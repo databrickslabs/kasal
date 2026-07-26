@@ -210,7 +210,10 @@ Output: {"system_template": "You are a {role}. Your goal is to {goal}. Backgroun
 
 GENERATE_CREW_PLAN_TEMPLATE = """You are an expert at planning AI crews. Produce a PLAN OUTLINE only — the skeleton of agents and tasks; descriptions, goals, backstories, and tools are generated separately.
 
-VERB-TO-TASK MAPPING (CRITICAL):
+ENUMERATION RULE (check FIRST — it overrides the verb rule):
+If the user states a number of agents ("4 agents") or lists distinct SUBJECTS to cover one-by-one ("one for sports, one for politics, one for economy"), create ONE agent per stated count/subject, give each its own task, set "process_type": "parallel", and leave those tasks' context empty. A repeated verb across different subjects ("report on X, report on Y") is still one agent per subject — never merge them, and do not minimise agents here.
+
+VERB-TO-TASK MAPPING (when the message does NOT enumerate agents or subjects):
 Count the distinct action verbs in the user's message. Each distinct verb typically maps to one task:
 - 1 verb = 1 task ("summarize this document" → 1 task)
 - 2 verbs = 2 tasks ("create a dashboard AND send an email" → 2 tasks)
@@ -224,13 +227,16 @@ Rules:
 1. Every task's assigned_agent must be the name of one of the agents.
 2. A task's context lists the names of earlier tasks whose output it needs (empty list if none).
 3. Names are short and descriptive; roles are one specialised sentence fragment.
-4. Do NOT include descriptions, goals, backstories, or tools."""
+4. Do NOT include descriptions, goals, backstories, or tools.
+5. Every agent MUST be the assigned_agent of at least one task — an agent with no task is discarded."""
 
 GENERATE_CREW_TEMPLATE = """You are an expert at creating AI crews. From the user's goal, generate specialized agents and well-defined tasks. Each task is assigned to one agent and may depend on earlier tasks.
 
-VERB-TO-TASK MAPPING: count the distinct action verbs in the user's message; each verb typically maps to one task (closely-related sub-steps like "extract, transform, load" may combine into one). Examples: "write a blog post" -> 1 task; "research competitors and write a summary" -> 2 tasks; "gather news, summarize findings, create a presentation" -> 3 tasks.
+ENUMERATION-TO-AGENT MAPPING (overrides the verb rule): if the user states a number of agents ("create 4 agents") or lists distinct subjects to cover one-by-one ("one for sports, one for politics, one for economy, one for technology"), create exactly one agent per stated count/subject and give each its own task — never merge them, even though they share the same verb. Those fan-out tasks are independent (empty context); only a task that consumes their output lists them.
 
-LIMITS: at most 3 agents and 6 tasks unless the user explicitly asks for more (hard cap 10 agents / 10 tasks). Use the minimum agents needed; the number of agents must NEVER exceed the number of tasks; every agent MUST be assigned at least one task (no orphan agents).
+VERB-TO-TASK MAPPING (when the message does NOT enumerate agents or subjects): count the distinct action verbs in the user's message; each verb typically maps to one task (closely-related sub-steps like "extract, transform, load" may combine into one). Examples: "write a blog post" -> 1 task; "research competitors and write a summary" -> 2 tasks; "gather news, summarize findings, create a presentation" -> 3 tasks.
+
+LIMITS: at most 3 agents and 6 tasks unless the user explicitly asks for more (hard cap 10 agents / 10 tasks). Use the minimum agents needed EXCEPT where the enumeration rule above applies; the number of agents must NEVER exceed the number of tasks; every agent MUST be assigned at least one task (no orphan agents).
 
 TOOLS:
 - ONLY use tools from the provided tools list, and return tool names EXACTLY as listed. Do not invent tools.

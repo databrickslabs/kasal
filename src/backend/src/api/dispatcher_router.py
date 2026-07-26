@@ -101,13 +101,17 @@ async def detect_intent_only(
     # Fetch workspace-enabled tools for automatic suggestion
     available_tools = await _fetch_available_tools(session, group_context)
 
-    # Only detect intent without dispatching
+    # Only detect intent without dispatching. Logged like dispatch() does, so a
+    # misroute here is visible in llmlog instead of surfacing as an unexplained
+    # generate-agent/generate-task call with no classification step.
     # Intent classification always rides the fast model chain; the caller's
     # model is passed only as a last-resort fallback (see detect_intent).
-    intent_result = await dispatcher_service.detect_intent(
+    intent_result = await dispatcher_service.detect_intent_logged(
         request.message,
         DEFAULT_DISPATCHER_MODEL,
+        group_context=group_context,
         available_tools=available_tools,
+        chat_mode=request.chat_mode,
         last_resort_model=request.model,
     )
 

@@ -96,7 +96,13 @@ async def test_enable_disable_all_models_and_global_toggle():
 
 
 @pytest.mark.asyncio
-async def test_get_model_config_paths_repo_and_fallback_and_auth():
+async def test_get_model_config_paths_repo_and_fallback_and_auth(monkeypatch):
+    # These rebinds go through monkeypatch so they are UNDONE at teardown. They
+    # used to be raw assignments (`module.ApiKeysService = FakeKeysSvc2`,
+    # `auth_mod.get_auth_context = fake_auth`) that leaked for the rest of the
+    # session: every later test in this file saw an ApiKeysService that always
+    # returns None, and `databricks_auth.get_auth_context` stayed stubbed
+    # process-wide. Any test written afterwards was silently order-dependent.
     # repo hit path for databricks provider (no api_key added)
     svc = ModelConfigService(session=SimpleNamespace(), group_id="gid")
     repo = svc.repository = AsyncMock()
@@ -105,17 +111,21 @@ async def test_get_model_config_paths_repo_and_fallback_and_auth():
     assert cfg["provider"] == "databricks" and "api_key" not in cfg
 
     # fallback path via utility with non-dbx provider -> adds API key
-    from src.services import model_config_service as module
-    module.get_model_config = lambda key: {"key": key, "name": "N", "provider": "openai",
-                                           "temperature": 0.1, "context_window": 1, "max_output_tokens": 2,
-                                           "extended_thinking": False, "enabled": True}
+    monkeypatch.setattr(
+        "src.services.model_config_service.get_model_config",
+        lambda key: {"key": key, "name": "N", "provider": "openai",
+                     "temperature": 0.1, "context_window": 1, "max_output_tokens": 2,
+                     "extended_thinking": False, "enabled": True},
+    )
     repo.find_by_key = AsyncMock(return_value=None)
     # Patch ApiKeysService class to control API key returns
     class FakeKeysSvc:
         @staticmethod
         async def get_provider_api_key(provider: str, group_id=None):
             return "KEY"
-    module.ApiKeysService = FakeKeysSvc
+    monkeypatch.setattr(
+        "src.services.model_config_service.ApiKeysService", FakeKeysSvc
+    )
     cfg2 = await svc.get_model_config("openai/gpt-4o-mini")
     assert cfg2["api_key"] == "KEY" and cfg2["key"].endswith("gpt-4o-mini")
 
@@ -124,12 +134,15 @@ async def test_get_model_config_paths_repo_and_fallback_and_auth():
         @staticmethod
         async def get_provider_api_key(provider: str, group_id=None):
             return None
-    module.ApiKeysService = FakeKeysSvc2
+    monkeypatch.setattr(
+        "src.services.model_config_service.ApiKeysService", FakeKeysSvc2
+    )
     # Patch actual function in src.utils.databricks_auth so in-function import sees it
-    from src.utils import databricks_auth as auth_mod
     async def fake_auth():
         return SimpleNamespace(auth_method="obo")
-    auth_mod.get_auth_context = fake_auth
+    monkeypatch.setattr(
+        "src.utils.databricks_auth.get_auth_context", fake_auth
+    )
     cfg3 = await svc.get_model_config("openai/gpt-4o-mini")
     assert cfg3["provider"] == "openai"
 
@@ -185,3 +198,127 @@ async def test_group_aware_listing_and_toggle_with_group():
         await svc.toggle_model_enabled_with_group("k5", False, None)
     assert getattr(ei2.value, "status_code", None) == 403
 
+
+
+# ===================================================================
+# Fallback model selection when no Databricks workspace is configured
+# ===================================================================
+
+
+def _patch_keys(monkeypatch, key):
+    """Patch the ApiKeysService bound INSIDE model_config_service.
+
+    The module imports the class by name, so the module attribute — not the
+    class in api_keys_service — is what the code under test actually calls.
+    """
+    class _Keys:
+        @staticmethod
+        async def get_provider_api_key(provider, group_id=None):
+            return key
+    monkeypatch.setattr(
+        "src.services.model_config_service.ApiKeysService", _Keys
+    )
+
+
+class TestLocalFallbackConfig:
+    """A Databricks model on a non-Databricks deployment is substituted with an
+    enabled model that can ACTUALLY serve. The old logic considered vllm/ollama
+    only, so a powered-off self-hosted box was a hard dead end: every generation
+    picked it and died on a multi-minute timeout while an enabled OpenAI model
+    with a valid key sat unused."""
+
+    def _svc(self, models, group_id="g1"):
+        svc = ModelConfigService(session=SimpleNamespace())
+        svc.group_id = group_id
+        svc.find_enabled_models = AsyncMock(return_value=models)
+        return svc
+
+    @pytest.mark.asyncio
+    async def test_prefers_self_hosted_when_it_answers(self, monkeypatch):
+        svc = self._svc([mk_model("gpt-5-nano", provider="openai"),
+                         mk_model("Qwen3", provider="vllm")])
+        monkeypatch.setattr(
+            "src.services.model_config_service._endpoint_reachable",
+            AsyncMock(return_value=True),
+        )
+        out = await svc._local_fallback_config()
+        assert out["key"] == "Qwen3"
+
+    @pytest.mark.asyncio
+    async def test_skips_unreachable_self_hosted_for_hosted_with_key(self, monkeypatch):
+        """The exact production failure: vLLM box offline, gpt-5-nano enabled."""
+        svc = self._svc([mk_model("Qwen3", provider="vllm"),
+                         mk_model("gpt-5-nano", provider="openai")])
+        monkeypatch.setattr(
+            "src.services.model_config_service._endpoint_reachable",
+            AsyncMock(return_value=False),
+        )
+        _patch_keys(monkeypatch, "sk-test")
+        out = await svc._local_fallback_config()
+        assert out["key"] == "gpt-5-nano"
+        assert out["provider"] == "openai"
+
+    @pytest.mark.asyncio
+    async def test_hosted_without_api_key_is_skipped(self, monkeypatch):
+        svc = self._svc([mk_model("Qwen3", provider="vllm"),
+                         mk_model("gpt-5-nano", provider="openai")])
+        monkeypatch.setattr(
+            "src.services.model_config_service._endpoint_reachable",
+            AsyncMock(return_value=False),
+        )
+        _patch_keys(monkeypatch, None)
+        assert await svc._local_fallback_config() is None
+
+    @pytest.mark.asyncio
+    async def test_databricks_models_are_never_the_fallback(self, monkeypatch):
+        svc = self._svc([mk_model("databricks-x", provider="databricks"),
+                         mk_model("gpt-5-nano", provider="openai")])
+        _patch_keys(monkeypatch, "sk-test")
+        out = await svc._local_fallback_config()
+        assert out["key"] == "gpt-5-nano"
+
+    @pytest.mark.asyncio
+    async def test_env_pin_wins_over_ranking(self, monkeypatch):
+        svc = self._svc([mk_model("Qwen3", provider="vllm"),
+                         mk_model("gpt-5-nano", provider="openai")])
+        monkeypatch.setenv("KASAL_FALLBACK_MODEL", "gpt-5-nano")
+        # Reachable self-hosted would normally win — the pin overrides it.
+        monkeypatch.setattr(
+            "src.services.model_config_service._endpoint_reachable",
+            AsyncMock(return_value=True),
+        )
+        out = await svc._local_fallback_config()
+        assert out["key"] == "gpt-5-nano"
+
+    @pytest.mark.asyncio
+    async def test_unknown_env_pin_falls_back_to_ranking(self, monkeypatch):
+        svc = self._svc([mk_model("Qwen3", provider="vllm")])
+        monkeypatch.setenv("KASAL_FALLBACK_MODEL", "does-not-exist")
+        monkeypatch.setattr(
+            "src.services.model_config_service._endpoint_reachable",
+            AsyncMock(return_value=True),
+        )
+        out = await svc._local_fallback_config()
+        assert out["key"] == "Qwen3"
+
+    @pytest.mark.asyncio
+    async def test_lookup_failure_returns_none(self):
+        svc = ModelConfigService(session=SimpleNamespace())
+        svc.group_id = "g1"
+        svc.find_enabled_models = AsyncMock(side_effect=RuntimeError("db down"))
+        assert await svc._local_fallback_config() is None
+
+
+class TestEndpointReachable:
+    @pytest.mark.asyncio
+    async def test_malformed_url_is_unreachable(self):
+        from src.services.model_config_service import _endpoint_reachable
+        assert await _endpoint_reachable("not-a-url") is False
+
+    @pytest.mark.asyncio
+    async def test_dead_host_is_unreachable_and_fast(self, monkeypatch):
+        from src.services.model_config_service import _endpoint_reachable
+        monkeypatch.setattr(
+            "asyncio.open_connection", AsyncMock(side_effect=OSError("refused"))
+        )
+        assert await _endpoint_reachable("http://10.255.255.1:9/v1") is False

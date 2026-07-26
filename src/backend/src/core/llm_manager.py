@@ -392,7 +392,8 @@ class LLMManager:
         max_tokens: Optional[int] = None,
         extra_headers: Optional[Dict[str, str]] = None,
         fallback_drop_system_on_400: bool = False,
-    ) -> str:
+        with_served_model: bool = False,
+    ) -> Union[str, Tuple[str, str]]:
         """
         Unified async completion method that routes through CrewAI's LLM class.
 
@@ -408,9 +409,16 @@ class LLMManager:
             fallback_drop_system_on_400: If True and the call raises an HTTP 400,
                 retry once with system messages removed (user messages only).
                 Handles models that reject system+user dual-message payloads.
+            with_served_model: Return ``(content, served_model_key)`` instead of
+                just the content. ``model`` is only what was ASKED for — a
+                Databricks model on a deployment with no workspace resolves to a
+                stand-in — so callers that record which model answered (the
+                llmlog rows behind the LLM Logs table) need the resolved key.
+                Opt-in so the 38+ existing call sites keep their str return.
 
         Returns:
-            str: The LLM response content string
+            str: The LLM response content string, or ``(content, served_model)``
+            when ``with_served_model`` is set.
 
         Raises:
             ValueError: If model configuration is not found or group_id is unavailable
@@ -418,6 +426,14 @@ class LLMManager:
         """
         group_id = LLMManager._get_group_id_from_context(required=True)
         llm = await LLMManager.configure_kasal_llm(model, group_id, temperature)
+        # The model that actually serves this call — configure_kasal_llm may have
+        # substituted one. Reporting the requested name is what made the logs
+        # claim a Databricks model ran on a workspace where no Databricks
+        # endpoint is reachable at all.
+        _resolved = (getattr(llm, "model", None) or model).rsplit("/", 1)[-1]
+        if not isinstance(_resolved, str):  # defensive: mocked LLMs in tests
+            _resolved = model
+        served_model = _resolved if _resolved == model else f"{_resolved} (for '{model}')"
         if max_tokens is not None:
             # Responses-API models (the GPT-5/Codex family, whether served by
             # OpenAI or Databricks) reject max_output_tokens below 16 with
@@ -472,9 +488,9 @@ class LLMManager:
             try:
                 result = await _run_llm_blocking(llm.call, messages)
                 duration = time.time() - start_time
-                logger.info(f"LLM completion: model={model}, duration={duration:.2f}s, response_length={len(result) if result else 0}")
+                logger.info(f"LLM completion: model={served_model}, duration={duration:.2f}s, response_length={len(result) if result else 0}")
                 _set_span_outputs(_span, result)
-                return result
+                return (result, _resolved) if with_served_model else result
             except Exception as e:
                 duration = time.time() - start_time
                 # On HTTP 400 with fallback enabled, retry without system messages
@@ -482,21 +498,21 @@ class LLMManager:
                     user_only = [m for m in messages if m.get("role") != "system"]
                     if user_only and len(user_only) < len(messages):
                         logger.warning(
-                            f"LLM completion got 400, retrying without system message: model={model}"
+                            f"LLM completion got 400, retrying without system message: model={served_model}"
                         )
                         try:
                             result = await _run_llm_blocking(llm.call, user_only)
                             fallback_duration = time.time() - start_time
                             logger.info(
-                                f"LLM completion (user-only fallback): model={model}, "
+                                f"LLM completion (user-only fallback): model={served_model}, "
                                 f"duration={fallback_duration:.2f}s, response_length={len(result) if result else 0}"
                             )
                             _set_span_outputs(_span, result)
-                            return result
+                            return (result, _resolved) if with_served_model else result
                         except Exception as retry_err:
                             logger.error(f"LLM completion user-only fallback also failed: {retry_err}")
                             raise retry_err
-                logger.error(f"LLM completion failed: model={model}, duration={duration:.2f}s, error={e}")
+                logger.error(f"LLM completion failed: model={served_model}, duration={duration:.2f}s, error={e}")
                 raise
 
     @staticmethod
@@ -621,8 +637,21 @@ class LLMManager:
         # Extract provider and model name
         provider = model_config_dict["provider"]
         model_name_value = model_config_dict["name"]
-        
-        logger.info(f"Configuring CrewAI LLM with provider: {provider}, model: {model_name}")
+
+        # Name the model that will ACTUALLY serve. get_model_config may have
+        # substituted one (a Databricks model on a deployment with no workspace
+        # resolves to a local/hosted stand-in), and logging the REQUESTED name
+        # next to the RESOLVED provider read as "haiku is running on openai".
+        if model_name_value != model_name:
+            logger.info(
+                "Configuring CrewAI LLM with provider: %s, model: %s "
+                "(substituted for requested '%s')",
+                provider, model_name_value, model_name,
+            )
+        else:
+            logger.info(
+                f"Configuring CrewAI LLM with provider: {provider}, model: {model_name_value}"
+            )
         
         # Get API key for the provider using ApiKeysService
         api_key = None

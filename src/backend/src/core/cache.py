@@ -258,6 +258,12 @@ tool_list_cache: TTLCache = TTLCache(ttl=60, maxsize=200, name="tool_list")
 # invalidation is not safe).
 template_cache: TTLCache = TTLCache(ttl=300, maxsize=1000, name="template")
 
+# Self-hosted endpoint reachability - 60s TTL. Used only when substituting a
+# local model for an unauthenticated Databricks model, so a self-hosted box that
+# is powered off does not get picked over a hosted model that actually answers.
+# Short TTL so the box is re-tried a minute after it comes back.
+endpoint_health_cache: TTLCache = TTLCache(ttl=60, maxsize=50, name="endpoint_health")
+
 
 def get_all_cache_stats() -> Dict[str, Dict[str, Any]]:
     """

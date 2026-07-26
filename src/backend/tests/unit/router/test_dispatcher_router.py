@@ -326,7 +326,7 @@ class TestDetectIntentOnly:
                 "suggested_prompt": "Create a data analyst agent that can analyze data and generate reports",
                 "suggested_tools": [],
             }
-            mock_service.detect_intent.return_value = intent_result
+            mock_service.detect_intent_logged.return_value = intent_result
 
             request_data = {
                 "message": "Create an agent that can analyze data",
@@ -362,7 +362,7 @@ class TestDetectIntentOnly:
                 "suggested_prompt": "Create a task to analyze the provided data",
                 "suggested_tools": [],
             }
-            mock_service.detect_intent.return_value = intent_result
+            mock_service.detect_intent_logged.return_value = intent_result
 
             request_data = {
                 "message": "Analyze this data for trends"
@@ -396,7 +396,7 @@ class TestDetectIntentOnly:
                 "suggested_prompt": "Create a crew for data processing workflow with collector, analyst, and writer",
                 "suggested_tools": [],
             }
-            mock_service.detect_intent.return_value = intent_result
+            mock_service.detect_intent_logged.return_value = intent_result
 
             request_data = {
                 "message": "Create a team to collect, analyze and report on data",
@@ -431,7 +431,7 @@ class TestDetectIntentOnly:
                 "suggested_prompt": "Configure crew settings for LLM model and rate limits",
                 "suggested_tools": [],
             }
-            mock_service.detect_intent.return_value = intent_result
+            mock_service.detect_intent_logged.return_value = intent_result
 
             request_data = {
                 "message": "Setup the LLM model and configure max RPM for the crew",
@@ -465,7 +465,7 @@ class TestDetectIntentOnly:
                 "suggested_prompt": "Answer the user's question about system capabilities",
                 "suggested_tools": [],
             }
-            mock_service.detect_intent.return_value = intent_result
+            mock_service.detect_intent_logged.return_value = intent_result
 
             request_data = {
                 "message": "What can this system do?"
@@ -498,7 +498,7 @@ class TestDetectIntentOnly:
                 "suggested_prompt": "Please provide more specific information about what you want to create",
                 "suggested_tools": [],
             }
-            mock_service.detect_intent.return_value = intent_result
+            mock_service.detect_intent_logged.return_value = intent_result
 
             request_data = {
                 "message": "Help me with something",
@@ -522,7 +522,7 @@ class TestDetectIntentOnly:
             mock_create_service.return_value = mock_service
 
             # Mock service error
-            mock_service.detect_intent.side_effect = Exception("Intent detection failed")
+            mock_service.detect_intent_logged.side_effect = Exception("Intent detection failed")
 
             request_data = {
                 "message": "Create an agent for data analysis"
@@ -584,7 +584,7 @@ class TestDetectIntentOnly:
                 "source": "slash_command",
                 "suggested_tools": [],
             }
-            mock_service.detect_intent.return_value = intent_result
+            mock_service.detect_intent_logged.return_value = intent_result
 
             request_data = {"message": "/list"}
 
@@ -691,7 +691,7 @@ class TestDetectIntentOnly:
                 "suggested_prompt": "Create a SQL analyst agent with database tools",
                 "suggested_tools": ["NL2SQLTool"],
             }
-            mock_service.detect_intent.return_value = intent_result
+            mock_service.detect_intent_logged.return_value = intent_result
 
             request_data = {
                 "message": "Create an agent that can query databases",

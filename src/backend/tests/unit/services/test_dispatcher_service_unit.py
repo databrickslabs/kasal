@@ -4464,6 +4464,162 @@ class TestExplicitCreationIntent:
         assert svc._explicit_creation_intent("analyze sales and build a dashboard") is None
 
 
+class TestDetectIntentLoggedModelAttribution:
+    """The llmlog row must name the model that ANSWERED. It used to always log
+    DEFAULT_DISPATCHER_MODEL with status=success — so a workspace with no
+    reachable Databricks endpoint still showed
+    "databricks-claude-haiku-4-5 / success" for a result the deterministic
+    fallback produced without calling any LLM."""
+
+    @pytest.mark.asyncio
+    async def test_logs_the_model_that_answered_not_the_first_candidate(self):
+        svc = _build_service()
+        svc.detect_intent = AsyncMock(return_value={
+            "intent": "generate_crew", "confidence": 0.9, "extracted_info": {},
+            "suggested_prompt": "p", "suggested_tools": [],
+            "source": "llm", "model": "gpt-5-nano",
+        })
+        svc._log_llm_interaction = AsyncMock()
+
+        await svc.detect_intent_logged("build a crew", "databricks-claude-haiku-4-5")
+
+        kw = svc._log_llm_interaction.call_args.kwargs
+        assert kw["model"] == "gpt-5-nano"
+        assert kw["status"] == "success"
+        assert kw["error_message"] is None
+
+    @pytest.mark.asyncio
+    async def test_degraded_fallback_is_not_logged_as_a_model_success(self):
+        svc = _build_service()
+        svc.detect_intent = AsyncMock(return_value={
+            "intent": "generate_crew", "confidence": 0.5, "extracted_info": {},
+            "suggested_prompt": "p", "suggested_tools": [],
+            "source": "semantic_fallback", "model": None,
+        })
+        svc._log_llm_interaction = AsyncMock()
+
+        await svc.detect_intent_logged("build a crew", "databricks-claude-haiku-4-5")
+
+        kw = svc._log_llm_interaction.call_args.kwargs
+        assert kw["status"] == "error"
+        assert "semantic_fallback" in kw["error_message"]
+
+    @pytest.mark.asyncio
+    async def test_substituted_model_is_reported_end_to_end(self):
+        """detect_intent asks for the chain candidate, but a substituted model
+        may answer (a Databricks model on a workspace with none configured
+        resolves to a local/hosted stand-in). The llmlog row must name the one
+        that ran, not the one that was asked for."""
+        svc = _build_service()
+        svc.template_service.get_template_content = AsyncMock(return_value="prompt")
+        svc._log_llm_interaction = AsyncMock()
+
+        with patch(
+            "src.services.dispatcher_service.LLMManager.completion",
+            new_callable=AsyncMock,
+            # what completion(with_served_model=True) really returns
+            return_value=('{"intent": "generate_crew", "confidence": 0.9}', "gpt-5-nano"),
+        ):
+            result = await svc.detect_intent_logged(
+                "build a crew to summarise a report", "databricks-claude-haiku-4-5"
+            )
+
+        assert result["model"] == "gpt-5-nano"
+        kw = svc._log_llm_interaction.call_args.kwargs
+        assert kw["model"] == "gpt-5-nano"
+        assert kw["status"] == "success"
+
+    @pytest.mark.asyncio
+    async def test_bare_string_completion_still_classifies(self):
+        """A wrapper/stub that ignores with_served_model returns a plain string;
+        that must degrade to an unknown served model, not a failed intent."""
+        svc = _build_service()
+        svc.template_service.get_template_content = AsyncMock(return_value="prompt")
+        svc._log_llm_interaction = AsyncMock()
+
+        with patch(
+            "src.services.dispatcher_service.LLMManager.completion",
+            new_callable=AsyncMock,
+            return_value='{"intent": "generate_crew", "confidence": 0.9}',
+        ):
+            result = await svc.detect_intent_logged("build a crew", "some-model")
+
+        assert result["intent"] == "generate_crew"
+        assert result["source"] == "llm"
+        # Falls back to the candidate name rather than blowing up.
+        assert result["model"] == "some-model"
+
+    @pytest.mark.asyncio
+    async def test_no_llm_paths_are_not_logged_at_all(self):
+        svc = _build_service()
+        svc._log_llm_interaction = AsyncMock()
+        for source in ("chat_mode_fast_path", "slash_command"):
+            svc.detect_intent = AsyncMock(return_value={
+                "intent": "generate_crew", "confidence": 1.0, "extracted_info": {},
+                "suggested_prompt": "p", "suggested_tools": [], "source": source,
+            })
+            await svc.detect_intent_logged("hi", "m")
+        svc._log_llm_interaction.assert_not_awaited()
+
+
+class TestMultiAgentIsNotSingleAgent:
+    """The single-agent guardrail is for ONE agent only. AGENT_CREATION_PATTERNS
+    use a greedy `.*`, so a multi-agent request that also contains a singular
+    "agent" later in the sentence used to match and force-route the whole crew
+    into the single-agent generator — which emitted one agent and dropped the
+    rest (llmlog #1370: five Swiss news topics -> "Swiss Sports News Reporter")."""
+
+    def test_the_swiss_news_bug_report(self):
+        svc = _build_service()
+        # Exactly as typed by the user.
+        assert svc._explicit_creation_intent(
+            "create 4 agents one is going to give the swiss news on sports, "
+            "the other agent going to give news on politics, the other is going "
+            "to give on economy, on innovation and another on technology"
+        ) is None
+
+    def test_the_rewritten_prompt_variant(self):
+        svc = _build_service()
+        # What improve-prompt/suggested_prompt turns it into — spelled-out count.
+        assert svc._explicit_creation_intent(
+            "Create a CrewAI crew with four specialized agents: one agent reports "
+            "the latest Swiss sports news, one reports Swiss politics news, one "
+            "reports Swiss economy and innovation news, and one reports Swiss "
+            "technology news."
+        ) is None
+
+    def test_plural_counted_and_collective_forms_defer_to_crew(self):
+        svc = _build_service()
+        for msg in (
+            "create two agents to research and write",
+            "build a team of agents for customer support",
+            "make a crew with ten agents",
+            "generate 3 specialized research agents",
+        ):
+            assert svc._explicit_creation_intent(msg) is None, msg
+
+    def test_singular_requests_still_route_to_agent(self):
+        svc = _build_service()
+        # The guard must not swallow the case the guardrail exists for.
+        for msg in (
+            "create an agent that analyzes data",
+            "make me a chatbot for support",
+            "build an assistant that summarizes emails",
+            "i need a bot to monitor uptime",
+        ):
+            assert svc._explicit_creation_intent(msg) == "generate_agent", msg
+
+    def test_canvas_surface_no_longer_overrides_crew_for_multi_agent(self):
+        svc = _build_service()
+        # chat_mode=False is the AgentBuilder canvas — the LLM's generate_crew
+        # verdict must survive instead of being forced to generate_agent.
+        assert svc._resolve_surface_intent(
+            "create 4 agents one for sports, another agent for politics",
+            "generate_crew",
+            chat_mode=False,
+        ) == ("generate_crew", None)
+
+
 # ===================================================================
 # Tests for _resolve_surface_intent (ChatMode vs canvas/builder rule)
 # ===================================================================

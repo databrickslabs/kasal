@@ -8,14 +8,16 @@ PERFORMANCE: Uses TTL caching for group-scoped model queries with automatic
 invalidation on mutations. See src/core/cache.py for cache implementation.
 """
 
+import asyncio
 import logging
 import os
 from typing import Dict, Any, Optional, List
+from urllib.parse import urlparse
 from src.core.exceptions import KasalError, NotFoundError, ForbiddenError
 
 from src.utils.model_config import get_model_config
 from src.core.logger import LoggerManager
-from src.core.cache import model_config_cache
+from src.core.cache import endpoint_health_cache, model_config_cache
 from src.services.api_keys_service import ApiKeysService
 from src.repositories.model_config_repository import ModelConfigRepository
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,6 +39,73 @@ def _databricks_configured() -> bool:
         os.getenv(v)
         for v in ("DATABRICKS_HOST", "DATABRICKS_TOKEN", "DATABRICKS_API_KEY", "DATABRICKS_CLIENT_ID")
     )
+
+
+# Self-hosted providers and the env var holding their base URL (defaults mirror
+# llm_manager's vLLM / Ollama branches). Preferred for the fallback because they
+# cost nothing to call — but only when the box actually answers.
+SELF_HOSTED_ENDPOINTS = {
+    "vllm": ("VLLM_BASE_URL", "http://localhost:8081/v1"),
+    "ollama": ("OLLAMA_API_BASE", "http://localhost:11434"),
+}
+
+# Ranking for fallback candidates: self-hosted first (free), then hosted models
+# that have a usable API key.
+_FALLBACK_RANK = {"vllm": 0, "ollama": 1}
+_HOSTED_RANK = 2
+
+# How long to wait for a TCP connect when probing a self-hosted endpoint. Long
+# enough for a LAN box, short enough that a dead host costs a blink.
+_PROBE_TIMEOUT_SECONDS = 0.75
+
+
+async def _endpoint_reachable(url: str) -> bool:
+    """True when a TCP connection to the endpoint's host:port succeeds.
+
+    Cheap liveness signal (no HTTP round trip), cached for 60s. "Enabled" in the
+    catalogue does not mean "running": a self-hosted box that is powered off
+    still looks enabled, and picking it stalls every generation on a multi-minute
+    timeout instead of using a hosted model that answers immediately.
+    """
+    try:
+        parsed = urlparse(url)
+        host, port = parsed.hostname, parsed.port
+        if not host:
+            return False
+        if port is None:
+            port = 443 if parsed.scheme == "https" else 80
+    except Exception:  # noqa: BLE001 — a malformed URL is simply unreachable
+        return False
+
+    cache_key = f"{host}:{port}"
+    cached = await endpoint_health_cache.get("__default__", cache_key)
+    if cached is not None:
+        return bool(cached)
+
+    reachable = False
+    writer = None
+    try:
+        _, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port), timeout=_PROBE_TIMEOUT_SECONDS
+        )
+        reachable = True
+    except (asyncio.TimeoutError, OSError):
+        reachable = False
+    except Exception as e:  # noqa: BLE001 — probing must never break resolution
+        logger.debug(f"Endpoint probe for {cache_key} failed unexpectedly: {e}")
+        reachable = False
+    finally:
+        if writer is not None:
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:  # noqa: BLE001
+                pass
+
+    await endpoint_health_cache.set("__default__", cache_key, reachable)
+    if not reachable:
+        logger.warning(f"Self-hosted endpoint {cache_key} is not reachable")
+    return reachable
 
 
 class ModelConfigService:
@@ -394,24 +463,9 @@ class ModelConfigService:
                 detail=f"Failed to get model configuration: {str(e)}"
             )
 
-    async def _local_fallback_config(self) -> Optional[Dict[str, Any]]:
-        """The enabled self-hosted (vllm/ollama) model's config dict, used to
-        substitute a Databricks model on a non-Databricks deployment. Prefers
-        vllm (self-hosted OpenAI-compatible) over ollama; returns None when no
-        local model is enabled (so the caller keeps the original Databricks config)."""
-        try:
-            models = await self.find_enabled_models()
-        except Exception as e:  # noqa: BLE001 — fallback must never raise
-            logger.warning(f"Local-fallback lookup failed: {e}")
-            return None
-        order = {"vllm": 0, "ollama": 1}
-        locals_ = sorted(
-            (m for m in models if (m.provider or "").lower() in order),
-            key=lambda m: order[(m.provider or "").lower()],
-        )
-        if not locals_:
-            return None
-        m = locals_[0]
+    @staticmethod
+    def _as_config(m) -> Dict[str, Any]:
+        """Model row -> the config dict shape get_model_config returns."""
         return {
             "key": m.key,
             "name": m.name,
@@ -422,6 +476,85 @@ class ModelConfigService:
             "extended_thinking": getattr(m, "extended_thinking", False),
             "enabled": m.enabled,
         }
+
+    async def _fallback_candidate_usable(self, provider: str) -> bool:
+        """Can this provider actually serve a request right now?
+
+        Self-hosted: the box must answer a TCP connect. Hosted: an API key must
+        exist for this group. Anything that fails here is skipped so the
+        substitution lands on a model that works instead of one that merely
+        exists in the catalogue.
+        """
+        if provider in SELF_HOSTED_ENDPOINTS:
+            env_var, default = SELF_HOSTED_ENDPOINTS[provider]
+            return await _endpoint_reachable(os.getenv(env_var, default))
+        if not self.group_id:
+            return False
+        try:
+            return bool(
+                await ApiKeysService.get_provider_api_key(
+                    provider, group_id=self.group_id
+                )
+            )
+        except Exception as e:  # noqa: BLE001 — fallback must never raise
+            logger.debug(f"API-key lookup for fallback provider {provider} failed: {e}")
+            return False
+
+    async def _local_fallback_config(self) -> Optional[Dict[str, Any]]:
+        """An enabled, *usable* non-Databricks model to substitute for a
+        Databricks model on a deployment with no Databricks workspace.
+
+        Preference is self-hosted (vllm, then ollama — they cost nothing) and
+        then any hosted provider with an API key for this group. Candidates that
+        cannot serve are skipped: a self-hosted box that does not answer a TCP
+        connect, or a hosted provider with no key.
+
+        This used to consider vllm/ollama ONLY, so a powered-off local box was a
+        hard dead end — every generation picked it, waited out a ~226s timeout
+        and failed, even with an enabled OpenAI model and a key sitting right
+        there. Returns None when nothing is usable (the caller then keeps the
+        original Databricks config).
+
+        KASAL_FALLBACK_MODEL pins a specific model key and wins over the ranking
+        when that model is enabled.
+        """
+        try:
+            models = await self.find_enabled_models()
+        except Exception as e:  # noqa: BLE001 — fallback must never raise
+            logger.warning(f"Local-fallback lookup failed: {e}")
+            return None
+
+        candidates = [
+            m for m in models if (m.provider or "").lower() != "databricks"
+        ]
+
+        pinned_key = os.getenv("KASAL_FALLBACK_MODEL")
+        if pinned_key:
+            for m in candidates:
+                if m.key == pinned_key:
+                    logger.info(
+                        "Using KASAL_FALLBACK_MODEL pin '%s' for Databricks substitution",
+                        pinned_key,
+                    )
+                    return self._as_config(m)
+            logger.warning(
+                "KASAL_FALLBACK_MODEL='%s' is not an enabled model — ignoring the pin",
+                pinned_key,
+            )
+
+        ranked = sorted(
+            candidates,
+            key=lambda m: _FALLBACK_RANK.get((m.provider or "").lower(), _HOSTED_RANK),
+        )
+        for m in ranked:
+            if await self._fallback_candidate_usable((m.provider or "").lower()):
+                return self._as_config(m)
+
+        logger.warning(
+            "No usable fallback model: every enabled non-Databricks model is "
+            "either an unreachable self-hosted endpoint or missing an API key."
+        )
+        return None
 
     # Group-aware methods for multi-tenant support
 

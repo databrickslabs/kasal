@@ -168,10 +168,33 @@ class DispatcherService:
         "chatbot",
     }
 
+    # detect_intent sources where NO LLM produced the answer — the result came
+    # from semantic analysis or the deterministic guardrail. Logging these as a
+    # "success" against a model is a lie about what ran.
+    DEGRADED_INTENT_SOURCES = frozenset(
+        {"semantic_fallback", "circuit_breaker_fallback", "explicit_override"}
+    )
+
     # Patterns that indicate explicit single-agent creation intent
     AGENT_CREATION_PATTERNS = [
         r"\b(create|make|build|generate|develop)\b.*\b(an?\s+)?(agent|bot|assistant|chatbot)\b",
         r"\b(i need|give me|set up)\b.*\b(an?\s+)?(agent|bot|assistant|chatbot)\b",
+    ]
+
+    # Signals that a "create ... agent" message asks for MORE THAN ONE agent, so
+    # the single-agent guardrail must NOT fire. AGENT_CREATION_PATTERNS use a
+    # greedy `.*`, so "create 4 agents ... the other agent ..." matched on the
+    # later SINGULAR occurrence and force-routed a five-topic crew into the
+    # single-agent generator (it produced one "Swiss Sports News Reporter").
+    MULTI_AGENT_PATTERNS = [
+        r"\bagents\b",                                   # plural entity
+        r"\b(crew|team|squad|panel)\b",                  # collective noun
+        # explicit count before the entity, digit or spelled out, with a bounded
+        # gap so "4 specialized agents" counts but a distant number does not
+        r"\b(\d+|two|three|four|five|six|seven|eight|nine|ten)\s+"
+        r"(?:\w+\s+){0,3}(agents?|bots?|assistants?)\b",
+        # enumeration of distinct roles: "one agent does X, another agent does Y"
+        r"\b(another|other|each)\s+(agent|bot|assistant)\b",
     ]
 
     # Patterns that indicate explicit single-task creation intent.
@@ -379,7 +402,10 @@ class DispatcherService:
             extra_headers: Optional extra HTTP headers (e.g. User-Agent for telemetry)
 
         Returns:
-            Content string from the LLM response
+            ``(content, served_model)`` — the response text and the model key
+            that ACTUALLY answered. The two differ whenever `model` was
+            substituted (a Databricks model on a deployment with no workspace),
+            and the llmlog row has to name the one that ran.
 
         Raises:
             Last encountered exception after all retries are exhausted
@@ -393,14 +419,21 @@ class DispatcherService:
                     model=model,
                     temperature=temperature,
                     max_tokens=max_tokens,
+                    with_served_model=True,
                 )
                 if extra_headers:
                     completion_kwargs["extra_headers"] = extra_headers
-                content = await asyncio.wait_for(
+                out = await asyncio.wait_for(
                     LLMManager.completion(**completion_kwargs),
                     timeout=self.LLM_REQUEST_TIMEOUT,
                 )
-                return content
+                # completion() returns (content, served_model) for
+                # with_served_model=True. Tolerate a bare string from any
+                # wrapper or stub that ignores the flag — an unknown served
+                # model is a worse log label, not a failed classification.
+                if isinstance(out, tuple):
+                    return out[0], out[1]
+                return out, None
             except Exception as e:
                 last_error = e
                 error_str = str(e).lower()
@@ -694,6 +727,11 @@ class DispatcherService:
         This is a guardrail so a weak intent model can't misroute an explicit
         "create a task" into a crew plan — the chat default is heavily crew-biased,
         which small models over-apply.
+
+        It is a SINGLE-entity guardrail only. A message asking for several agents
+        ("create 4 agents…", "a crew with four specialized agents") must fall
+        through to the LLM/crew default — forcing generate_agent there discards
+        every agent but one.
         """
         msg = message.lower()
         # Multi-step workflows are crews even if "task"/"agent" appears.
@@ -702,6 +740,9 @@ class DispatcherService:
         if any(re.search(p, msg) for p in self.TASK_CREATION_PATTERNS):
             return "generate_task"
         if any(re.search(p, msg) for p in self.AGENT_CREATION_PATTERNS):
+            # Plural / counted / enumerated agents are a crew, not one agent.
+            if any(re.search(p, msg) for p in self.MULTI_AGENT_PATTERNS):
+                return None
             return "generate_agent"
         return None
 
@@ -924,6 +965,9 @@ Please analyze this message and provide your intent classification."""
                 )
                 continue
             attempted += 1
+            # Reset per attempt so a previous candidate's resolved name can
+            # never be attributed to this one.
+            served: Optional[str] = None
             try:
                 # Acquire concurrency semaphore to limit parallel LLM calls
                 async with self._get_semaphore():
@@ -940,7 +984,7 @@ Please analyze this message and provide your intent classification."""
                                         "temperature": 0.3,
                                     }
                                 )
-                            content = await self._call_llm_with_retry(
+                            content, served = await self._call_llm_with_retry(
                                 messages=messages,
                                 model=candidate,
                                 extra_headers=intent_extra_headers,
@@ -950,7 +994,7 @@ Please analyze this message and provide your intent classification."""
                                     {"response": content[:500] if content else ""}
                                 )
                     else:
-                        content = await self._call_llm_with_retry(
+                        content, served = await self._call_llm_with_retry(
                             messages=messages,
                             model=candidate,
                             extra_headers=intent_extra_headers,
@@ -987,7 +1031,9 @@ Please analyze this message and provide your intent classification."""
             # Usable result — record success and stop walking the chain.
             self._record_success(candidate)
             result = parsed
-            used_model = candidate
+            # `served` is the key that actually answered; it differs from the
+            # candidate whenever the model was substituted downstream.
+            used_model = served or candidate
             break
 
         if result is None:
@@ -1009,10 +1055,16 @@ Please analyze this message and provide your intent classification."""
                 "extracted_info": {"semantic_analysis": semantic_analysis},
                 "suggested_prompt": message,
                 "source": source,
+                # No LLM produced this answer — carry that through so the log
+                # can't attribute the result to a model that never responded.
+                "model": None,
                 "suggested_tools": [],
             }
 
         logger.info(f"Intent resolved by model {used_model}")
+        # The model that ACTUALLY answered, which is rarely the first candidate:
+        # the chain walks preferred -> fast fallbacks -> last resort.
+        result["model"] = used_model
 
         # Validate the response
         if "intent" not in result:
@@ -1073,6 +1125,52 @@ Please analyze this message and provide your intent classification."""
         # Cache successful LLM results (never cache fallback/degraded)
         await intent_cache.set(group_id, cache_key, result)
 
+        return result
+
+    async def detect_intent_logged(
+        self,
+        message: str,
+        model: str,
+        group_context: Optional[GroupContext] = None,
+        available_tools: Optional[List[Dict[str, str]]] = None,
+        chat_mode: bool = False,
+        last_resort_model: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """detect_intent + the same llmlog record dispatch() writes.
+
+        The preview endpoint used to classify silently, so a misroute showed up
+        in llmlog as a bare generate-agent/generate-task call with no visible
+        classification step — the reason a five-agent crew request that got
+        force-routed to the single-agent generator looked inexplicable.
+        """
+        result = await self.detect_intent(
+            message, model, group_context, available_tools,
+            chat_mode=chat_mode, last_resort_model=last_resort_model,
+        )
+        # Skip when no LLM actually ran (ChatMode fast-path / slash command),
+        # otherwise every message records a phantom call against the model.
+        if result.get("source") in ("chat_mode_fast_path", "slash_command"):
+            return result
+
+        # Report the model that ANSWERED, not the first candidate we tried. The
+        # row used to always read DEFAULT_DISPATCHER_MODEL / "success" even when
+        # that endpoint never responded and the answer came from the
+        # deterministic fallback — which reads as "claude ran" on a workspace
+        # where no Databricks model is reachable at all.
+        source = result.get("source") or ""
+        degraded = source in self.DEGRADED_INTENT_SOURCES
+        await self._log_llm_interaction(
+            endpoint="detect-intent",
+            prompt=message,
+            response=str(result),
+            model=result.get("model") or model,
+            status="error" if degraded else "success",
+            error_message=(
+                f"no intent model answered; result came from {source}"
+                if degraded else None
+            ),
+            group_context=group_context,
+        )
         return result
 
     async def dispatch(
@@ -1144,23 +1242,14 @@ Please analyze this message and provide your intent classification."""
             # possibly-heavy/reasoning model the user picked for the crew —
             # request.model is passed only as a last-resort fallback so intent
             # never hard-fails on a workspace where the fast models aren't enabled.
-            intent_result = await self.detect_intent(
+            # detect_intent_logged writes the DB record (separate from MLflow),
+            # skipping the no-LLM paths and attributing the row to the model that
+            # actually answered — one implementation for both surfaces.
+            intent_result = await self.detect_intent_logged(
                 request.message, DEFAULT_DISPATCHER_MODEL, group_context,
                 available_tools, chat_mode=request.chat_mode,
                 last_resort_model=request.model,
             )
-
-            # Log the intent detection to DB (separate from MLflow). Skip when no
-            # LLM actually ran (ChatMode fast-path) — otherwise every chat message
-            # records a phantom detect-intent call against DEFAULT_DISPATCHER_MODEL.
-            if intent_result.get("source") != "chat_mode_fast_path":
-                await self._log_llm_interaction(
-                    endpoint="detect-intent",
-                    prompt=request.message,
-                    response=str(intent_result),
-                    model=DEFAULT_DISPATCHER_MODEL,
-                    group_context=group_context,
-                )
 
             # Create dispatcher response
             # Clamp confidence to [0.0, 1.0] range (LLM sometimes returns >1.0)
