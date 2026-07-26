@@ -348,6 +348,66 @@ def _dedupe_flow_agent_task_tools(agents: List[Any], task_list: List[Any]) -> No
         logger.debug(f"[FLOW] agent∩task tool de-dupe skipped: {e}")
 
 
+def attach_memory_seams(crew: Any, crew_label: str) -> None:
+    """Wire runtime recall + per-task persistence onto an already-built crew.
+
+    MUST be called for every flow crew that has memory configured. The engine
+    carries ``Crew.memory`` but its execution loop never consults it (see
+    ``memory/memory_hooks.py``): recall happens through ``crew.context_providers``
+    and persistence through ``crew.output_sinks``. A crew built with
+    ``memory=True`` and a fully configured backend but without these seams is
+    silently memory-less — it neither reads nor writes, with no error to show it.
+
+    Best-effort by design: a broken memory backend must never break a flow.
+    """
+    try:
+        from src.engines.kasal.memory.memory_hooks import (
+            make_memory_context_provider,
+            make_memory_output_sink,
+        )
+
+        crew_memory = getattr(crew, "memory", None)
+        memory_provider = make_memory_context_provider(crew_memory)
+        if memory_provider is not None:
+            crew.context_providers.append(memory_provider)
+        memory_sink = make_memory_output_sink(crew_memory)
+        if memory_sink is not None:
+            crew.output_sinks.append(memory_sink)
+        if memory_provider is not None or memory_sink is not None:
+            logger.info(
+                f"Memory recall provider + persist sink attached to {crew_label}"
+            )
+        else:
+            logger.info(
+                f"No usable memory instance on {crew_label} — recall/persist not attached"
+            )
+    except Exception as mem_err:
+        logger.warning(f"Flow crew memory wiring skipped (non-fatal): {mem_err}")
+
+
+def collect_task_agents(task_list: List[Any]) -> List[Any]:
+    """Unique agents assigned to ``task_list``, in first-seen task order.
+
+    Deliberately not ``list(set(t.agent for t in task_list))``: the engine's
+    ``Agent`` is a non-frozen Pydantic model, so Pydantic sets ``__hash__ = None``
+    and ``set()`` raises ``TypeError: unhashable type: 'Agent'`` — every flow with
+    a listener or router died there. Identity de-dupe via ``id()`` matches
+    ``_dedupe_flow_agent_task_tools`` above, and preserving task order makes the
+    derived crew name (``agents[0].role``) deterministic rather than dependent on
+    set iteration order. Tasks with no agent are skipped instead of contributing a
+    ``None`` to the crew's agent list.
+    """
+    agents: List[Any] = []
+    seen = set()
+    for task in task_list:
+        agent = getattr(task, "agent", None)
+        if agent is None or id(agent) in seen:
+            continue
+        seen.add(id(agent))
+        agents.append(agent)
+    return agents
+
+
 class FlowMethodFactory:
     """
     Factory for creating dynamic flow methods (starting points, listeners, routers).
@@ -574,27 +634,7 @@ class FlowMethodFactory:
             # ── Memory seams — same wiring as the crew path: runtime recall via
             # context provider, per-task persistence via output sink. The flow
             # subprocess flushes pending writes at flow end.
-            try:
-                from src.engines.kasal.memory.memory_hooks import (
-                    make_memory_context_provider,
-                    make_memory_output_sink,
-                )
-
-                _flow_crew_memory = getattr(crew, "memory", None)
-                _memory_provider = make_memory_context_provider(_flow_crew_memory)
-                if _memory_provider is not None:
-                    crew.context_providers.append(_memory_provider)
-                _memory_sink = make_memory_output_sink(_flow_crew_memory)
-                if _memory_sink is not None:
-                    crew.output_sinks.append(_memory_sink)
-                if _memory_provider is not None or _memory_sink is not None:
-                    logger.info(
-                        f"Memory recall provider + persist sink attached to flow crew '{crew_name}'"
-                    )
-            except Exception as mem_err:
-                logger.warning(
-                    f"Flow crew memory wiring skipped (non-fatal): {mem_err}"
-                )
+            attach_memory_seams(crew, f"flow crew '{crew_name}'")
 
             # SECURITY: Run all assembly-time security checks (spotlighting, trifecta,
             # mixed-task anti-pattern, destructive tools).  Flow crews are built here
@@ -939,7 +979,7 @@ class FlowMethodFactory:
                 )
 
             # Create a crew with runtime tasks
-            agents = list(set(task.agent for task in runtime_tasks))
+            agents = collect_task_agents(runtime_tasks)
             logger.info(f"Number of agents in listener: {len(agents)}")
 
             # Log if agents have no tools
@@ -1096,6 +1136,12 @@ class FlowMethodFactory:
             logger.info(
                 f"Crew instance '{listener_crew_name}' created for listener, kwargs: {list(crew_kwargs.keys())}"
             )
+
+            # ── Memory seams — REQUIRED, same as starting-point crews above.
+            # Listener crews were configuring a memory backend and then never
+            # attaching these hooks, so every @listen step ran with no recall and
+            # no persistence despite reporting memory=True.
+            attach_memory_seams(crew, f"flow listener crew '{listener_crew_name}'")
 
             # SECURITY: Same assembly-time checks as starting-point crews.
             try:

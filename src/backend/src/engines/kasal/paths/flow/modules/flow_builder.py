@@ -33,7 +33,7 @@ from src.engines.kasal.callbacks.execution_callback import create_execution_call
 from src.engines.kasal.paths.flow.modules.flow_config import FlowConfigManager
 from src.engines.kasal.paths.flow.modules.flow_processors import FlowProcessorManager
 from src.engines.kasal.paths.flow.modules.flow_state import FlowStateManager
-from src.engines.kasal.paths.flow.modules.flow_methods import FlowMethodFactory, extract_final_answer, get_model_context_limits
+from src.engines.kasal.paths.flow.modules.flow_methods import FlowMethodFactory, collect_task_agents, extract_final_answer, get_model_context_limits
 from src.engines.kasal.paths.flow.exceptions import FlowPausedForApprovalException
 
 # Initialize logger - use flow logger for flow execution
@@ -1278,7 +1278,7 @@ class FlowBuilder:
                             logger.info("="*80)
 
                             # Get agents for these tasks
-                            agents = list(set(task.agent for task in route_task_list))
+                            agents = collect_task_agents(route_task_list)
                             logger.info(f"Number of agents in route listener: {len(agents)}")
 
                             # CRITICAL FIX: Inject previous output context into task descriptions
