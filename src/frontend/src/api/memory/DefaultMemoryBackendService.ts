@@ -3,7 +3,7 @@
  * This allows setting a global default that all new agents will use
  */
 
-import { MemoryBackendConfig } from '../../types/memoryBackend';
+import { MemoryBackendConfig } from '../../types/config/memoryBackend';
 
 const DEFAULT_CONFIG_KEY = 'default_memory_backend_config';
 

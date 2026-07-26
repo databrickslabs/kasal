@@ -3,7 +3,7 @@ import React from 'react';
 import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
-import { MemoryBackendType } from '../../types/memoryBackend';
+import { MemoryBackendType } from '../../types/config/memoryBackend';
 
 // ---------------------------------------------------------------------------
 // Hoisted mock references

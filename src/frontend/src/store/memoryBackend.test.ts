@@ -7,7 +7,7 @@ import {
   DEFAULT_MEMORY_BACKEND_CONFIG, 
   DEFAULT_DATABRICKS_CONFIG,
   DatabricksMemoryConfig 
-} from '../types/memoryBackend';
+} from '../types/config/memoryBackend';
 
 // Mock the MemoryBackendService
 vi.mock('../api/memory/MemoryBackendService');

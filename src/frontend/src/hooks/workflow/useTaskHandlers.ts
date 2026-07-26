@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import { Node, NodeChange, ReactFlowInstance } from 'reactflow';
-import { Task } from '../../types/task';
+import { Task } from '../../types/workflow/task';
 import { TaskService } from '../../api/workflow/TaskService';
 import { useErrorStore } from '../../store/error';
 import { calculateNonOverlappingPosition } from '../../utils/flowUtils';

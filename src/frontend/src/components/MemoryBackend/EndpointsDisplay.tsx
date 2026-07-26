@@ -13,7 +13,7 @@ import {
   Storage as StorageIcon,
   Delete as DeleteIcon,
 } from '@mui/icons-material';
-import { SavedConfigInfo } from '../../types/memoryBackend';
+import { SavedConfigInfo } from '../../types/config/memoryBackend';
 import { buildVectorSearchEndpointUrl, hasActiveVectorSearchIndexes } from './databricksVectorSearchUtils';
 
 interface EndpointsDisplayProps {

@@ -9,7 +9,7 @@ import {
   Grid,
   Typography,
 } from '@mui/material';
-import { SavedConfigInfo } from '../../types/memoryBackend';
+import { SavedConfigInfo } from '../../types/config/memoryBackend';
 
 interface EditConfigurationFormProps {
   editedConfig: SavedConfigInfo | null;

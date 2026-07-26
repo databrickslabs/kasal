@@ -1,6 +1,6 @@
 import axios, { AxiosError } from 'axios';
 import { apiClient } from '../../config/api/ApiConfig';
-import { Schema, SchemaCreate, SchemaListResponse } from '../../types/schema';
+import { Schema, SchemaCreate, SchemaListResponse } from '../../types/workflow/schema';
 
 interface CacheEntry<T> {
   data: T;

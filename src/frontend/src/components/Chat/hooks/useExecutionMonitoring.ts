@@ -3,7 +3,7 @@ import { ChatMessage } from '../types';
 import { streamExecution } from '../../ChatMode/api/streaming';
 
 import { runService } from '../../../api/execution/ExecutionHistoryService';
-import { Run } from '../../../types/run';
+import { Run } from '../../../types/execution/run';
 import { useTaskExecutionStore } from '../../../store/taskExecutionStore';
 import { useChatMessagesStore } from '../../../store/chatMessagesStore';
 import { extractTaskId, extractTaskName, mapEventToStatus } from '../../../utils/taskIdUtils';

@@ -35,8 +35,8 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import SearchIcon from '@mui/icons-material/Search';
 import { FlowService } from '../../../api/workflow/FlowService';
 import { CrewService } from '../../../api/workflow/CrewService';
-import { FlowConfiguration, FlowResponse, Listener, Action, StartingPoint, Flow, FlowSaveData } from '../../../types/flow';
-import { CrewTask } from '../../../types/crewPlan';
+import { FlowConfiguration, FlowResponse, Listener, Action, StartingPoint, Flow, FlowSaveData } from '../../../types/workflow/flow';
+import { CrewTask } from '../../../types/workflow/crewPlan';
 import { validateNodePositions } from '../../../utils/flowWizardUtils';
 import { v4 as uuidv4 } from 'uuid';
 

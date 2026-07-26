@@ -21,7 +21,7 @@ import {
   countTodos,
   type ConfigKeyStatus,
   type PipelineConfig,
-} from '../../types/configEditor';
+} from '../../types/config/configEditor';
 
 interface ConfigSidebarProps {
   config: PipelineConfig | null;

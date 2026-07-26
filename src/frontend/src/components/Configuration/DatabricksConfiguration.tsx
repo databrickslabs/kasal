@@ -24,7 +24,7 @@ import StorageIcon from '@mui/icons-material/Storage';
 import { useTranslation } from 'react-i18next';
 import { DatabricksService, DatabricksConfig, DatabricksTokenStatus, DatabricksConnectionStatus } from '../../api/databricks/DatabricksService';
 import { MemoryBackendService } from '../../api/memory/MemoryBackendService';
-import { MemoryBackendType, isValidMemoryBackendConfig, isKnowledgeCapableMemoryConfig } from '../../types/memoryBackend';
+import { MemoryBackendType, isValidMemoryBackendConfig, isKnowledgeCapableMemoryConfig } from '../../types/config/memoryBackend';
 import { useKnowledgeConfigStore } from '../../store/knowledgeConfigStore';
 import { ToolService } from '../../api/tools/ToolService';
 

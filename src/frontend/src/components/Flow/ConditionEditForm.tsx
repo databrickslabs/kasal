@@ -19,7 +19,7 @@ import {
 import CompareArrowsIcon from '@mui/icons-material/CompareArrows';
 import CallSplitIcon from '@mui/icons-material/CallSplit';
 import RouterIcon from '@mui/icons-material/Router';
-import { FlowFormData } from '../../types/flow';
+import { FlowFormData } from '../../types/workflow/flow';
 
 interface ConditionEditFormProps {
   initialData: {

@@ -25,9 +25,9 @@ import {
   ContentPaste as PasteIcon,
   History as HistoryIcon,
 } from '@mui/icons-material';
-import type { PipelineConfig } from '../../types/configEditor';
+import type { PipelineConfig } from '../../types/config/configEditor';
 import { RunService } from '../../api/execution/ExecutionHistoryService';
-import type { Run } from '../../types/run';
+import type { Run } from '../../types/execution/run';
 
 interface ConfigLoaderProps {
   onLoad: (config: PipelineConfig, source: string) => void;

@@ -19,13 +19,13 @@ import {
   Checkbox,
   FormControlLabel,
 } from '@mui/material';
-import { CrewPlanningDialogProps } from '../../types/crewPlan';
+import { CrewPlanningDialogProps } from '../../types/workflow/crewPlan';
 import { ToolService } from '../../api/tools/ToolService';
-import { Tool as _Tool } from '../../types/tool';
+import { Tool as _Tool } from '../../types/workflow/tool';
 import { useModelConfigStore } from '../../store/modelConfig';
 import { useCrewExecutionStore } from '../../store/crewExecution';
 import { ModelService } from '../../api/config/ModelService';
-import { Models } from '../../types/models';
+import { Models } from '../../types/config/models';
 import { useAPIKeysStore } from '../../store/apiKeys';
 import * as ApiKeyUtils from '../../utils/apiKeyUtils';
 import { CrewPlanningService } from '../../api/workflow/CrewPlanningService';

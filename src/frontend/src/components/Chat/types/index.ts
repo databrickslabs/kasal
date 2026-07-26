@@ -1,6 +1,6 @@
 import { Node, Edge } from 'reactflow';
-import { Agent } from '../../../types/agent';
-import { Task } from '../../../types/task';
+import { Agent } from '../../../types/workflow/agent';
+import { Task } from '../../../types/workflow/task';
 
 export interface GeneratedAgent {
   name: string;

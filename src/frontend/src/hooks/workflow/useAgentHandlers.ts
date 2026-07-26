@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import { Node, NodeChange, ReactFlowInstance } from 'reactflow';
-import { Agent } from '../../types/agent';
+import { Agent } from '../../types/workflow/agent';
 import { AgentService } from '../../api/workflow/AgentService';
 import { useErrorStore } from '../../store/error';
 

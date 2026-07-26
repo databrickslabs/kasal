@@ -5,7 +5,7 @@ import '@testing-library/jest-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { AxiosError } from 'axios';
 import { EMBEDDING_MODELS } from './constants';
-import { MemoryBackendType } from '../../types/memoryBackend';
+import { MemoryBackendType } from '../../types/config/memoryBackend';
 
 // ---------------------------------------------------------------------------
 // Hoisted mock references

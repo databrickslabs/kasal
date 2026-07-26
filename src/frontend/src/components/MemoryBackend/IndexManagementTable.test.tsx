@@ -4,7 +4,7 @@ import { render, screen, fireEvent, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { IndexManagementTable } from './IndexManagementTable';
-import { SavedConfigInfo, IndexInfoState } from '../../types/memoryBackend';
+import { SavedConfigInfo, IndexInfoState } from '../../types/config/memoryBackend';
 import { INDEX_DESCRIPTIONS } from './constants';
 import {
   buildVectorSearchIndexUrl,

@@ -1,5 +1,5 @@
 import { apiClient as API } from '../../config/api/ApiConfig';
-import { Crew } from '../../types/crewPlan';
+import { Crew } from '../../types/workflow/crewPlan';
 
 /**
  * Request parameters for creating a crew

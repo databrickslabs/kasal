@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { Node, Edge, Connection } from 'reactflow';
-import { FlowConfiguration } from '../types/flow';
+import { FlowConfiguration } from '../types/workflow/flow';
 import { createEdge, edgeExists } from '../utils/edgeUtils';
 import { useUILayoutStore } from './uiLayout';
 import { getEdgeStyle } from '../config/edgeConfig';

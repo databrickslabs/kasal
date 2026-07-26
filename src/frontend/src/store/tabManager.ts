@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { Node, Edge } from 'reactflow';
 import { v4 as uuidv4 } from 'uuid';
-import { ReasoningConfig } from '../types/crews';
+import { ReasoningConfig } from '../types/workflow/crews';
 import { useUILayoutStore } from './uiLayout';
 
 // Execution configuration per tab

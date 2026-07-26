@@ -4,7 +4,7 @@ import { jobExecutionService } from '../api/execution/JobExecutionService';
 import { useWorkflowStore } from './workflow';
 import { useTabManagerStore } from './tabManager';
 import { useFlowExecutionStore } from './flowExecutionStore';
-import { Tool } from '../types/tool';
+import { Tool } from '../types/workflow/tool';
 import { FlowService, FlowCheckpoint } from '../api/workflow/FlowService';
 import { assessTrifecta, TrifectaAssessment } from '../utils/toolCapabilityManifest';
 import { ToolService } from '../api/tools/ToolService';
@@ -22,8 +22,8 @@ interface RunHistoryItem {
 // (a leaf module) and re-exported here so existing imports keep working without an
 // import cycle (tabManager <-> crewExecution). Sent to the backend as
 // `reasoning_config` only when reasoning is enabled.
-export type { ReasoningConfig } from '../types/crews';
-import type { ReasoningConfig } from '../types/crews';
+export type { ReasoningConfig } from '../types/workflow/crews';
+import type { ReasoningConfig } from '../types/workflow/crews';
 
 type ToolConfigs = Record<string, unknown>;
 

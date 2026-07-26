@@ -1,7 +1,7 @@
 import { create } from 'zustand';
-import { ExtendedRun } from '../types/run';
+import { ExtendedRun } from '../types/execution/run';
 import { runService } from '../api/execution/ExecutionHistoryService';
-import { Trace } from '../types/trace';
+import { Trace } from '../types/execution/trace';
 
 // Re-export Trace type to ensure consistency across the app
 export type { Trace };

@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useAPIKeysStore } from '../../store/apiKeys';
-import { ApiKey } from '../../types/apiKeys';
+import { ApiKey } from '../../types/config/apiKeys';
 
 export const useAPIKeys = () => {
   const { secrets, loading, error, fetchAPIKeys, updateSecrets: updateSecretsList } = useAPIKeysStore();

@@ -1,5 +1,5 @@
 import apiClient from '../../config/api/ApiConfig';
-import { Run, RunsResponse, JobStatus } from '../../types/run';
+import { Run, RunsResponse, JobStatus } from '../../types/execution/run';
 import { Trace } from '../../store/runStatus';
 
 export type { Run, RunsResponse, JobStatus };

@@ -19,7 +19,7 @@ import {
   useTheme
 } from '@mui/material';
 import { FlowService } from '../../api/workflow/FlowService';
-import { FlowResponse, FlowSelectionDialogProps } from '../../types/flow';
+import { FlowResponse, FlowSelectionDialogProps } from '../../types/workflow/flow';
 import AccountTreeIcon from '@mui/icons-material/AccountTree';
 import DeleteIcon from '@mui/icons-material/Delete';
 import CalendarTodayIcon from '@mui/icons-material/CalendarToday';

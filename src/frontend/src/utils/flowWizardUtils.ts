@@ -1,5 +1,5 @@
-import { CrewResponse } from '../types/crews';
-import type { FlowEdgeFormData } from '../types/flow';
+import { CrewResponse } from '../types/workflow/crews';
+import type { FlowEdgeFormData } from '../types/workflow/flow';
 import { Node } from 'reactflow';
 
 // Custom interfaces for the flow wizard

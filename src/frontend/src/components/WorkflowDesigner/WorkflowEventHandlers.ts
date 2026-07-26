@@ -1,7 +1,7 @@
 import { useCallback, useState, useEffect, useRef } from 'react';
 import { Node, Edge, OnSelectionChangeParams, ReactFlowInstance } from 'reactflow';
-import { FlowConfiguration, FlowFormData } from '../../types/flow';
-import { CrewTask } from '../../types/crewPlan';
+import { FlowConfiguration, FlowFormData } from '../../types/workflow/flow';
+import { CrewTask } from '../../types/workflow/crewPlan';
 import { v4 as uuidv4 } from 'uuid';
 import { createEdge } from '../../utils/edgeUtils';
 import { FlowService } from '../../api/workflow/FlowService';

@@ -2,7 +2,7 @@ import ConditionFlowNode from './ConditionFlowNode';
 import FlowDialog from './FlowDialog';
 import AddFlowDialog from './AddFlowDialog';
 import { EdgeStateForm } from './EdgeStateForm';
-import { FlowFormData, FlowEdgeFormData } from '../../types/flow';
+import { FlowFormData, FlowEdgeFormData } from '../../types/workflow/flow';
 import ConditionForm from './ConditionForm';
 import ConditionEditForm from './ConditionEditForm';
 import CrewNode from './CrewNode';

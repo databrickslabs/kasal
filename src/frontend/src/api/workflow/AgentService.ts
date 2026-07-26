@@ -1,6 +1,6 @@
 import { getDefaultModel } from '../../config/defaultModel';
 import { apiClient } from '../../config/api/ApiConfig';
-import { Agent, KnowledgeSource, StepCallback } from '../../types/agent';
+import { Agent, KnowledgeSource, StepCallback } from '../../types/workflow/agent';
 import { ModelService } from '../config/ModelService';
 // DISABLED: Local file uploads are not allowed - use Databricks volumes instead
 // import { uploadService } from './UploadService';

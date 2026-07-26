@@ -39,7 +39,7 @@ import type {
   OutboundFormat,
   SQLDialect,
   PowerBIAuthMethod,
-} from '../../types/converter';
+} from '../../types/config/converter';
 import { ConverterService } from '../../api/tools/ConverterService';
 import { usePowerBIOAuth } from '../../hooks/usePowerBIOAuth';
 import toast from 'react-hot-toast';

@@ -12,7 +12,7 @@ import {
   DEFAULT_MEMORY_BACKEND_CONFIG,
   DEFAULT_DATABRICKS_CONFIG,
   DEFAULT_LAKEBASE_CONFIG,
-} from '../types/memoryBackend';
+} from '../types/config/memoryBackend';
 import { 
   MemoryBackendService, 
   DatabricksIndex, 

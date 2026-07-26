@@ -34,7 +34,7 @@ import { useThemeManager } from '../../hooks/workflow/useThemeManager';
 import FlowCanvasControls from './FlowCanvasControls';
 import useShortcuts from '../../hooks/global/useShortcuts';
 import { CrewService } from '../../api/workflow/CrewService';
-import { CrewResponse } from '../../types/crews';
+import { CrewResponse } from '../../types/workflow/crews';
 import EdgeConfigDialog, { EdgeConfig } from '../Flow/EdgeConfigDialog';
 import { useUILayoutStore } from '../../store/uiLayout';
 import { useFlowExecutionStore } from '../../store/flowExecutionStore';

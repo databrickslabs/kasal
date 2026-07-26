@@ -3,7 +3,7 @@ import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { EditConfigurationForm } from './EditConfigurationForm';
-import { SavedConfigInfo } from '../../types/memoryBackend';
+import { SavedConfigInfo } from '../../types/config/memoryBackend';
 
 const theme = createTheme();
 

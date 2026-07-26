@@ -1,6 +1,6 @@
 import { vi, Mock, beforeEach, afterEach, describe, it, test, expect } from 'vitest';
 import { DefaultMemoryBackendService } from './DefaultMemoryBackendService';
-import { MemoryBackendConfig, MemoryBackendType } from '../../types/memoryBackend';
+import { MemoryBackendConfig, MemoryBackendType } from '../../types/config/memoryBackend';
 
 describe('DefaultMemoryBackendService', () => {
   let service: DefaultMemoryBackendService;

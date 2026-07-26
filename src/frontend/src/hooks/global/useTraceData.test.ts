@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { processTraces } from './useTraceData';
-import { Trace } from '../../types/trace';
+import { Trace } from '../../types/execution/trace';
 
 let _id = 0;
 const makeTrace = (overrides: Partial<Trace>): Trace => ({

@@ -4,7 +4,7 @@ import { render, screen, fireEvent, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { SetupResultDialog } from './SetupResultDialog';
-import { SetupResult } from '../../types/memoryBackend';
+import { SetupResult } from '../../types/config/memoryBackend';
 
 // ---------------------------------------------------------------------------
 // Helpers

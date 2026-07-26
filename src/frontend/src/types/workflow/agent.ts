@@ -1,4 +1,4 @@
-import { MemoryBackendConfig } from './memoryBackend';
+import { MemoryBackendConfig } from '../config/memoryBackend';
 
 // Define UploadedFileInfo locally since we removed UploadService
 export interface UploadedFileInfo {

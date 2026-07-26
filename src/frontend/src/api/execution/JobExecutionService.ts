@@ -1,11 +1,11 @@
 import axios from 'axios';
 import { apiClient } from '../../config/api/ApiConfig';
 import { Node, Edge } from 'reactflow';
-import { AgentYaml, TaskYaml } from '../../types/crew';
-import { Task } from '../../types/task';
+import { AgentYaml, TaskYaml } from '../../types/workflow/crew';
+import { Task } from '../../types/workflow/task';
 import { JobResult } from '../../types/common';
 import { ModelService } from '../config/ModelService';
-import { Models } from '../../types/models';
+import { Models } from '../../types/config/models';
 import { buildFlowConfiguration } from '../../utils/flowConfigBuilder';
 
 interface NodeData {

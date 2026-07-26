@@ -33,7 +33,7 @@ import { GroupToolService, type GroupToolMapping } from '../../../api/groups/Gro
 import { ToolService, type Tool } from '../../../api/tools/ToolService';
 import { APIKeysService, type ApiKey } from '../../../api/config/APIKeysService';
 import SecurityDisclaimer from '../../Tools/SecurityDisclaimer';
-import { Tool as UITool } from '../../../types/tool';
+import { Tool as UITool } from '../../../types/workflow/tool';
 
 function KeyReadinessChip({ ready, onClick }: { ready: boolean; onClick?: () => void }) {
   if (ready) {

@@ -1,5 +1,5 @@
 import { apiClient } from '../../config/api/ApiConfig';
-import { FlowResponse, Flow, FlowSaveData } from '../../types/flow';
+import { FlowResponse, Flow, FlowSaveData } from '../../types/workflow/flow';
 import { Node } from 'reactflow';
 import { v4 as uuidv4 } from 'uuid';
 import { logger } from '../../utils/logger';

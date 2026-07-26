@@ -1,8 +1,8 @@
 import { Node, Edge } from 'reactflow';
 import { AgentService } from '../../../api/workflow/AgentService';
 import { TaskService } from '../../../api/workflow/TaskService';
-import { Agent } from '../../../types/agent';
-import { Task } from '../../../types/task';
+import { Agent } from '../../../types/workflow/agent';
+import { Task } from '../../../types/workflow/task';
 import { GeneratedAgent, GeneratedTask, GeneratedCrew, ChatMessage } from '../types';
 import { CanvasLayoutManager } from '../../../utils/CanvasLayoutManager';
 import { useWorkflowStore } from '../../../store/workflow';

@@ -1,6 +1,6 @@
 import { Box, Typography, Paper, List, ListItem, ListItemText, Checkbox } from '@mui/material';
-import { CrewTask } from '../../types/crewPlan';
-import { StartingPoint } from '../../types/flow';
+import { CrewTask } from '../../types/workflow/crewPlan';
+import { StartingPoint } from '../../types/workflow/flow';
 
 interface StartingPointsStepProps {
   tasks: CrewTask[];

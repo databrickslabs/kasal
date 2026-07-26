@@ -2,7 +2,7 @@ import { vi, beforeEach, describe, it, expect } from 'vitest';
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { KnowledgeFileUpload } from './KnowledgeFileUpload';
-import { Agent } from '../../types/agent';
+import { Agent } from '../../types/workflow/agent';
 
 // Mock the knowledge config store - must use vi.hoisted for variables used in vi.mock
 const mockKnowledgeConfigStore = vi.hoisted(() => ({

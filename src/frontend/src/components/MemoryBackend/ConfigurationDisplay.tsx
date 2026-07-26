@@ -17,7 +17,7 @@ import {
   Save as SaveIcon,
   Cancel as CancelIcon,
 } from '@mui/icons-material';
-import { SavedConfigInfo } from '../../types/memoryBackend';
+import { SavedConfigInfo } from '../../types/config/memoryBackend';
 
 interface ConfigurationDisplayProps {
   savedConfig: SavedConfigInfo;

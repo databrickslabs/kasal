@@ -16,7 +16,7 @@ import {
 } from '@mui/material';
 import { Delete as DeleteIcon, Add as AddIcon } from '@mui/icons-material';
 import { SchemaService } from '../../api/workflow/SchemaService';
-import { Schema } from '../../types/schema';
+import { Schema } from '../../types/workflow/schema';
 
 interface SchemaField {
   name: string;

@@ -7,4 +7,4 @@ export {
 };
 
 // Re-export types if needed
-export type { CrewSelectionDialogProps } from '../../types/crews'; 
+export type { CrewSelectionDialogProps } from '../../types/workflow/crews'; 

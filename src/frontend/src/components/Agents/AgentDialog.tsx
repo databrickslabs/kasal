@@ -20,7 +20,7 @@ import PersonIcon from '@mui/icons-material/Person';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
-import { Agent, Tool, AgentDialogProps } from '../../types/agent';
+import { Agent, Tool, AgentDialogProps } from '../../types/workflow/agent';
 import { AgentService } from '../../api/workflow/AgentService';
 import { ToolService } from '../../api/tools/ToolService';
 import AgentForm from './AgentForm';

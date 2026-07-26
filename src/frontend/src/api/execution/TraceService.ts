@@ -1,6 +1,6 @@
 import apiClient from '../../config/api/ApiConfig';
 import { Trace } from '../../store/runStatus';
-import { TaskDetails } from '../../types/trace';
+import { TaskDetails } from '../../types/execution/trace';
 
 // List of known run IDs for development/testing - this should be removed in production
 const KNOWN_RUN_IDS = [1]; // Based on the database, we only have run ID 1

@@ -30,7 +30,7 @@ import {
   CircularProgress,
 } from '@mui/material';
 import { type Task } from '../../api/workflow/TaskService';
-import { type Agent } from '../../types/agent';
+import { type Agent } from '../../types/workflow/agent';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import OpenInFullIcon from '@mui/icons-material/OpenInFull';
 import CloseIcon from '@mui/icons-material/Close';
@@ -67,10 +67,10 @@ import { MetricViewDeployerConfigSelector, MetricViewDeployerConfig } from '../C
 import { UCMVGenieConfigGeneratorConfigSelector, UCMVGenieConfigGeneratorConfig } from '../Common/UCMVGenieConfigGeneratorConfigSelector';
 import { PBIVisualUCMVMapperConfigSelector, PBIVisualUCMVMapperConfig } from '../Common/PBIVisualUCMVMapperConfigSelector';
 import { DatabricksDashboardCreatorConfigSelector, DatabricksDashboardCreatorConfig } from '../Common/DatabricksDashboardCreatorConfigSelector';
-import { PerplexityConfig, SerperConfig } from '../../types/config';
-import { type LLMGuardrailConfig } from '../../types/task';
+import { PerplexityConfig, SerperConfig } from '../../types/workflow/config';
+import { type LLMGuardrailConfig } from '../../types/workflow/task';
 import { ModelService } from '../../api/config/ModelService';
-import { type ModelConfig } from '../../types/models';
+import { type ModelConfig } from '../../types/config/models';
 import TaskBestPractices from '../BestPractices/TaskBestPractices';
 
 interface TaskFormProps {

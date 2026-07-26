@@ -1,7 +1,7 @@
 import { vi, Mock, beforeEach, afterEach, describe, it, expect } from 'vitest';
 import DatabricksVectorSearchService from './DatabricksVectorSearchService';
 import { apiClient } from '../../config/api/ApiConfig';
-import { SetupResult, DatabricksMemoryConfig, MemoryBackendType } from '../../types/memoryBackend';
+import { SetupResult, DatabricksMemoryConfig, MemoryBackendType } from '../../types/config/memoryBackend';
 
 vi.mock('../../config/api/ApiConfig', () => ({
   apiClient: {

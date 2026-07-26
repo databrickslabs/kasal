@@ -35,7 +35,7 @@ const STATUS = {
 import { usePermissionStore } from '../../store/permissions';
 import { useWorkflowStore } from '../../store/workflow';
 import { useTheme } from '@mui/material/styles';
-import { TutorialProps } from '../../types/tutorial';
+import { TutorialProps } from '../../types/config/tutorial';
 
 // Custom styles for the tour
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

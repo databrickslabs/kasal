@@ -4,4 +4,4 @@ export const useFlowWizard = () => {
   return useFlowWizardStore();
 };
 
-export { WizardStep } from '../../types/flow'; 
+export { WizardStep } from '../../types/workflow/flow'; 

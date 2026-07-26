@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { CrewSection, ProcessedTraces, RunConfig, RunConfigAgent, RunConfigTask, TimelineItem } from '../../types/trace';
+import { CrewSection, ProcessedTraces, RunConfig, RunConfigAgent, RunConfigTask, TimelineItem } from '../../types/execution/trace';
 import {
   processTraceEvent,
   extractOutputForDisplay,

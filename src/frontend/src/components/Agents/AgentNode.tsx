@@ -12,7 +12,7 @@ import { Agent, AgentService } from '../../api/workflow/AgentService';
 import AgentForm from './AgentForm';
 import LLMSelectionDialog from './LLMSelectionDialog';
 import { ToolService } from '../../api/tools/ToolService';
-import { Tool, KnowledgeSource } from '../../types/agent';
+import { Tool, KnowledgeSource } from '../../types/workflow/agent';
 import { Theme } from '@mui/material/styles';
 import { useTabDirtyState } from '../../hooks/workflow/useTabDirtyState';
 import { useAgentStore } from '../../store/agent';
@@ -138,7 +138,7 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
           function_calling_llm: data.function_calling_llm,
           max_rpm: data.max_rpm,
           max_execution_time: data.max_execution_time,
-          embedder_config: (data.embedder_config as import('../../types/agent').EmbedderConfig | undefined),
+          embedder_config: (data.embedder_config as import('../../types/workflow/agent').EmbedderConfig | undefined),
           knowledge_sources: data.knowledge_sources,
         };
         setAgentData(agentFromData);

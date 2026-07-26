@@ -11,7 +11,7 @@ import React from 'react';
 import { render, screen, fireEvent, within, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import TraceTimelineContent, { TraceTimelineContentProps } from './TraceTimelineContent';
-import { RunConfig, RunConfigAgent, RunConfigTask, ProcessedTraces } from '../../types/trace';
+import { RunConfig, RunConfigAgent, RunConfigTask, ProcessedTraces } from '../../types/execution/trace';
 
 /**
  * Test the RunConfig extraction logic used in processTraces (useTraceData hook).

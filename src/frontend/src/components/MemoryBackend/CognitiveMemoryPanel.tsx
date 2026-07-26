@@ -24,8 +24,8 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import {
   COGNITIVE_MEMORY_DEFAULTS,
   CognitiveMemoryConfig,
-} from '../../types/memoryBackend';
-import { Models } from '../../types/models';
+} from '../../types/config/memoryBackend';
+import { Models } from '../../types/config/models';
 import { ModelService } from '../../api/config/ModelService';
 import {
   useCognitiveMemoryConfig,

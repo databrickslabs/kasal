@@ -1,5 +1,5 @@
 import { AxiosError } from 'axios';
-import { Task } from '../../types/task';
+import { Task } from '../../types/workflow/task';
 import { apiClient } from '../../config/api/ApiConfig';
 
 // Define specific types for error response

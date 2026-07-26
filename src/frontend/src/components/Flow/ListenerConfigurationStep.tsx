@@ -26,9 +26,9 @@ import {
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
-import { CrewTask } from '../../types/crewPlan';
-import { Listener } from '../../types/flow';
-import { CrewResponse } from '../../types/crews';
+import { CrewTask } from '../../types/workflow/crewPlan';
+import { Listener } from '../../types/workflow/flow';
+import { CrewResponse } from '../../types/workflow/crews';
 
 interface Route {
   name: string;

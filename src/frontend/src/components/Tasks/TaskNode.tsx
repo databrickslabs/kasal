@@ -21,7 +21,7 @@ import { useUILayoutStore } from '../../store/uiLayout';
 import { useErrorStore } from '../../store/error';
 import { findTaskStoreKey } from '../../utils/taskIdUtils';
 
-import { type LLMGuardrailConfig } from '../../types/task';
+import { type LLMGuardrailConfig } from '../../types/workflow/task';
 
 export interface TaskNodeData {
   label?: string;

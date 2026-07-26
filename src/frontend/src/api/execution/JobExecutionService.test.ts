@@ -3,7 +3,7 @@ import { JobExecutionService, JobResponse } from './JobExecutionService';
 import { apiClient } from '../../config/api/ApiConfig';
 import { ModelService } from '../config/ModelService';
 import { Node, Edge } from 'reactflow';
-import { AgentYaml } from '../../types/crew';
+import { AgentYaml } from '../../types/workflow/crew';
 
 // Mock dependencies
 vi.mock('../../config/api/ApiConfig', () => ({

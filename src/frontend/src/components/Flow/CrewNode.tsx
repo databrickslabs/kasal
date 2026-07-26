@@ -5,7 +5,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorIcon from '@mui/icons-material/Error';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
-import { FlowConfiguration } from '../../types/flow';
+import { FlowConfiguration } from '../../types/workflow/flow';
 import { useUILayoutStore } from '../../store/uiLayout';
 import { useFlowExecutionStore } from '../../store/flowExecutionStore';
 

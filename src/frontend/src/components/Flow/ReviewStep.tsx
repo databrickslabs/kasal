@@ -1,5 +1,5 @@
 import { Box, Typography, TextField, Paper, Chip, Divider } from '@mui/material';
-import { Listener, Action, StartingPoint } from '../../types/flow';
+import { Listener, Action, StartingPoint } from '../../types/workflow/flow';
 
 interface ReviewStepProps {
   flowName: string;

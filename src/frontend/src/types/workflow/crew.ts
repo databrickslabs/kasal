@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import type { Node, Edge, MarkerType, Viewport } from 'reactflow';
 import type { Agent as FormAgent } from './agent';
-import type { KnowledgeSource } from '../api/workflow/AgentService';
+import type { KnowledgeSource } from '../../api/workflow/AgentService';
 
 export type CodeExecutionMode = 'safe' | 'unsafe';
 

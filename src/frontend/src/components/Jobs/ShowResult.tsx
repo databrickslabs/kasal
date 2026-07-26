@@ -44,7 +44,7 @@ import '../ChatMode/chat.css';
 import { toSurface } from '../ChatMode/utils/surfaceAdapter';
 import { useThemeStore } from '../../store/theme';
 import { ShowResultProps } from '../../types/common';
-import { ResultValue } from '../../types/result';
+import { ResultValue } from '../../types/execution/result';
 import { DatabricksService } from '../../api/databricks/DatabricksService';
 import UCMVResultViewer, { isUCMVResult, UCMVResult } from './UCMVResultViewer';
 import ValidatorResultViewer, { isValidatorResult } from './ValidatorResultViewer';

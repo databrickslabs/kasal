@@ -19,8 +19,8 @@ import {
 import type { Task } from '../../api/workflow/TaskService';
 import { GenerateService } from '../../api/workflow/GenerateService';
 import { ModelService } from '../../api/config/ModelService';
-import { Models } from '../../types/models';
-import { TaskGenerationDialogProps } from '../../types/task';
+import { Models } from '../../types/config/models';
+import { TaskGenerationDialogProps } from '../../types/workflow/task';
 import { useAPIKeysStore } from '../../store/apiKeys';
 import * as ApiKeyUtils from '../../utils/apiKeyUtils';
 

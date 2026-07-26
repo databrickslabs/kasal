@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Box, Typography, Paper, Grid } from '@mui/material';
-import { Listener } from '../../types/flow';
+import { Listener } from '../../types/workflow/flow';
 import { EdgeStateForm } from './EdgeStateForm';
 
 interface StateConfigurationStepProps {

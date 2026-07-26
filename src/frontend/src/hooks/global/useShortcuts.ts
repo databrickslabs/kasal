@@ -1,6 +1,6 @@
 import { useEffect, useRef, useMemo } from 'react';
 import { Node, Edge, ReactFlowInstance } from 'reactflow';
-import { ShortcutConfig } from '../../types/shortcuts';
+import { ShortcutConfig } from '../../types/config/shortcuts';
 import { useRunResult } from './useExecutionResult';
 import { useRunHistory } from './useExecutionHistory';
 import { useWorkflowStore } from '../../store/workflow';

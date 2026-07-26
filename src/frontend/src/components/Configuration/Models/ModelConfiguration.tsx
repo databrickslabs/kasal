@@ -42,7 +42,7 @@ import PowerSettingsNewIcon from '@mui/icons-material/PowerSettingsNew';
 import PowerOffIcon from '@mui/icons-material/PowerOff';
 import { useTranslation } from 'react-i18next';
 import { ModelService } from '../../../api/config/ModelService';
-import { ModelConfig, Models } from '../../../types/models';
+import { ModelConfig, Models } from '../../../types/config/models';
 import { useModelConfig } from '../../../hooks/global/useModelConfig';
 import { useSnackbar } from 'notistack';
 

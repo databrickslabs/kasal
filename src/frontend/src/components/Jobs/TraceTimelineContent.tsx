@@ -42,7 +42,7 @@ import {
   getEventIcon as getEventIconConfig,
 } from './traceEventProcessors';
 import { PaginatedOutput } from '../Common';
-import { ProcessedTraces, RunConfig, TimelineItem } from '../../types/trace';
+import { ProcessedTraces, RunConfig, TimelineItem } from '../../types/execution/trace';
 
 // Interface for parsed task data
 interface ParsedTask {

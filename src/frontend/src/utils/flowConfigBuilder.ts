@@ -1,5 +1,5 @@
 import { Edge, Node } from 'reactflow';
-import { FlowConfiguration, Listener, Action, StartingPoint, Router } from '../types/flow';
+import { FlowConfiguration, Listener, Action, StartingPoint, Router } from '../types/workflow/flow';
 
 // Task type used in flow configuration
 interface FlowTask {

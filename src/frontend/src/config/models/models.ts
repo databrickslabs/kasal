@@ -1,4 +1,4 @@
-import { Models } from '../../types/models';
+import { Models } from '../../types/config/models';
 
 /**
  * @deprecated This file is being replaced by the database-backed model configuration system.

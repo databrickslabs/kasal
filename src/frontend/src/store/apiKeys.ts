@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { APIKeysService } from '../api';
-import { ApiKey } from '../types/apiKeys';
+import { ApiKey } from '../types/config/apiKeys';
 
 interface APIKeysState {
   secrets: ApiKey[];

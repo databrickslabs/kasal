@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { Models, ModelConfig } from '../../types/models';
+import { Models, ModelConfig } from '../../types/config/models';
 import { useModelConfigStore } from '../../store/modelConfig';
 
 export const useModelConfig = () => {

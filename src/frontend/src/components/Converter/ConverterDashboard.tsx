@@ -42,7 +42,7 @@ import type {
   ConversionJob,
   SavedConverterConfiguration,
   ConversionStatistics,
-} from '../../types/converter';
+} from '../../types/config/converter';
 import toast from 'react-hot-toast';
 import { format } from 'date-fns';
 

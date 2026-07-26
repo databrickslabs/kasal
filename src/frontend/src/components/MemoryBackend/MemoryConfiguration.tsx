@@ -56,7 +56,7 @@ import {
   LakebaseMemoryConfig,
   CognitiveMemoryConfig,
   DEFAULT_LAKEBASE_CONFIG,
-} from '../../types/memoryBackend';
+} from '../../types/config/memoryBackend';
 import { MemoryBackendService } from '../../api/memory/MemoryBackendService';
 import { EMBEDDING_MODELS } from './constants';
 import { 

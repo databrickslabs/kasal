@@ -18,9 +18,9 @@ import { useThemeManager } from '../../hooks/workflow/useThemeManager';
 import { nodeTypes as importedNodeTypes, edgeTypes as importedEdgeTypes } from './flow-config';
 
 import useShortcuts from '../../hooks/global/useShortcuts';
-import { Agent } from '../../types/agent';
+import { Agent } from '../../types/workflow/agent';
 import { ToolService } from '../../api/tools/ToolService';
-import { Tool as ToolType } from '../../types/agent';
+import { Tool as ToolType } from '../../types/workflow/agent';
 import { useJobManagementStore } from '../../store/jobManagement';
 import { useCrewExecutionStore } from '../../store/crewExecution';
 import { useErrorStore } from '../../store/error';
@@ -49,7 +49,7 @@ import ToolSelectionDialog from '../Agents/ToolSelectionDialog';
 import MCPConfigDialog from '../Dialogs/MCPConfigDialog';
 
 // Import types
-import { Crew, CrewAgent, CrewTask } from '../../types/crewPlan';
+import { Crew, CrewAgent, CrewTask } from '../../types/workflow/crewPlan';
 
 // Use imported node and edge types from flow-config
 const nodeTypes = importedNodeTypes;

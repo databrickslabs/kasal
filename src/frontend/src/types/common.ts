@@ -1,6 +1,6 @@
-import { Agent } from './agent';
+import { Agent } from './workflow/agent';
 import { LogEntry } from '../api/execution/ExecutionLogs';
-import { ResultValue } from './result';
+import { ResultValue } from './execution/result';
 
 export type JobResult = {
   data?: unknown;

@@ -10,7 +10,7 @@ import {
   TextField, 
   Typography
 } from '@mui/material';
-import { FlowEdgeFormData } from '../../types/flow';
+import { FlowEdgeFormData } from '../../types/workflow/flow';
 
 interface EdgeStateFormProps {
   initialData?: {

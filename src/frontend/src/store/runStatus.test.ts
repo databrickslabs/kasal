@@ -7,8 +7,8 @@
  */
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { useRunStatusStore } from './runStatus';
-import { Trace } from '../types/trace';
-import { ExtendedRun } from '../types/run';
+import { Trace } from '../types/execution/trace';
+import { ExtendedRun } from '../types/execution/run';
 
 // Mock the runService used by fetchInitialRunHistory
 vi.mock('../api/execution/ExecutionHistoryService', () => ({

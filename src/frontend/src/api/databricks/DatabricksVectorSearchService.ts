@@ -3,7 +3,7 @@
  */
 
 import { apiClient } from '../../config/api/ApiConfig';
-import { SetupResult, DatabricksMemoryConfig, MemoryBackendType } from '../../types/memoryBackend';
+import { SetupResult, DatabricksMemoryConfig, MemoryBackendType } from '../../types/config/memoryBackend';
 
 class DatabricksVectorSearchService {
   /**

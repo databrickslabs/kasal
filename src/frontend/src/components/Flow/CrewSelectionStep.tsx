@@ -1,5 +1,5 @@
 import { Box, Typography, CircularProgress } from '@mui/material';
-import { CrewResponse } from '../../types/crews';
+import { CrewResponse } from '../../types/workflow/crews';
 
 interface CrewSelectionStepProps {
   crews: CrewResponse[];

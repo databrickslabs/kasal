@@ -11,7 +11,7 @@ import {
   ExportFormat,
   LakebaseInstance,
   LakebaseInstancesResponse
-} from '../../types/crewExport';
+} from '../../types/workflow/crewExport';
 
 /**
  * Service for crew export and deployment operations

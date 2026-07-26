@@ -35,10 +35,10 @@ import OpenInFullIcon from '@mui/icons-material/OpenInFull';
 import CloseIcon from '@mui/icons-material/Close';
 import DeleteIcon from '@mui/icons-material/Delete';
 import { AgentService } from '../../api/workflow/AgentService';
-import { Agent, AgentFormProps, KnowledgeSource } from '../../types/agent';
+import { Agent, AgentFormProps, KnowledgeSource } from '../../types/workflow/agent';
 import { ModelService } from '../../api/config/ModelService';
-import { Models } from '../../types/models';
-import { PerplexityConfig, SerperConfig } from '../../types/config';
+import { Models } from '../../types/config/models';
+import { PerplexityConfig, SerperConfig } from '../../types/workflow/config';
 
 import { GenerateService } from '../../api/workflow/GenerateService';
 import { DefaultMemoryBackendService } from '../../api/memory/DefaultMemoryBackendService';

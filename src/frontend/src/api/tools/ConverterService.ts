@@ -21,7 +21,7 @@ import type {
   SavedConfigurationUpdate,
   SavedConfigurationFilter,
   SavedConfigurationListResponse,
-} from '../../types/converter';
+} from '../../types/config/converter';
 
 export class ConverterService {
   private static readonly BASE_PATH = '/converters';

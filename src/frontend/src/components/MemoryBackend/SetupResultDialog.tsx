@@ -22,7 +22,7 @@ import {
   CheckCircle as CheckCircleIcon,
   Error as ErrorIcon,
 } from '@mui/icons-material';
-import { SetupResult } from '../../types/memoryBackend';
+import { SetupResult } from '../../types/config/memoryBackend';
 import { buildVectorSearchEndpointUrl, buildVectorSearchIndexUrl, getVectorSearchSetupStatus } from './databricksVectorSearchUtils';
 
 interface SetupResultDialogProps {

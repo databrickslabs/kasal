@@ -37,7 +37,7 @@ import { Run, calculateDurationFromTraces } from '../../api/execution/ExecutionH
 import { ScheduleService } from '../../api/execution/ScheduleService';
 import ShowTraceTimeline from './ShowTraceTimeline';
 import ShowResult from './ShowResult';
-import { ResultValue } from '../../types/result';
+import { ResultValue } from '../../types/execution/result';
 import ShowLogs from './ShowLogs';
 import { executionLogService } from '../../api/execution/ExecutionLogs';
 import type { LogMessage, LogEntry } from '../../api/execution/ExecutionLogs';
@@ -48,7 +48,7 @@ import { useRunHistory } from '../../hooks/global/useExecutionHistory';
 import { useRunStatusStore } from '../../store/runStatus';
 import RunActions from './ExecutionActions';
 import RunDialogs from './RunDialogs';
-import { AgentYaml, TaskYaml } from '../../types/crew';
+import { AgentYaml, TaskYaml } from '../../types/workflow/crew';
 import { useTaskExecutionStore } from '../../store/taskExecutionStore';
 import { usePermissions } from '../../hooks/usePermissions';
 import ExecutionStatusBadge from './ExecutionStatusBadge';

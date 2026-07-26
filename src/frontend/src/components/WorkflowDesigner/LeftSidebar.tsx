@@ -30,7 +30,7 @@ import {
   InfoOutlined as InfoOutlinedIcon,
   HelpOutline as HelpOutlineIcon,
 } from '@mui/icons-material';
-import { Models } from '../../types/models';
+import { Models } from '../../types/config/models';
 import { ModelService } from '../../api/config/ModelService';
 import { useCrewExecutionStore, ReasoningConfig } from '../../store/crewExecution';
 import { usePermissionStore } from '../../store/permissions';

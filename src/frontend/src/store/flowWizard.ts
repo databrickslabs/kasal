@@ -1,7 +1,7 @@
 import { create } from 'zustand';
-import { CrewResponse } from '../types/crews';
-import { CrewTask } from '../types/crewPlan';
-import { Action, Listener, StartingPoint as _FlowStartingPoint, WizardStep, FlowEdgeFormData } from '../types/flow';
+import { CrewResponse } from '../types/workflow/crews';
+import { CrewTask } from '../types/workflow/crewPlan';
+import { Action, Listener, StartingPoint as _FlowStartingPoint, WizardStep, FlowEdgeFormData } from '../types/workflow/flow';
 import { CrewService } from '../api/workflow/CrewService';
 
 interface FlowWizardState {

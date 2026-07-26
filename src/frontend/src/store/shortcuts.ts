@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { DEFAULT_SHORTCUTS } from '../hooks/global/useShortcuts';
-import { ShortcutConfig } from '../types/shortcuts';
+import { ShortcutConfig } from '../types/config/shortcuts';
 
 interface ShortcutsState {
   // State

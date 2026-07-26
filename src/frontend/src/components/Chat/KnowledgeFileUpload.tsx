@@ -338,7 +338,7 @@ export const KnowledgeFileUpload: React.FC<KnowledgeFileUploadProps> = ({
           exists: true,
           success: true,
         }
-      } as unknown as import('../../types/agent').KnowledgeSource;
+      } as unknown as import('../../types/workflow/agent').KnowledgeSource;
 
       // Collect updated agents to pass back to parent
       const updatedAgents: Agent[] = [];

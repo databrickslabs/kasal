@@ -29,7 +29,7 @@ import ConditionBuilder, { Condition, conditionsToPython, pythonToConditions } f
 import SchemaQuickCreateDialog from './SchemaQuickCreateDialog';
 import { SchemaService } from '../../api/workflow/SchemaService';
 import { TaskService } from '../../api/workflow/TaskService';
-import { Schema } from '../../types/schema';
+import { Schema } from '../../types/workflow/schema';
 
 export type FlowLogicType = 'AND' | 'OR' | 'ROUTER' | 'NONE';
 

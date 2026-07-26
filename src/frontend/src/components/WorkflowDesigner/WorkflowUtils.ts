@@ -1,7 +1,7 @@
 import { Edge, Connection, Node } from 'reactflow';
 import { v4 as uuidv4 } from 'uuid';
 import { createEdge } from '../../utils/edgeUtils';
-import { FlowConfiguration, FlowFormData } from '../../types/flow';
+import { FlowConfiguration, FlowFormData } from '../../types/workflow/flow';
 
 // Add a function at the top level to intercept ResizeObserver errors globally
 export const setupResizeObserverErrorHandling = (): void => {

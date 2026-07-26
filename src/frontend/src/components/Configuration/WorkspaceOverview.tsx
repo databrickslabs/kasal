@@ -25,7 +25,7 @@ import BuildIcon from '@mui/icons-material/Build';
 import { GroupService } from '../../api/groups/GroupService';
 import { DatabricksService, DatabricksConfig } from '../../api/databricks/DatabricksService';
 import { MemoryBackendService } from '../../api/memory/MemoryBackendService';
-import { MemoryBackendConfig } from '../../types/memoryBackend';
+import { MemoryBackendConfig } from '../../types/config/memoryBackend';
 import { usePermissionStore } from '../../store/permissions';
 import { ToolService, Tool as ServiceTool } from '../../api/tools/ToolService';
 import { MCPService } from '../../api/tools/MCPService';

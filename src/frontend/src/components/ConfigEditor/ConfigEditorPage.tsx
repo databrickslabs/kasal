@@ -33,8 +33,8 @@ import {
   CheckCircle as ApproveIcon,
   ArrowBack as BackIcon,
 } from '@mui/icons-material';
-import type { PipelineConfig } from '../../types/configEditor';
-import { getKeyStatus, countTodos } from '../../types/configEditor';
+import type { PipelineConfig } from '../../types/config/configEditor';
+import { getKeyStatus, countTodos } from '../../types/config/configEditor';
 import ConfigSidebar from './ConfigSidebar';
 import KeyEditor from './KeyEditor';
 import ConfigLoader from './ConfigLoader';

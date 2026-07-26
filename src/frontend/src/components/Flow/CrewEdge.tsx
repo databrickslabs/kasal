@@ -2,7 +2,7 @@ import React from 'react';
 import { BaseEdge, EdgeProps, getSmoothStepPath } from 'reactflow';
 import { Box } from '@mui/material';
 import WarningIcon from '@mui/icons-material/Warning';
-import { FlowConfiguration } from '../../types/flow';
+import { FlowConfiguration } from '../../types/workflow/flow';
 import { edgeColors, EdgeCategory, getEdgeStyleConfig } from '../../config/edgeConfig';
 
 export type FlowLogicType = 'AND' | 'OR' | 'ROUTER' | 'NONE';

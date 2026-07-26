@@ -6,7 +6,7 @@
  */
 
 import { apiClient } from '../../config/api/ApiConfig';
-import { MemoryBackendConfig, DatabricksMemoryConfig, LakebaseMemoryConfig } from '../../types/memoryBackend';
+import { MemoryBackendConfig, DatabricksMemoryConfig, LakebaseMemoryConfig } from '../../types/config/memoryBackend';
 import { AxiosError } from 'axios';
 
 export interface DatabricksIndex {

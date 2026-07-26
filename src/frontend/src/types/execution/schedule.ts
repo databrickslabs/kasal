@@ -1,6 +1,6 @@
 import { Node, Edge } from 'reactflow';
-import { AgentNodeData, TaskNodeData } from './crew';
-import { Schedule, ScheduleCreate } from '../api/execution/ScheduleService';
+import { AgentNodeData, TaskNodeData } from '../workflow/crew';
+import { Schedule, ScheduleCreate } from '../../api/execution/ScheduleService';
 
 export type { Schedule, ScheduleCreate };
 

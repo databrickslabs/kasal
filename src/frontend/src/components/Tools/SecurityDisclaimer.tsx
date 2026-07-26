@@ -19,7 +19,7 @@ import WarningIcon from '@mui/icons-material/Warning';
 import SecurityIcon from '@mui/icons-material/Security';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
-import { Tool } from '../../types/tool';
+import { Tool } from '../../types/workflow/tool';
 
 interface SecurityDisclaimerProps {
   open: boolean;

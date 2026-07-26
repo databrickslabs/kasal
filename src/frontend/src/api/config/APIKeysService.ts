@@ -8,7 +8,7 @@ import {
   DatabricksSecretCreate, 
   DatabricksSecretUpdate,
   DatabricksTokenRequest 
-} from '../../types/apiKeys';
+} from '../../types/config/apiKeys';
 import { DatabricksService } from '../databricks/DatabricksService';
 
 export type { 

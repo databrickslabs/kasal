@@ -29,13 +29,13 @@ import DownloadIcon from '@mui/icons-material/Download';
 import RocketLaunchIcon from '@mui/icons-material/RocketLaunch';
 import { CrewExportService } from '../../api/workflow/CrewExportService';
 import { ModelService } from '../../api/config/ModelService';
-import { Models } from '../../types/models';
+import { Models } from '../../types/config/models';
 import {
   ExportFormat,
   ExportOptions,
   AppDeploymentStatusResponse,
   LakebaseInstance,
-} from '../../types/crewExport';
+} from '../../types/workflow/crewExport';
 
 interface ExportCrewDialogProps {
   open: boolean;

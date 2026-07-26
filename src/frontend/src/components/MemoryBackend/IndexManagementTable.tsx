@@ -26,7 +26,7 @@ import {
   AccountTree as GraphIcon,
   Description as DocumentsIcon,
 } from '@mui/icons-material';
-import { SavedConfigInfo, IndexInfoState } from '../../types/memoryBackend';
+import { SavedConfigInfo, IndexInfoState } from '../../types/config/memoryBackend';
 import { buildVectorSearchIndexUrl, buildVectorSearchEndpointUrl } from './databricksVectorSearchUtils';
 import { INDEX_DESCRIPTIONS } from './constants';
 

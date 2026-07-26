@@ -21,7 +21,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import { Task, TaskService } from '../../api/workflow/TaskService';
-import { TaskSelectionDialogProps } from '../../types/task';
+import { TaskSelectionDialogProps } from '../../types/workflow/task';
 import TaskForm from './TaskForm';
 import { ToolService, Tool } from '../../api/tools/ToolService';
 import TaskBestPractices from '../BestPractices/TaskBestPractices';

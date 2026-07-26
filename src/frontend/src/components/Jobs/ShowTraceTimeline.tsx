@@ -18,7 +18,7 @@ import PreviewIcon from '@mui/icons-material/Preview';
 import TimelineIcon from '@mui/icons-material/Timeline';
 import TerminalIcon from '@mui/icons-material/Terminal';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
-import { ShowTraceProps } from '../../types/trace';
+import { ShowTraceProps } from '../../types/execution/trace';
 
 import apiClient from '../../config/api/ApiConfig';
 import { useUserPreferencesStore } from '../../store/userPreferencesStore';

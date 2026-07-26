@@ -1,4 +1,4 @@
-import { ApiKey } from '../types/apiKeys';
+import { ApiKey } from '../types/config/apiKeys';
 import { DatabricksService } from '../api/databricks/DatabricksService';
 
 /**

@@ -20,7 +20,7 @@ import { Node, Edge } from 'reactflow';
 import { toast } from 'react-hot-toast';
 import { AgentService } from '../../api/workflow/AgentService';
 import { TaskService } from '../../api/workflow/TaskService';
-import { AgentYaml, TaskYaml } from '../../types/crew';
+import { AgentYaml, TaskYaml } from '../../types/workflow/crew';
 import { createEdge, edgeExists } from '../../utils/edgeUtils';
 
 // Style for JSON formatting

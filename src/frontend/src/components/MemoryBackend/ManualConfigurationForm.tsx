@@ -16,7 +16,7 @@ import {
   CircularProgress,
 } from '@mui/material';
 import { Save as SaveIcon } from '@mui/icons-material';
-import { ManualConfig } from '../../types/memoryBackend';
+import { ManualConfig } from '../../types/config/memoryBackend';
 import { EMBEDDING_MODELS } from './constants';
 import { validateVectorSearchIndexName } from './databricksVectorSearchUtils';
 

@@ -14,8 +14,8 @@ import {
   Tooltip,
   IconButton,
 } from '@mui/material';
-import { type TaskAdvancedConfigProps } from '../../types/task';
-import { TASK_CALLBACKS, type TaskCallbackOption } from '../../types/taskCallbacks';
+import { type TaskAdvancedConfigProps } from '../../types/workflow/task';
+import { TASK_CALLBACKS, type TaskCallbackOption } from '../../types/workflow/taskCallbacks';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import { SchemaService } from '../../api/workflow/SchemaService';
 import { DatabricksVolumeConfigComponent, type DatabricksVolumeConfig } from './DatabricksVolumeConfig';

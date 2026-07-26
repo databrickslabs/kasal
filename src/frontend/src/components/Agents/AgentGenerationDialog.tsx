@@ -18,12 +18,12 @@ import {
   Typography,
   Chip,
 } from '@mui/material';
-import { AgentGenerationDialogProps } from '../../types/agent';
+import { AgentGenerationDialogProps } from '../../types/workflow/agent';
 import { GenerateService } from '../../api/workflow/GenerateService';
 import { ModelService } from '../../api/config/ModelService';
-import { Models } from '../../types/models';
+import { Models } from '../../types/config/models';
 import { ToolService } from '../../api/tools/ToolService';
-import { Tool } from '../../types/tool';
+import { Tool } from '../../types/workflow/tool';
 import { useAPIKeysStore } from '../../store/apiKeys';
 import * as ApiKeyUtils from '../../utils/apiKeyUtils';
 

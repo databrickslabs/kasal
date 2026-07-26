@@ -5,7 +5,7 @@ import '@testing-library/jest-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { ManualConfigurationForm } from './ManualConfigurationForm';
 import { EMBEDDING_MODELS } from './constants';
-import { ManualConfig } from '../../types/memoryBackend';
+import { ManualConfig } from '../../types/config/memoryBackend';
 
 // ---------------------------------------------------------------------------
 // Helpers

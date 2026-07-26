@@ -28,7 +28,7 @@ import {
   classifyValueType,
   getKeyStatus,
   countTodos,
-} from '../../types/configEditor';
+} from '../../types/config/configEditor';
 
 interface KeyEditorProps {
   configKey: string;

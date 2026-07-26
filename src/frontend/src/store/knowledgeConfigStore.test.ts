@@ -3,7 +3,7 @@ import { renderHook, act } from '@testing-library/react';
 import { useKnowledgeConfigStore } from './knowledgeConfigStore';
 import { MemoryBackendService } from '../api/memory/MemoryBackendService';
 import { DatabricksService } from '../api/databricks/DatabricksService';
-import { MemoryBackendType } from '../types/memoryBackend';
+import { MemoryBackendType } from '../types/config/memoryBackend';
 
 // Mock the API services so the store never hits the network.
 vi.mock('../api/memory/MemoryBackendService');

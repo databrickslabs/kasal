@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import { Node, Edge, NodeChange, EdgeChange } from 'reactflow';
-import { FlowConfiguration } from '../../types/flow';
+import { FlowConfiguration } from '../../types/workflow/flow';
 
 interface UseCrewFlowHandlersProps {
   onNodesChange: (changes: NodeChange[]) => void;

@@ -4,7 +4,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { ThemeProvider } from '@mui/material/styles';
 import { createTheme } from '@mui/material/styles';
 import SecurityDisclaimer, { TOOL_SECURITY_INFO } from './SecurityDisclaimer';
-import type { Tool } from '../../types/tool';
+import type { Tool } from '../../types/workflow/tool';
 
 const theme = createTheme();
 

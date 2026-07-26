@@ -1,8 +1,8 @@
 import React from 'react';
 import { useCallback, useEffect, useState } from 'react';
 import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Box, Typography } from '@mui/material';
-import { CrewResponse } from '../../types/crews';
-import { WizardStep, FlowConfiguration } from '../../types/flow';
+import { CrewResponse } from '../../types/workflow/crews';
+import { WizardStep, FlowConfiguration } from '../../types/workflow/flow';
 import { useFlowWizard } from '../../hooks/global/useFlowWizard';
 import CrewSelectionStep from './CrewSelectionStep';
 import StartingPointsStep from './StartingPointsStep';

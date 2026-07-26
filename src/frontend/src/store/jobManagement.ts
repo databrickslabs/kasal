@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Tool } from '../types/tool';
+import { Tool } from '../types/workflow/tool';
 
 // Simplified Tool type for store
 interface SimplifiedTool {

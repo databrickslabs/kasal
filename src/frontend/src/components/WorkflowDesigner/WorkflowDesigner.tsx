@@ -33,7 +33,7 @@ import { useResponsiveLayout } from '../../hooks/workflow/useResponsiveLayout';
 import { v4 as _uuidv4 } from 'uuid';
 import { FlowService as _FlowService } from '../../api/workflow/FlowService';
 import { useAPIKeysStore as _useAPIKeysStore } from '../../store/apiKeys';
-import { FlowFormData as _FlowFormData, FlowConfiguration as _FlowConfiguration } from '../../types/flow';
+import { FlowFormData as _FlowFormData, FlowConfiguration as _FlowConfiguration } from '../../types/workflow/flow';
 import { createEdge as _createEdge } from '../../utils/edgeUtils';
 import { handleNodesGenerated } from '../Chat/utils/chatHelpers';
 import CloseIcon from '@mui/icons-material/Close';
