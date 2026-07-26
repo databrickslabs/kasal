@@ -148,6 +148,20 @@ const parseAgentFromScope = (scope: string): string | null => {
   return match ? match[1] : null;
 };
 
+/**
+ * Which agent wrote this record.
+ *
+ * The writing agent is stamped into `metadata.agent_role` — the scope path
+ * stays the tenant boundary because the Databricks backend filters records on
+ * an EXACT scope match. Older records only have the scope form, so fall back
+ * to parsing it.
+ */
+const recordAgent = (record: MemoryRecord): string | null => {
+  const role = record.metadata?.agent_role;
+  if (typeof role === 'string' && role.trim()) return role.trim();
+  return parseAgentFromScope(record.scope);
+};
+
 /** Extract the crew hash from a scope path of the form .../_crew_<hash>... */
 const parseCrewFromScope = (scope: string): string | null => {
   const match = scope.match(/_crew_([0-9a-f]+)/i);
@@ -205,7 +219,7 @@ function deriveIndex(records: MemoryRecord[]): DerivedIndex {
   for (const record of records) {
     totalImportance += record.importance;
     const crew = parseCrewFromScope(record.scope);
-    const agent = parseAgentFromScope(record.scope);
+    const agent = recordAgent(record);
 
     if (crew) {
       crews.set(crew, (crews.get(crew) ?? 0) + 1);
@@ -348,7 +362,7 @@ const RecordCard: React.FC<RecordCardProps> = ({
   onToggleCategory,
   activeCategories,
 }) => {
-  const agent = parseAgentFromScope(record.scope) || 'unknown agent';
+  const agent = recordAgent(record) || 'unknown agent';
   const crew = parseCrewFromScope(record.scope);
   const tail = record.scope
     .split('/agent/')
@@ -889,7 +903,7 @@ export const MemoryRecordsBrowser: React.FC<MemoryRecordsBrowserProps> = ({
         return false;
       }
       if (selectedAgents.size > 0) {
-        const agent = parseAgentFromScope(record.scope);
+        const agent = recordAgent(record);
         if (!agent || !selectedAgents.has(agent)) return false;
       }
       if (selectedCategories.size > 0) {

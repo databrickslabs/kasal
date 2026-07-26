@@ -411,7 +411,13 @@ class DatabricksStorageBackend:
             "created_at": record.created_at.isoformat(),
             "last_accessed": record.last_accessed.isoformat(),
             "crew_id": self.crew_id,
-            "agent_id": (record.metadata or {}).get("agent_id", ""),
+            # agent_role is what the engine stamps on every write; keep the
+            # dedicated column populated so provenance is filterable in the index.
+            "agent_id": (
+                (record.metadata or {}).get("agent_id")
+                or (record.metadata or {}).get("agent_role")
+                or ""
+            ),
             "group_id": self.group_id,
             "session_id": self.session_id or "",
             "llm_model": (record.metadata or {}).get("llm_model", ""),
