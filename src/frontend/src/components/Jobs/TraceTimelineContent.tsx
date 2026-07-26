@@ -822,9 +822,20 @@ const TraceTimelineContent = memo<TraceTimelineContentProps>(({
                                         ? formatDuration(event.duration)
                                         : ''}
                                     </Typography>
-                                    {isClickable && (
-                                      <ChevronRightIcon className="row-open-icon" sx={OPEN_ICON_SX} />
-                                    )}
+                                    {/* Always rendered, hidden when the row does
+                                        not open: dropping it from the tree let
+                                        non-clickable rows reclaim its width, so
+                                        their durations sat ~16px right of the
+                                        clickable ones and the column looked
+                                        ragged. visibility keeps the box. */}
+                                    <ChevronRightIcon
+                                      className="row-open-icon"
+                                      sx={
+                                        isClickable
+                                          ? OPEN_ICON_SX
+                                          : { ...OPEN_ICON_SX, visibility: 'hidden' }
+                                      }
+                                    />
                                   </Box>
                                 );
                               })}
