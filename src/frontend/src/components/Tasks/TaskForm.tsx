@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   TextField,
   Button,
@@ -93,6 +93,29 @@ interface Tool {
   enabled?: boolean;
 }
 
+// Tools whose configuration is a plain object stored under the tool's title
+// in `tool_configs`. GenieTool, AgentBricksTool and MCP_SERVERS are absent on
+// purpose — their config is a selection or a list, not an object, so they are
+// handled individually below.
+const TOOL_CONFIG_KEYS = [
+  'PerplexityTool',
+  'SerperDevTool',
+  'Measure Conversion Pipeline',
+  'M-Query Conversion Pipeline',
+  'Power BI Relationships Tool',
+  'Power BI Hierarchies Tool',
+  'Power BI Field Parameters & Calculation Groups Tool',
+  'Power BI Report References Tool',
+  'Power BI Semantic Model Fetcher',
+  'Power BI Semantic Model DAX Generator',
+  'Power BI Metadata Reducer',
+  'Power BI DAX Executor',
+  'UC Metric View Generator',
+  'Config Generator',
+  'Pipeline Config Generator',
+  'Power BI Comprehensive Analysis Tool',
+] as const;
+
 const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved, onSubmit, isEdit, tools, hideTitle, isCreateMode, agent }) => {
   const [expandedAccordion, setExpandedAccordion] = useState<boolean>(false);
   const [expandedDescription, setExpandedDescription] = useState<boolean>(false);
@@ -149,22 +172,6 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
   const [availableTasks, setAvailableTasks] = useState<Task[]>([]);
   const [selectedGenieSpace, setSelectedGenieSpace] = useState<{ id: string; name: string } | null>(null);
   const [selectedAgentBricksEndpoint, setSelectedAgentBricksEndpoint] = useState<{ id: string; name: string } | null>(null);
-  const [perplexityConfig, setPerplexityConfig] = useState<PerplexityConfig>({});
-  const [serperConfig, setSerperConfig] = useState<SerperConfig>({});
-  const [powerBIConfig, setPowerBIConfig] = useState<PowerBIAnalysisConfig>({});
-  const [measureConverterConfig, setMeasureConverterConfig] = useState<MeasureConverterConfig>({});
-  const [mQueryConverterConfig, setMQueryConverterConfig] = useState<MQueryConverterConfig>({});
-  const [powerBIRelationshipsConfig, setPowerBIRelationshipsConfig] = useState<PowerBIRelationshipsConfig>({});
-  const [powerBIHierarchiesConfig, setPowerBIHierarchiesConfig] = useState<PowerBIHierarchiesConfig>({});
-  const [powerBIFieldParametersConfig, setPowerBIFieldParametersConfig] = useState<PowerBIFieldParametersConfig>({});
-  const [powerBIReportReferencesConfig, setPowerBIReportReferencesConfig] = useState<PowerBIReportReferencesConfig>({});
-  const [powerBIFetcherConfig, setPowerBIFetcherConfig] = useState<PowerBIFetcherConfig>({});
-  const [powerBIDaxConfig, setPowerBIDaxConfig] = useState<PowerBIDaxConfig>({});
-  const [powerBIReducerConfig, setPowerBIReducerConfig] = useState<PowerBIMetadataReducerConfig>({});
-  const [powerBIDaxExecutorConfig, setPowerBIDaxExecutorConfig] = useState<PowerBIDaxExecutorConfig>({});
-  const [ucMetricViewConfig, setUcMetricViewConfig] = useState<UCMetricViewGeneratorConfig>({});
-  const [configGeneratorConfig, setConfigGeneratorConfig] = useState<ConfigGeneratorConfig>({});
-  const [pipelineConfigGenConfig, setPipelineConfigGenConfig] = useState<PipelineConfigGeneratorConfig>({});
   const [genieSpaceConfig, setGenieSpaceConfig] = useState<GenieSpaceConfig>({});
   const [metricViewDeployerConfig, setMetricViewDeployerConfig] = useState<MetricViewDeployerConfig>({});
   const [ucmvGenieConfigGenConfig, setUcmvGenieConfigGenConfig] = useState<UCMVGenieConfigGeneratorConfig>({});
@@ -172,6 +179,26 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
   const [databricksDashboardCreatorConfig, setDatabricksDashboardCreatorConfig] = useState<DatabricksDashboardCreatorConfig>({});
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
   const [toolConfigs, setToolConfigs] = useState<Record<string, unknown>>(initialData?.tool_configs || {});
+
+  // One config record keyed by tool title, replacing 16 separate useState calls
+  // that all did the same thing. `toolConfigs` is already seeded from
+  // initialData, so loading a saved task needs no per-tool hydration either.
+  const setToolConfig = useCallback((key: string, config: unknown) => {
+    setToolConfigs(prev => ({ ...prev, [key]: config }));
+  }, []);
+
+  // Was inlined into all 16 submit blocks, twice each.
+  const isToolSelected = useCallback((title: string) => (
+    formData.tools.some(toolId => {
+      const tool = tools.find(t =>
+        String(t.id) === String(toolId) ||
+        t.id === Number(toolId) ||
+        t.title === toolId
+      );
+      return tool?.title === title;
+    })
+  ), [formData.tools, tools]);
+
   const [showBestPractices, setShowBestPractices] = useState(false);
   const [workspaceUrlFromBackend, setWorkspaceUrlFromBackend] = useState<string>('');
 
@@ -222,84 +249,6 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
             name: endpointName as string
           });
         }
-      }
-
-      if (initialData.tool_configs.PerplexityTool) {
-        setPerplexityConfig(initialData.tool_configs.PerplexityTool as PerplexityConfig);
-      }
-
-      if (initialData.tool_configs.SerperDevTool) {
-        setSerperConfig(initialData.tool_configs.SerperDevTool as SerperConfig);
-      }
-
-      // Check for Power BI Comprehensive Analysis Tool config
-      if (initialData.tool_configs['Power BI Comprehensive Analysis Tool']) {
-        setPowerBIConfig(initialData.tool_configs['Power BI Comprehensive Analysis Tool'] as PowerBIAnalysisConfig);
-      }
-
-      // Check for Measure Conversion Pipeline config
-      if (initialData.tool_configs['Measure Conversion Pipeline']) {
-        setMeasureConverterConfig(initialData.tool_configs['Measure Conversion Pipeline'] as MeasureConverterConfig);
-      }
-
-      // Check for M-Query Conversion Pipeline config
-      if (initialData.tool_configs['M-Query Conversion Pipeline']) {
-        setMQueryConverterConfig(initialData.tool_configs['M-Query Conversion Pipeline'] as MQueryConverterConfig);
-      }
-
-      // Check for Power BI Relationships Tool config
-      if (initialData.tool_configs['Power BI Relationships Tool']) {
-        setPowerBIRelationshipsConfig(initialData.tool_configs['Power BI Relationships Tool'] as PowerBIRelationshipsConfig);
-      }
-
-      // Check for Power BI Hierarchies Tool config
-      if (initialData.tool_configs['Power BI Hierarchies Tool']) {
-        setPowerBIHierarchiesConfig(initialData.tool_configs['Power BI Hierarchies Tool'] as PowerBIHierarchiesConfig);
-      }
-
-      // Check for Power BI Field Parameters & Calculation Groups Tool config
-      if (initialData.tool_configs['Power BI Field Parameters & Calculation Groups Tool']) {
-        setPowerBIFieldParametersConfig(initialData.tool_configs['Power BI Field Parameters & Calculation Groups Tool'] as PowerBIFieldParametersConfig);
-      }
-
-      // Check for Power BI Report References Tool config
-      if (initialData.tool_configs['Power BI Report References Tool']) {
-        setPowerBIReportReferencesConfig(initialData.tool_configs['Power BI Report References Tool'] as PowerBIReportReferencesConfig);
-      }
-
-      // Check for Power BI Semantic Model Fetcher config
-      if (initialData.tool_configs['Power BI Semantic Model Fetcher']) {
-        setPowerBIFetcherConfig(initialData.tool_configs['Power BI Semantic Model Fetcher'] as PowerBIFetcherConfig);
-      }
-
-      // Check for Power BI Semantic Model DAX Generator config
-      if (initialData.tool_configs['Power BI Semantic Model DAX Generator']) {
-        setPowerBIDaxConfig(initialData.tool_configs['Power BI Semantic Model DAX Generator'] as PowerBIDaxConfig);
-      }
-
-      // Check for Power BI Metadata Reducer config
-      if (initialData.tool_configs['Power BI Metadata Reducer']) {
-        setPowerBIReducerConfig(initialData.tool_configs['Power BI Metadata Reducer'] as PowerBIMetadataReducerConfig);
-      }
-
-      // Check for Power BI DAX Executor config
-      if (initialData.tool_configs['Power BI DAX Executor']) {
-        setPowerBIDaxExecutorConfig(initialData.tool_configs['Power BI DAX Executor'] as PowerBIDaxExecutorConfig);
-      }
-
-      // Check for UC Metric View Generator config
-      if (initialData.tool_configs['UC Metric View Generator']) {
-        setUcMetricViewConfig(initialData.tool_configs['UC Metric View Generator'] as UCMetricViewGeneratorConfig);
-      }
-
-      // Check for Config Generator config
-      if (initialData.tool_configs['Config Generator']) {
-        setConfigGeneratorConfig(initialData.tool_configs['Config Generator'] as ConfigGeneratorConfig);
-      }
-
-      // Check for Pipeline Config Generator config
-      if (initialData.tool_configs['Pipeline Config Generator']) {
-        setPipelineConfigGenConfig(initialData.tool_configs['Pipeline Config Generator'] as PipelineConfigGeneratorConfig);
       }
 
       // Check for Genie Space Generator config
@@ -559,6 +508,19 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
         // Build tool_configs for tools that need configuration
         let updatedToolConfigs = { ...toolConfigs };
 
+        // Tool configs, one rule for all of them: keep a config when its tool is
+        // still selected and it holds something, drop it when the tool is not.
+        // This was written out longhand 16 times, once per tool, differing only
+        // in the tool's title.
+        for (const key of TOOL_CONFIG_KEYS) {
+          const config = toolConfigs[key] as Record<string, unknown> | undefined;
+          if (config && Object.keys(config).length > 0 && isToolSelected(key)) {
+            updatedToolConfigs = { ...updatedToolConfigs, [key]: config };
+          } else if (!isToolSelected(key)) {
+            delete updatedToolConfigs[key];
+          }
+        }
+
         // Handle GenieTool config
         if (selectedGenieSpace && formData.tools.some(toolId => {
           const tool = tools.find(t =>
@@ -598,399 +560,6 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
         } else if (!selectedAgentBricksEndpoint) {
           // Remove AgentBricksTool config if no endpoint selected
           delete updatedToolConfigs.AgentBricksTool;
-        }
-
-        // Handle PerplexityTool config
-        if (perplexityConfig && Object.keys(perplexityConfig).length > 0 && formData.tools.some(toolId => {
-          const tool = tools.find(t =>
-            String(t.id) === String(toolId) ||
-            t.id === Number(toolId) ||
-            t.title === toolId
-          );
-          return tool?.title === 'PerplexityTool';
-        })) {
-          updatedToolConfigs = {
-            ...updatedToolConfigs,
-            PerplexityTool: perplexityConfig
-          };
-        } else if (!formData.tools.some(toolId => {
-          const tool = tools.find(t =>
-            String(t.id) === String(toolId) ||
-            t.id === Number(toolId) ||
-            t.title === toolId
-          );
-          return tool?.title === 'PerplexityTool';
-        })) {
-          // Remove PerplexityTool config if tool not selected
-          delete updatedToolConfigs.PerplexityTool;
-        }
-
-        // Handle SerperDevTool config
-        if (serperConfig && Object.keys(serperConfig).length > 0 && formData.tools.some(toolId => {
-          const tool = tools.find(t =>
-            String(t.id) === String(toolId) ||
-            t.id === Number(toolId) ||
-            t.title === toolId
-          );
-          return tool?.title === 'SerperDevTool';
-        })) {
-          updatedToolConfigs = {
-            ...updatedToolConfigs,
-            SerperDevTool: serperConfig
-          };
-        } else if (!formData.tools.some(toolId => {
-          const tool = tools.find(t =>
-            String(t.id) === String(toolId) ||
-            t.id === Number(toolId) ||
-            t.title === toolId
-          );
-          return tool?.title === 'SerperDevTool';
-        })) {
-          // Remove SerperDevTool config if tool not selected
-          delete updatedToolConfigs.SerperDevTool;
-        }
-
-        // Handle Measure Conversion Pipeline config
-        if (measureConverterConfig && Object.keys(measureConverterConfig).length > 0 && formData.tools.some(toolId => {
-          const tool = tools.find(t =>
-            String(t.id) === String(toolId) ||
-            t.id === Number(toolId) ||
-            t.title === toolId
-          );
-          return tool?.title === 'Measure Conversion Pipeline';
-        })) {
-          updatedToolConfigs = {
-            ...updatedToolConfigs,
-            'Measure Conversion Pipeline': measureConverterConfig
-          };
-        } else if (!formData.tools.some(toolId => {
-          const tool = tools.find(t =>
-            String(t.id) === String(toolId) ||
-            t.id === Number(toolId) ||
-            t.title === toolId
-          );
-          return tool?.title === 'Measure Conversion Pipeline';
-        })) {
-          // Remove Measure Conversion Pipeline config if tool not selected
-          delete updatedToolConfigs['Measure Conversion Pipeline'];
-        }
-
-        // Handle M-Query Conversion Pipeline config
-        if (mQueryConverterConfig && Object.keys(mQueryConverterConfig).length > 0 && formData.tools.some(toolId => {
-          const tool = tools.find(t =>
-            String(t.id) === String(toolId) ||
-            t.id === Number(toolId) ||
-            t.title === toolId
-          );
-          return tool?.title === 'M-Query Conversion Pipeline';
-        })) {
-          updatedToolConfigs = {
-            ...updatedToolConfigs,
-            'M-Query Conversion Pipeline': mQueryConverterConfig
-          };
-        } else if (!formData.tools.some(toolId => {
-          const tool = tools.find(t =>
-            String(t.id) === String(toolId) ||
-            t.id === Number(toolId) ||
-            t.title === toolId
-          );
-          return tool?.title === 'M-Query Conversion Pipeline';
-        })) {
-          // Remove M-Query Conversion Pipeline config if tool not selected
-          delete updatedToolConfigs['M-Query Conversion Pipeline'];
-        }
-
-        // Handle Power BI Relationships Tool config
-        if (powerBIRelationshipsConfig && Object.keys(powerBIRelationshipsConfig).length > 0 && formData.tools.some(toolId => {
-          const tool = tools.find(t =>
-            String(t.id) === String(toolId) ||
-            t.id === Number(toolId) ||
-            t.title === toolId
-          );
-          return tool?.title === 'Power BI Relationships Tool';
-        })) {
-          updatedToolConfigs = {
-            ...updatedToolConfigs,
-            'Power BI Relationships Tool': powerBIRelationshipsConfig
-          };
-        } else if (!formData.tools.some(toolId => {
-          const tool = tools.find(t =>
-            String(t.id) === String(toolId) ||
-            t.id === Number(toolId) ||
-            t.title === toolId
-          );
-          return tool?.title === 'Power BI Relationships Tool';
-        })) {
-          // Remove Power BI Relationships Tool config if tool not selected
-          delete updatedToolConfigs['Power BI Relationships Tool'];
-        }
-
-        // Handle Power BI Hierarchies Tool config
-        if (powerBIHierarchiesConfig && Object.keys(powerBIHierarchiesConfig).length > 0 && formData.tools.some(toolId => {
-          const tool = tools.find(t =>
-            String(t.id) === String(toolId) ||
-            t.id === Number(toolId) ||
-            t.title === toolId
-          );
-          return tool?.title === 'Power BI Hierarchies Tool';
-        })) {
-          updatedToolConfigs = {
-            ...updatedToolConfigs,
-            'Power BI Hierarchies Tool': powerBIHierarchiesConfig
-          };
-        } else if (!formData.tools.some(toolId => {
-          const tool = tools.find(t =>
-            String(t.id) === String(toolId) ||
-            t.id === Number(toolId) ||
-            t.title === toolId
-          );
-          return tool?.title === 'Power BI Hierarchies Tool';
-        })) {
-          // Remove Power BI Hierarchies Tool config if tool not selected
-          delete updatedToolConfigs['Power BI Hierarchies Tool'];
-        }
-
-        // Handle Power BI Field Parameters & Calculation Groups Tool config
-        if (powerBIFieldParametersConfig && Object.keys(powerBIFieldParametersConfig).length > 0 && formData.tools.some(toolId => {
-          const tool = tools.find(t =>
-            String(t.id) === String(toolId) ||
-            t.id === Number(toolId) ||
-            t.title === toolId
-          );
-          return tool?.title === 'Power BI Field Parameters & Calculation Groups Tool';
-        })) {
-          updatedToolConfigs = {
-            ...updatedToolConfigs,
-            'Power BI Field Parameters & Calculation Groups Tool': powerBIFieldParametersConfig
-          };
-        } else if (!formData.tools.some(toolId => {
-          const tool = tools.find(t =>
-            String(t.id) === String(toolId) ||
-            t.id === Number(toolId) ||
-            t.title === toolId
-          );
-          return tool?.title === 'Power BI Field Parameters & Calculation Groups Tool';
-        })) {
-          // Remove Power BI Field Parameters & Calculation Groups Tool config if tool not selected
-          delete updatedToolConfigs['Power BI Field Parameters & Calculation Groups Tool'];
-        }
-
-        // Handle Power BI Report References Tool config
-        if (powerBIReportReferencesConfig && Object.keys(powerBIReportReferencesConfig).length > 0 && formData.tools.some(toolId => {
-          const tool = tools.find(t =>
-            String(t.id) === String(toolId) ||
-            t.id === Number(toolId) ||
-            t.title === toolId
-          );
-          return tool?.title === 'Power BI Report References Tool';
-        })) {
-          updatedToolConfigs = {
-            ...updatedToolConfigs,
-            'Power BI Report References Tool': powerBIReportReferencesConfig
-          };
-        } else if (!formData.tools.some(toolId => {
-          const tool = tools.find(t =>
-            String(t.id) === String(toolId) ||
-            t.id === Number(toolId) ||
-            t.title === toolId
-          );
-          return tool?.title === 'Power BI Report References Tool';
-        })) {
-          // Remove Power BI Report References Tool config if tool not selected
-          delete updatedToolConfigs['Power BI Report References Tool'];
-        }
-
-        // Handle Power BI Semantic Model Fetcher config
-        if (powerBIFetcherConfig && Object.keys(powerBIFetcherConfig).length > 0 && formData.tools.some(toolId => {
-          const tool = tools.find(t =>
-            String(t.id) === String(toolId) ||
-            t.id === Number(toolId) ||
-            t.title === toolId
-          );
-          return tool?.title === 'Power BI Semantic Model Fetcher';
-        })) {
-          updatedToolConfigs = {
-            ...updatedToolConfigs,
-            'Power BI Semantic Model Fetcher': powerBIFetcherConfig
-          };
-        } else if (!formData.tools.some(toolId => {
-          const tool = tools.find(t =>
-            String(t.id) === String(toolId) ||
-            t.id === Number(toolId) ||
-            t.title === toolId
-          );
-          return tool?.title === 'Power BI Semantic Model Fetcher';
-        })) {
-          delete updatedToolConfigs['Power BI Semantic Model Fetcher'];
-        }
-
-        // Handle Power BI Semantic Model DAX Generator config
-        if (powerBIDaxConfig && Object.keys(powerBIDaxConfig).length > 0 && formData.tools.some(toolId => {
-          const tool = tools.find(t =>
-            String(t.id) === String(toolId) ||
-            t.id === Number(toolId) ||
-            t.title === toolId
-          );
-          return tool?.title === 'Power BI Semantic Model DAX Generator';
-        })) {
-          updatedToolConfigs = {
-            ...updatedToolConfigs,
-            'Power BI Semantic Model DAX Generator': powerBIDaxConfig
-          };
-        } else if (!formData.tools.some(toolId => {
-          const tool = tools.find(t =>
-            String(t.id) === String(toolId) ||
-            t.id === Number(toolId) ||
-            t.title === toolId
-          );
-          return tool?.title === 'Power BI Semantic Model DAX Generator';
-        })) {
-          delete updatedToolConfigs['Power BI Semantic Model DAX Generator'];
-        }
-
-        // Handle Power BI Metadata Reducer config
-        if (powerBIReducerConfig && Object.keys(powerBIReducerConfig).length > 0 && formData.tools.some(toolId => {
-          const tool = tools.find(t =>
-            String(t.id) === String(toolId) ||
-            t.id === Number(toolId) ||
-            t.title === toolId
-          );
-          return tool?.title === 'Power BI Metadata Reducer';
-        })) {
-          updatedToolConfigs = {
-            ...updatedToolConfigs,
-            'Power BI Metadata Reducer': powerBIReducerConfig
-          };
-        } else if (!formData.tools.some(toolId => {
-          const tool = tools.find(t =>
-            String(t.id) === String(toolId) ||
-            t.id === Number(toolId) ||
-            t.title === toolId
-          );
-          return tool?.title === 'Power BI Metadata Reducer';
-        })) {
-          delete updatedToolConfigs['Power BI Metadata Reducer'];
-        }
-
-        // Handle Power BI DAX Executor config
-        if (powerBIDaxExecutorConfig && Object.keys(powerBIDaxExecutorConfig).length > 0 && formData.tools.some(toolId => {
-          const tool = tools.find(t =>
-            String(t.id) === String(toolId) ||
-            t.id === Number(toolId) ||
-            t.title === toolId
-          );
-          return tool?.title === 'Power BI DAX Executor';
-        })) {
-          updatedToolConfigs = {
-            ...updatedToolConfigs,
-            'Power BI DAX Executor': powerBIDaxExecutorConfig
-          };
-        } else if (!formData.tools.some(toolId => {
-          const tool = tools.find(t =>
-            String(t.id) === String(toolId) ||
-            t.id === Number(toolId) ||
-            t.title === toolId
-          );
-          return tool?.title === 'Power BI DAX Executor';
-        })) {
-          delete updatedToolConfigs['Power BI DAX Executor'];
-        }
-
-        // Handle UC Metric View Generator config
-        if (ucMetricViewConfig && Object.keys(ucMetricViewConfig).length > 0 && formData.tools.some(toolId => {
-          const tool = tools.find(t =>
-            String(t.id) === String(toolId) ||
-            t.id === Number(toolId) ||
-            t.title === toolId
-          );
-          return tool?.title === 'UC Metric View Generator';
-        })) {
-          updatedToolConfigs = {
-            ...updatedToolConfigs,
-            'UC Metric View Generator': ucMetricViewConfig
-          };
-        } else if (!formData.tools.some(toolId => {
-          const tool = tools.find(t =>
-            String(t.id) === String(toolId) ||
-            t.id === Number(toolId) ||
-            t.title === toolId
-          );
-          return tool?.title === 'UC Metric View Generator';
-        })) {
-          delete updatedToolConfigs['UC Metric View Generator'];
-        }
-
-        // Handle Config Generator config
-        if (configGeneratorConfig && Object.keys(configGeneratorConfig).length > 0 && formData.tools.some(toolId => {
-          const tool = tools.find(t =>
-            String(t.id) === String(toolId) ||
-            t.id === Number(toolId) ||
-            t.title === toolId
-          );
-          return tool?.title === 'Config Generator';
-        })) {
-          updatedToolConfigs = {
-            ...updatedToolConfigs,
-            'Config Generator': configGeneratorConfig
-          };
-        } else if (!formData.tools.some(toolId => {
-          const tool = tools.find(t =>
-            String(t.id) === String(toolId) ||
-            t.id === Number(toolId) ||
-            t.title === toolId
-          );
-          return tool?.title === 'Config Generator';
-        })) {
-          delete updatedToolConfigs['Config Generator'];
-        }
-
-        // Handle Pipeline Config Generator config
-        if (pipelineConfigGenConfig && Object.keys(pipelineConfigGenConfig).length > 0 && formData.tools.some(toolId => {
-          const tool = tools.find(t =>
-            String(t.id) === String(toolId) ||
-            t.id === Number(toolId) ||
-            t.title === toolId
-          );
-          return tool?.title === 'Pipeline Config Generator';
-        })) {
-          updatedToolConfigs = {
-            ...updatedToolConfigs,
-            'Pipeline Config Generator': pipelineConfigGenConfig
-          };
-        } else if (!formData.tools.some(toolId => {
-          const tool = tools.find(t =>
-            String(t.id) === String(toolId) ||
-            t.id === Number(toolId) ||
-            t.title === toolId
-          );
-          return tool?.title === 'Pipeline Config Generator';
-        })) {
-          delete updatedToolConfigs['Pipeline Config Generator'];
-        }
-
-        // Handle Power BI Comprehensive Analysis Tool config
-        if (powerBIConfig && Object.keys(powerBIConfig).length > 0 && formData.tools.some(toolId => {
-          const tool = tools.find(t =>
-            String(t.id) === String(toolId) ||
-            t.id === Number(toolId) ||
-            t.title === toolId
-          );
-          return tool?.title === 'Power BI Comprehensive Analysis Tool';
-        })) {
-          updatedToolConfigs = {
-            ...updatedToolConfigs,
-            'Power BI Comprehensive Analysis Tool': powerBIConfig
-          };
-        } else if (!formData.tools.some(toolId => {
-          const tool = tools.find(t =>
-            String(t.id) === String(toolId) ||
-            t.id === Number(toolId) ||
-            t.title === toolId
-          );
-          return tool?.title === 'Power BI Comprehensive Analysis Tool';
-        })) {
-          // Remove Power BI Comprehensive Analysis Tool config if tool not selected
-          delete updatedToolConfigs['Power BI Comprehensive Analysis Tool'];
         }
 
         // Handle MCP_SERVERS config - use dict format to match schema
@@ -1618,9 +1187,9 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
             }) && (
               <Box sx={{ mt: 2 }}>
                 <PerplexityConfigSelector
-                  value={perplexityConfig}
+                  value={(toolConfigs['PerplexityTool'] || {}) as PerplexityConfig}
                   onChange={(config) => {
-                    setPerplexityConfig(config);
+                    setToolConfig('PerplexityTool', config);
                     // Update tool configs when configuration changes
                     setToolConfigs(prev => ({
                       ...prev,
@@ -1645,9 +1214,9 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
             }) && (
               <Box sx={{ mt: 2 }}>
                 <SerperConfigSelector
-                  value={serperConfig}
+                  value={(toolConfigs['SerperDevTool'] || {}) as SerperConfig}
                   onChange={(config) => {
-                    setSerperConfig(config);
+                    setToolConfig('SerperDevTool', config);
                     // Update tool configs when configuration changes
                     setToolConfigs(prev => ({
                       ...prev,
@@ -1681,9 +1250,9 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                   border: '1px solid rgba(25, 118, 210, 0.2)'
                 }}>
                   <PowerBIAnalysisConfigSelector
-                    value={powerBIConfig}
+                    value={(toolConfigs['Power BI Comprehensive Analysis Tool'] || {}) as PowerBIAnalysisConfig}
                     onChange={(config) => {
-                      setPowerBIConfig(config);
+                      setToolConfig('Power BI Comprehensive Analysis Tool', config);
                       // Update tool configs when configuration changes
                       setToolConfigs(prev => ({
                         ...prev,
@@ -1715,9 +1284,9 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                   border: '1px solid rgba(156, 39, 176, 0.2)'
                 }}>
                   <MeasureConverterConfigSelector
-                    value={measureConverterConfig}
+                    value={(toolConfigs['Measure Conversion Pipeline'] || {}) as MeasureConverterConfig}
                     onChange={(config) => {
-                      setMeasureConverterConfig(config);
+                      setToolConfig('Measure Conversion Pipeline', config);
                       // Update tool configs when configuration changes
                       setToolConfigs(prev => ({
                         ...prev,
@@ -1749,9 +1318,9 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                   border: '1px solid rgba(25, 118, 210, 0.2)'
                 }}>
                   <MQueryConverterConfigSelector
-                    value={mQueryConverterConfig}
+                    value={(toolConfigs['M-Query Conversion Pipeline'] || {}) as MQueryConverterConfig}
                     onChange={(config) => {
-                      setMQueryConverterConfig(config);
+                      setToolConfig('M-Query Conversion Pipeline', config);
                       // Update tool configs when configuration changes
                       setToolConfigs(prev => ({
                         ...prev,
@@ -1783,9 +1352,9 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                   border: '1px solid rgba(76, 175, 80, 0.2)'
                 }}>
                   <PowerBIRelationshipsConfigSelector
-                    value={powerBIRelationshipsConfig}
+                    value={(toolConfigs['Power BI Relationships Tool'] || {}) as PowerBIRelationshipsConfig}
                     onChange={(config) => {
-                      setPowerBIRelationshipsConfig(config);
+                      setToolConfig('Power BI Relationships Tool', config);
                       // Update tool configs when configuration changes
                       setToolConfigs(prev => ({
                         ...prev,
@@ -1817,9 +1386,9 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                   border: '1px solid rgba(156, 39, 176, 0.2)'
                 }}>
                   <PowerBIHierarchiesConfigSelector
-                    value={powerBIHierarchiesConfig}
+                    value={(toolConfigs['Power BI Hierarchies Tool'] || {}) as PowerBIHierarchiesConfig}
                     onChange={(config) => {
-                      setPowerBIHierarchiesConfig(config);
+                      setToolConfig('Power BI Hierarchies Tool', config);
                       // Update tool configs when configuration changes
                       setToolConfigs(prev => ({
                         ...prev,
@@ -1851,9 +1420,9 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                   border: '1px solid rgba(0, 150, 136, 0.2)'
                 }}>
                   <PowerBIFieldParametersConfigSelector
-                    value={powerBIFieldParametersConfig}
+                    value={(toolConfigs['Power BI Field Parameters & Calculation Groups Tool'] || {}) as PowerBIFieldParametersConfig}
                     onChange={(config) => {
-                      setPowerBIFieldParametersConfig(config);
+                      setToolConfig('Power BI Field Parameters & Calculation Groups Tool', config);
                       // Update tool configs when configuration changes
                       setToolConfigs(prev => ({
                         ...prev,
@@ -1885,9 +1454,9 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                   border: '1px solid rgba(156, 39, 176, 0.2)'
                 }}>
                   <PowerBIReportReferencesConfigSelector
-                    value={powerBIReportReferencesConfig}
+                    value={(toolConfigs['Power BI Report References Tool'] || {}) as PowerBIReportReferencesConfig}
                     onChange={(config) => {
-                      setPowerBIReportReferencesConfig(config);
+                      setToolConfig('Power BI Report References Tool', config);
                       // Update tool configs when configuration changes
                       setToolConfigs(prev => ({
                         ...prev,
@@ -1919,9 +1488,9 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                   border: '1px solid rgba(255, 152, 0, 0.2)'
                 }}>
                   <PowerBIFetcherConfigSelector
-                    value={powerBIFetcherConfig}
+                    value={(toolConfigs['Power BI Semantic Model Fetcher'] || {}) as PowerBIFetcherConfig}
                     onChange={(config) => {
-                      setPowerBIFetcherConfig(config);
+                      setToolConfig('Power BI Semantic Model Fetcher', config);
                       setToolConfigs(prev => ({
                         ...prev,
                         'Power BI Semantic Model Fetcher': config
@@ -1952,9 +1521,9 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                   border: '1px solid rgba(0, 121, 107, 0.2)'
                 }}>
                   <PowerBIDaxConfigSelector
-                    value={powerBIDaxConfig}
+                    value={(toolConfigs['Power BI Semantic Model DAX Generator'] || {}) as PowerBIDaxConfig}
                     onChange={(config) => {
-                      setPowerBIDaxConfig(config);
+                      setToolConfig('Power BI Semantic Model DAX Generator', config);
                       setToolConfigs(prev => ({
                         ...prev,
                         'Power BI Semantic Model DAX Generator': config
@@ -1985,9 +1554,9 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                   border: '1px solid rgba(156, 39, 176, 0.2)'
                 }}>
                   <PowerBIMetadataReducerConfigSelector
-                    value={powerBIReducerConfig}
+                    value={(toolConfigs['Power BI Metadata Reducer'] || {}) as PowerBIMetadataReducerConfig}
                     onChange={(config) => {
-                      setPowerBIReducerConfig(config);
+                      setToolConfig('Power BI Metadata Reducer', config);
                       setToolConfigs(prev => ({
                         ...prev,
                         'Power BI Metadata Reducer': config
@@ -2018,9 +1587,9 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                   border: '1px solid rgba(25, 118, 210, 0.2)'
                 }}>
                   <PowerBIDaxExecutorConfigSelector
-                    value={powerBIDaxExecutorConfig}
+                    value={(toolConfigs['Power BI DAX Executor'] || {}) as PowerBIDaxExecutorConfig}
                     onChange={(config) => {
-                      setPowerBIDaxExecutorConfig(config);
+                      setToolConfig('Power BI DAX Executor', config);
                       setToolConfigs(prev => ({
                         ...prev,
                         'Power BI DAX Executor': config
@@ -2051,9 +1620,9 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                   border: '1px solid rgba(156, 39, 176, 0.2)'
                 }}>
                   <UCMetricViewGeneratorConfigSelector
-                    value={ucMetricViewConfig}
+                    value={(toolConfigs['UC Metric View Generator'] || {}) as UCMetricViewGeneratorConfig}
                     onChange={(config) => {
-                      setUcMetricViewConfig(config);
+                      setToolConfig('UC Metric View Generator', config);
                       setToolConfigs(prev => ({
                         ...prev,
                         'UC Metric View Generator': config
@@ -2216,9 +1785,9 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                   border: '1px solid rgba(76, 175, 80, 0.2)'
                 }}>
                   <ConfigGeneratorConfigSelector
-                    value={configGeneratorConfig}
+                    value={(toolConfigs['Config Generator'] || {}) as ConfigGeneratorConfig}
                     onChange={(config) => {
-                      setConfigGeneratorConfig(config);
+                      setToolConfig('Config Generator', config);
                       setToolConfigs(prev => ({
                         ...prev,
                         'Config Generator': config
@@ -2249,9 +1818,9 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                   border: '1px solid rgba(25, 118, 210, 0.2)'
                 }}>
                   <PipelineConfigGeneratorConfigSelector
-                    value={pipelineConfigGenConfig}
+                    value={(toolConfigs['Pipeline Config Generator'] || {}) as PipelineConfigGeneratorConfig}
                     onChange={(config) => {
-                      setPipelineConfigGenConfig(config);
+                      setToolConfig('Pipeline Config Generator', config);
                       setToolConfigs(prev => ({
                         ...prev,
                         'Pipeline Config Generator': config
