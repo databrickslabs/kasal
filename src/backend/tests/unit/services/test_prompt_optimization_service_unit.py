@@ -23,6 +23,13 @@ import pytest
 from src.core.exceptions import BadRequestError
 from src.schemas.prompt_optimization import PromptOptimizationRequest
 from src.services import prompt_optimization_service as svc_module
+# Shared helpers the service was split across now live in these modules, and the
+# callers reach them through the module object — so patching HERE is what
+# intercepts every caller. Patching them on ``svc_module`` would rebind only that
+# module's own name and silently let the real implementation run.
+from src.services.gepa import reflection as gepa_reflection
+from src.services.prompt_optimization import run_state as run_state_mod
+from src.services.prompt_optimization import runs as runs_mod
 from src.services.prompt_optimization_service import (
     PromptOptimizationService,
     _checklist_grade,
@@ -177,7 +184,7 @@ def _attach_run_repo(svc):
     async def fake_persist(run_id, changes):
         await repo.update_fields(run_id, changes)
 
-    return repo, patch.object(svc_module, "_persist_run_changes", fake_persist)
+    return repo, patch.object(run_state_mod, "_persist_run_changes", fake_persist)
 
 
 def _service(template="TEMPLATE", sync_result=None, sync_error=None):
@@ -409,7 +416,7 @@ class TestLLMManagerRouting:
 
     def test_preflight_wraps_provider_errors(self):
         with patch.object(
-            svc_module,
+            gepa_reflection,
             "_sync_llm_completion",
             MagicMock(side_effect=RuntimeError("connection refused")),
         ):
@@ -430,7 +437,7 @@ class TestLLMManagerRouting:
             )
             return "IMPROVED DOC"
 
-        with patch.object(svc_module, "_sync_llm_completion", fake_completion):
+        with patch.object(gepa_reflection, "_sync_llm_completion", fake_completion):
             fn = svc_module._make_reflection_fn(MagicMock(), "qwen-30b", None, None)
             assert fn("improve this") == "IMPROVED DOC"
         assert captured["model"] == "qwen-30b"
@@ -445,7 +452,7 @@ class TestLLMManagerRouting:
         }
         # A second call must produce a DIFFERENT cache-buster.
         first_buster = captured["messages"][0]["content"]
-        with patch.object(svc_module, "_sync_llm_completion", fake_completion):
+        with patch.object(gepa_reflection, "_sync_llm_completion", fake_completion):
             fn = svc_module._make_reflection_fn(MagicMock(), "qwen-30b", None, None)
             fn("improve this")
         assert captured["messages"][0]["content"] != first_buster
@@ -669,7 +676,7 @@ class TestVisibilityAndApply:
             return_value=SimpleNamespace(id=42)
         )
         with patch.object(
-            svc_module, "TemplateService", return_value=fake_template_service
+            runs_mod, "TemplateService", return_value=fake_template_service
         ):
             applied = await svc.apply_run(result["run_id"], _group())
         assert applied["applied"] is True
@@ -1481,7 +1488,7 @@ class TestApplyIsReversible:
             return_value=SimpleNamespace(id=7)
         )
         with patch.object(
-            svc_module, "TemplateService", return_value=template_service
+            runs_mod, "TemplateService", return_value=template_service
         ):
             await svc.apply_run("t1", _group("grp1"))
             assert repo.rows["t1"].before_image == {"template": "CURRENT TEMPLATE"}
@@ -1657,7 +1664,7 @@ def _fake_stack(optimize_prompts, completion):
 
     stack = _FakeOptimizeStack(optimize_prompts)
     with patch.dict(sys.modules, stack.modules), patch.object(
-        svc_module, "_sync_llm_completion", completion
+        gepa_reflection, "_sync_llm_completion", completion
     ):
         # The bridge patches gepa.optimize in place; it must re-install against
         # the fake module rather than reuse a wrapper from a previous test.
@@ -1927,7 +1934,7 @@ class TestCrewOptimizationOrchestration:
             monkeypatch.setenv("GEPA_JUDGE_SAMPLES", samples_env)
 
         with _fake_stack(optimize_prompts, _fake_completion(handler, calls)) as stack:
-            with patch.object(svc_module, "_sync_run_crew", fake_run_crew):
+            with patch.object(gepa_reflection, "_sync_run_crew", fake_run_crew):
                 result = PromptOptimizationService._execute_crew_optimization_sync(
                     loop=MagicMock(),
                     baseline_doc=baseline_doc,
@@ -2097,7 +2104,7 @@ class TestCrewOptimizationOrchestration:
         with caplog.at_level("WARNING"):
             with _fake_stack(optimize_prompts, _fake_completion(handler, calls)):
                 with patch.object(
-                    svc_module,
+                    gepa_reflection,
                     "_sync_run_crew",
                     lambda *a, **k: "A deliverable long enough to clear the format floor easily.",
                 ):
@@ -2190,7 +2197,7 @@ class TestCrewOptimizationOrchestration:
         }
         with _fake_stack(optimize_prompts, _fake_completion(handler, calls)):
             with patch.object(
-                svc_module, "_sync_run_crew",
+                gepa_reflection, "_sync_run_crew",
                 lambda *a, **k: "A deliverable long enough to clear the format floor easily.",
             ):
                 PromptOptimizationService._execute_crew_optimization_sync(
@@ -2243,7 +2250,7 @@ class TestCrewOptimizationOrchestration:
 
         with _fake_stack(optimize_prompts, _fake_completion(handler, calls)):
             with patch.object(
-                svc_module, "_sync_run_crew",
+                gepa_reflection, "_sync_run_crew",
                 lambda *a, **k: "A deliverable long enough to clear the format floor easily.",
             ):
                 return PromptOptimizationService._execute_crew_optimization_sync(
