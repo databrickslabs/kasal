@@ -95,6 +95,36 @@ class CrewKickoffStartedEvent(CrewBaseEvent):
     type: Literal["crew_kickoff_started"] = "crew_kickoff_started"
 
 
+class FlowBaseEvent(BaseEvent):
+    """Base for flow lifecycle events; carries flow_name."""
+
+    flow_name: str | None = None
+
+
+class FlowStartedEvent(FlowBaseEvent):
+    """Emitted once when a Flow begins its kickoff.
+
+    Opens the outermost causality scope of a flow run, so the crew kickoffs the
+    flow drives become children of the flow rather than unrelated roots.
+    """
+
+    inputs: dict[str, Any] | None = None
+    type: Literal["flow_started"] = "flow_started"
+
+
+class FlowFinishedEvent(FlowBaseEvent):
+    """Emitted once when a Flow's kickoff finishes (success or failure).
+
+    Closes the scope opened by :class:`FlowStartedEvent` (see the bus's
+    ``_SCOPE_CLOSERS``).
+    """
+
+    result: Any | None = None
+    error: str | None = None
+    type: Literal["flow_finished"] = "flow_finished"
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+
 class LLMEventBase(BaseEvent):
     """Base for LLM call events; carries model and call attribution."""
 

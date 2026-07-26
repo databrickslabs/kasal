@@ -5,7 +5,7 @@ Tests the functionality of Pydantic schemas for execution trace operations
 including validation, serialization, and field constraints.
 """
 import pytest
-from datetime import datetime
+from datetime import datetime, timezone
 from pydantic import ValidationError
 
 from src.schemas.execution_trace import (
@@ -61,7 +61,12 @@ class TestExecutionTraceItem:
         assert trace.id == 456
         assert trace.run_id == 789
         assert trace.job_id == "exec_trace_001"
-        assert trace.created_at == now
+        # created_at is normalized to an explicit UTC instant: DB rows are naive
+        # (model default datetime.utcnow) and would otherwise serialize without an
+        # offset, which a browser parses as LOCAL time — that drifted the timeline
+        # against the live event pipe, which sends +00:00.
+        assert trace.created_at == now.replace(tzinfo=timezone.utc)
+        assert trace.created_at.tzinfo is not None
         assert trace.event_source == "agent_executor"
         assert trace.event_context == "task_execution"
         assert trace.event_type == "task_start"

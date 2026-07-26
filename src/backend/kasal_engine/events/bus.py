@@ -44,6 +44,10 @@ logger = logging.getLogger(__name__)
 
 # closing event type -> the starting event type it pairs with
 _SCOPE_CLOSERS: dict[str, str] = {
+    # Flow is the OUTERMOST scope: a flow run drives one crew kickoff per
+    # node, and without this pair every one of those kickoffs is a separate
+    # root instead of a child of the flow.
+    "flow_finished": "flow_started",
     "crew_kickoff_completed": "crew_kickoff_started",
     "agent_execution_completed": "agent_execution_started",
     "lite_agent_execution_completed": "lite_agent_execution_started",

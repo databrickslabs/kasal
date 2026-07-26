@@ -7,11 +7,36 @@ the openinference CrewAI instrumentor provides.
 """
 
 import logging
+from collections import OrderedDict
 from typing import Any, Optional
 
-from opentelemetry.trace import Tracer, StatusCode
+from opentelemetry.trace import (
+    NonRecordingSpan,
+    StatusCode,
+    Tracer,
+    set_span_in_context,
+)
 
 logger = logging.getLogger(__name__)
+
+# Max event_id -> SpanContext entries retained for DAG parenting (see
+# KasalEventBridge._event_span_ctx). Generous enough that a parent is still
+# resolvable long after it opened, small enough to bound memory on a long run.
+_MAX_TRACKED_SPAN_CTX = 4096
+
+# RUN-level lifecycle events: they describe the run/crew as a whole, never a
+# single agent or task. They must carry NO agent/task attribution.
+#
+# The bridge publishes agent/task provenance into the engine's ambient event
+# context (so background memory saves get attributed), and the bus stamps that
+# context onto every later event — including these. That made
+# ``crew_completed`` arrive carrying the last agent's role and task_id, so the
+# DB exporter recorded event_source=<agent role> and the timeline rendered
+# "Crew Completed" as a row INSIDE that agent's task instead of as the crew's
+# own boundary. Clearing the inherited values keeps these events run-level.
+_RUN_LEVEL_EVENTS = frozenset(
+    {"crew_started", "crew_completed", "flow_started", "flow_completed"}
+)
 
 
 # Event type -> (span_name, event_type_string)
@@ -236,6 +261,20 @@ class OTelEventBridge:
         # and properly bracketed (Started -> tool runs -> Finished/Error), so a
         # stack correctly pairs each finish with its start.
         self._mlflow_tool_spans: list = []
+        # ── Execution DAG ──────────────────────────────────────────────────
+        # The engine's event bus stamps a true causality DAG onto every event
+        # (parent_event_id, from its scope stack). Each bridge span is opened and
+        # closed immediately, so the ambient OTel context alone would make every
+        # span a sibling leaf — the DAG would be computed and then thrown away.
+        # We map engine event_id -> that event's SpanContext and use
+        # parent_event_id to parent the span explicitly, which lands the DAG in
+        # the already-persisted execution_trace.parent_span_id column (no schema
+        # change, and the frontend already reads span_id/parent_span_id).
+        #
+        # Bounded: a long run emits tens of thousands of events, and only
+        # scope-opening events are ever looked up as parents. We cap the map and
+        # drop oldest-first rather than grow without limit.
+        self._event_span_ctx: "OrderedDict[str, Any]" = OrderedDict()
 
     def register(self, event_bus: Any) -> int:
         """Register span-creating handlers for all available CrewAI event types.
@@ -292,10 +331,12 @@ class OTelEventBridge:
             ("kasal_engine.events", "LLMGuardrailStartedEvent"),
             ("kasal_engine.events", "LLMGuardrailCompletedEvent"),
             ("kasal_engine.events", "LLMGuardrailFailedEvent"),
-            # Flow
+            # Flow. No FlowCreatedEvent: the engine's Flow has no "created"
+            # lifecycle point (only kickoff start/finish), so subscribing to one
+            # would be permanently dead wiring — which is exactly how flow spans
+            # went missing in the first place.
             ("kasal_engine.events", "FlowStartedEvent"),
             ("kasal_engine.events", "FlowFinishedEvent"),
-            ("kasal_engine.events", "FlowCreatedEvent"),
             # MCP
             ("kasal_engine.events", "MCPConnectionStartedEvent"),
             ("kasal_engine.events", "MCPConnectionCompletedEvent"),
@@ -308,6 +349,7 @@ class OTelEventBridge:
 
         import importlib
 
+        missing: list = []
         for module_path, class_name in _EVENT_CLASSES:
             try:
                 module = importlib.import_module(module_path)
@@ -315,14 +357,22 @@ class OTelEventBridge:
                 self._register_handler(event_bus, event_cls)
                 registered += 1
             except (ImportError, AttributeError):
-                logger.debug(
-                    f"[OTel-Bridge][{self._job_id}] {class_name} not available, skipping"
-                )
+                # WARNING, not debug: an entry here that no longer resolves means
+                # a whole event type is silently missing from every trace. That
+                # was invisible for the flow events until someone asked why the
+                # timeline had no flow row.
+                missing.append(class_name)
 
         self._registered_count = registered
         logger.info(
             f"[OTel-Bridge][{self._job_id}] Registered {registered} event types on event bus"
         )
+        if missing:
+            logger.warning(
+                "[OTel-Bridge][%s] %d event class(es) in _EVENT_CLASSES do not "
+                "resolve and will be ABSENT from every trace: %s",
+                self._job_id, len(missing), ", ".join(missing),
+            )
         return registered
 
     def _register_handler(self, event_bus: Any, event_cls: type) -> None:
@@ -418,27 +468,42 @@ class OTelEventBridge:
                         if started_task_id:
                             event_task_id = started_task_id
 
+            # A run-level event inherited whatever agent/task was last active
+            # (see _RUN_LEVEL_EVENTS). Drop it: these are crew/flow boundaries,
+            # not work done by an agent. Done AFTER the _current_* bookkeeping
+            # above so memory attribution still has its fallbacks.
+            is_run_level = event_type in _RUN_LEVEL_EVENTS
+            if is_run_level:
+                agent_name = ""
+                task_name = ""
+                event_task_id = None
+
             # Publish agent/task provenance to the engine's ambient event
             # context so that upcoming ``Memory.remember_many()`` saves
             # (which snapshot the caller's contextvars when submitting to
             # their bg thread pool) emit ``MemorySaveCompletedEvent`` with
             # proper attribution. Explicit event values always win.
-            try:
-                from kasal_engine.events import set_event_context
-                set_event_context(
-                    agent_role=agent_name or None,
-                    agent_id=getattr(event, "agent_id", None)
-                    or getattr(getattr(event, "agent", None), "id", None)
-                    or getattr(getattr(event, "from_agent", None), "id", None),
-                    task_id=getattr(event, "task_id", None)
-                    or (
-                        str(getattr(getattr(event, "task", None), "id", ""))
-                        or None
-                    ),
-                    task_name=task_name or None,
-                )
-            except Exception:  # pragma: no cover - defensive
-                pass
+            #
+            # Skipped for run-level events: they carry no attribution to
+            # publish, and writing None here would ERASE the provenance a
+            # pending background memory save still needs.
+            if not is_run_level:
+                try:
+                    from kasal_engine.events import set_event_context
+                    set_event_context(
+                        agent_role=agent_name or None,
+                        agent_id=getattr(event, "agent_id", None)
+                        or getattr(getattr(event, "agent", None), "id", None)
+                        or getattr(getattr(event, "from_agent", None), "id", None),
+                        task_id=getattr(event, "task_id", None)
+                        or (
+                            str(getattr(getattr(event, "task", None), "id", ""))
+                            or None
+                        ),
+                        task_name=task_name or None,
+                    )
+                except Exception:  # pragma: no cover - defensive
+                    pass
 
             # Deduplicate memory-wrapper tool spans. ``search_memory`` and
             # ``save_to_memory`` are thin agent-facing wrappers around the
@@ -505,7 +570,17 @@ class OTelEventBridge:
             # not our OTel span. Never breaks the existing OTel path on failure.
             self._bridge_tool_to_mlflow(span_name, tool_name, output, event)
 
-            with self._tracer.start_as_current_span(span_name) as span:
+            # Parent this span to the span of the event that caused it, so the
+            # bus's causality DAG survives into parent_span_id. Falls back to the
+            # ambient context (previous behavior) when the parent is unknown —
+            # e.g. the root event, or a parent emitted before this bridge
+            # registered.
+            parent_context = self._dag_parent_context(event)
+
+            with self._tracer.start_as_current_span(
+                span_name, context=parent_context
+            ) as span:
+                self._track_span_for_dag(event, span)
                 if not span.is_recording():
                     logger.warning(
                         "[OTel-Bridge][%s] Span not recording for %s (NoOp tracer or not sampled)",
@@ -537,7 +612,7 @@ class OTelEventBridge:
                     span.set_attribute("kasal.extra.saved_content", saved_content)
 
                 # Extra metadata
-                self._set_extra_attributes(span, event)
+                self._set_extra_attributes(span, event, skip_attribution=is_run_level)
 
                 # Mark failed events with error status
                 if "failed" in event_type or "error" in event_type:
@@ -618,63 +693,122 @@ class OTelEventBridge:
                 self._job_id, span_name, e,
             )
 
-    def _set_extra_attributes(self, span: Any, event: Any) -> None:
+    def _dag_parent_context(self, event: Any) -> Optional[Any]:
+        """OTel context naming this event's causal parent, or None for ambient.
+
+        ``None`` means "use the ambient context", which is the pre-DAG behavior
+        and the correct fallback for a root event. The parent span has already
+        ENDED by the time we get here — that's fine, OTel parenting needs only
+        the parent's SpanContext (trace_id + span_id), not a live span, which is
+        why a NonRecordingSpan wrapper is enough.
+        """
+        try:
+            parent_event_id = getattr(event, "parent_event_id", None)
+            if not parent_event_id:
+                # The OUTERMOST closing event (e.g. flow_finished) has no parent:
+                # the bus only sets one when the matched scope is nested
+                # (``match > 0``). Falling through to ambient context would make
+                # it a second ROOT with its own trace_id, splitting one flow run
+                # across two traces. Anchor it to the scope it closes instead, so
+                # the whole run stays a single trace rooted at flow_started.
+                parent_event_id = getattr(event, "started_event_id", None)
+            if not parent_event_id:
+                return None
+            parent_ctx = self._event_span_ctx.get(parent_event_id)
+            if parent_ctx is None:
+                return None
+            return set_span_in_context(NonRecordingSpan(parent_ctx))
+        except Exception as e:  # pragma: no cover - defensive
+            logger.debug(
+                "[OTel-Bridge][%s] DAG parent resolution failed: %s", self._job_id, e
+            )
+            return None
+
+    def _track_span_for_dag(self, event: Any, span: Any) -> None:
+        """Remember this event's SpanContext so its children can parent to it."""
+        try:
+            event_id = getattr(event, "event_id", None)
+            if not event_id:
+                return
+            span_ctx = span.get_span_context()
+            if span_ctx is None or not span_ctx.is_valid:
+                return
+            self._event_span_ctx[event_id] = span_ctx
+            while len(self._event_span_ctx) > _MAX_TRACKED_SPAN_CTX:
+                self._event_span_ctx.popitem(last=False)
+        except Exception as e:  # pragma: no cover - defensive
+            logger.debug(
+                "[OTel-Bridge][%s] DAG span tracking failed: %s", self._job_id, e
+            )
+
+    def _set_extra_attributes(
+        self, span: Any, event: Any, skip_attribution: bool = False
+    ) -> None:
         """Set extra kasal.extra.* attributes from CrewAI event fields.
 
         CrewAI BaseEvent provides: task_id, task_name, agent_role, agent_id,
         source_type. Memory events add: query, value, query_time_ms,
         save_time_ms, results, limit, score_threshold, memory_content.
+
+        ``skip_attribution`` omits the agent/task identity attributes. Set for
+        run-level crew/flow events, whose agent_role/task_id were inherited from
+        the ambient event context rather than being their own — writing them
+        would file the crew's boundary under an agent's task in the timeline.
         """
-        # ── Task identification (BaseEvent fields) ──
-        # CrewAI events set task_id/task_name via _set_task_params from from_task
-        task_id = getattr(event, "task_id", None)
-        if task_id:
-            span.set_attribute("kasal.extra.task_id", str(task_id))
-        task_name = getattr(event, "task_name", None)
-        if task_name:
-            span.set_attribute("kasal.extra.task_name", _safe_str(task_name, 200))
+        # ── Task + agent identification ──
+        # Skipped wholesale for run-level events; everything BELOW this block
+        # (crew_name, inputs, total_tokens, ...) still applies to them and is
+        # what the timeline and MLflow read off a crew boundary.
+        if not skip_attribution:
+            # CrewAI events set task_id/task_name via _set_task_params from from_task
+            task_id = getattr(event, "task_id", None)
+            if task_id:
+                span.set_attribute("kasal.extra.task_id", str(task_id))
+            task_name = getattr(event, "task_name", None)
+            if task_name:
+                span.set_attribute("kasal.extra.task_name", _safe_str(task_name, 200))
 
-        # Also check task object directly (some events carry task reference)
-        task = getattr(event, "task", None)
-        if task:
-            if not task_id:
-                tid = getattr(task, "id", None)
-                if tid:
-                    span.set_attribute("kasal.extra.task_id", str(tid))
-            if not task_name:
-                resolved = getattr(task, "description", None) or getattr(task, "name", None)
-                if resolved:
-                    span.set_attribute("kasal.extra.task_name", _safe_str(resolved, 200))
-            kasal_task_id = getattr(task, "_kasal_task_id", None)
-            if kasal_task_id:
-                span.set_attribute("kasal.extra.frontend_task_id", str(kasal_task_id))
+            # Also check task object directly (some events carry task reference)
+            task = getattr(event, "task", None)
+            if task:
+                if not task_id:
+                    tid = getattr(task, "id", None)
+                    if tid:
+                        span.set_attribute("kasal.extra.task_id", str(tid))
+                if not task_name:
+                    resolved = getattr(task, "description", None) or getattr(task, "name", None)
+                    if resolved:
+                        span.set_attribute("kasal.extra.task_name", _safe_str(resolved, 200))
+                kasal_task_id = getattr(task, "_kasal_task_id", None)
+                if kasal_task_id:
+                    span.set_attribute("kasal.extra.frontend_task_id", str(kasal_task_id))
 
-        # ── Agent identification (BaseEvent fields) ──
-        agent_role = getattr(event, "agent_role", None)
-        if agent_role:
-            span.set_attribute("kasal.extra.agent_role", str(agent_role))
-        agent_id = getattr(event, "agent_id", None)
-        if agent_id:
-            span.set_attribute("kasal.extra.agent_id", str(agent_id))
+            # ── Agent identification (BaseEvent fields) ──
+            agent_role = getattr(event, "agent_role", None)
+            if agent_role:
+                span.set_attribute("kasal.extra.agent_role", str(agent_role))
+            agent_id = getattr(event, "agent_id", None)
+            if agent_id:
+                span.set_attribute("kasal.extra.agent_id", str(agent_id))
 
-        # ``MemoryBaseEvent`` and ``ToolUsageEvent`` carry ``from_agent`` /
-        # ``agent`` object references — pull role/id off those when the
-        # flat ``agent_role`` field wasn't set by the emitter.
-        if not agent_role:
-            for agent_attr in ("agent", "from_agent"):
-                agent_obj = getattr(event, agent_attr, None)
-                if not agent_obj:
-                    continue
-                role = getattr(agent_obj, "role", None)
-                aid = getattr(agent_obj, "id", None)
-                if role:
-                    span.set_attribute("kasal.extra.agent_role", str(role))
-                    agent_role = role
-                if aid and not agent_id:
-                    span.set_attribute("kasal.extra.agent_id", str(aid))
-                    agent_id = aid
-                if role:
-                    break
+            # ``MemoryBaseEvent`` and ``ToolUsageEvent`` carry ``from_agent`` /
+            # ``agent`` object references — pull role/id off those when the
+            # flat ``agent_role`` field wasn't set by the emitter.
+            if not agent_role:
+                for agent_attr in ("agent", "from_agent"):
+                    agent_obj = getattr(event, agent_attr, None)
+                    if not agent_obj:
+                        continue
+                    role = getattr(agent_obj, "role", None)
+                    aid = getattr(agent_obj, "id", None)
+                    if role:
+                        span.set_attribute("kasal.extra.agent_role", str(role))
+                        agent_role = role
+                    if aid and not agent_id:
+                        span.set_attribute("kasal.extra.agent_id", str(aid))
+                        agent_id = aid
+                    if role:
+                        break
 
         # ── Memory type from source_type (BaseEvent field) ──
         source_type = getattr(event, "source_type", None)

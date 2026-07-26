@@ -101,6 +101,36 @@ export interface RunConfig {
   crew_inputs?: Record<string, unknown>;
 }
 
+/**
+ * One crew execution within a run, with the agent groups that belong to it.
+ *
+ * A flow run drives one crew per node, so the timeline is a spine of these:
+ * FLOW STARTED > (CREW STARTED > agents > CREW COMPLETED) x N > FLOW COMPLETED.
+ * Membership comes from the OTel span DAG (span_id/parent_span_id), which the
+ * backend derives from the engine event bus's parent_event_id — not from
+ * timestamp order.
+ *
+ * `agentIdxs` indexes into `ProcessedTraces.agents` rather than embedding the
+ * groups, so agent identity (and therefore expand/collapse state) is unchanged.
+ */
+export interface CrewSection {
+  crewName?: string;
+  start?: Trace;
+  end?: Trace;
+  agentIdxs: number[];
+}
+
+/**
+ * The timeline as a flat, ordered render stream derived from `crewSections`.
+ *
+ * Flat rather than a nested tree so the renderer stays a single map: depth is
+ * carried by `nested` (agents inside a crew are indented under its banner).
+ */
+export type TimelineItem =
+  | { kind: 'crew-start'; trace: Trace; crewName?: string }
+  | { kind: 'crew-end'; trace: Trace }
+  | { kind: 'agent'; agentIdx: number; nested: boolean };
+
 export interface ProcessedTraces {
   globalStart?: Date;
   globalEnd?: Date;
@@ -110,6 +140,13 @@ export interface ProcessedTraces {
     start: Trace[];
     end: Trace[];
   };
+  /**
+   * Crew spine for the timeline. Always present: a light/chat run with no crew
+   * events yields a single headerless section holding every agent group.
+   */
+  crewSections: CrewSection[];
+  /** `crewSections` flattened into render order. */
+  timelineItems: TimelineItem[];
   runConfig?: RunConfig;
 }
 

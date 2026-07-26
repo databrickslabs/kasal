@@ -19,6 +19,9 @@ from typing import Any, ClassVar, Generic, TypeVar
 
 from pydantic import BaseModel
 
+from ..events.bus import crewai_event_bus
+from ..events.types import FlowFinishedEvent, FlowStartedEvent
+
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
@@ -171,8 +174,29 @@ class Flow(Generic[T]):
             raise ValueError(
                 f"{type(self).__name__} has no @start() methods; nothing to run."
             )
-        await asyncio.gather(
-            *(self._execute_method(name, None) for name in self._start_methods)
+
+        # Flow lifecycle events. These open/close the outermost causality scope
+        # (see the bus's _SCOPE_CLOSERS), which is what makes the crew kickoffs
+        # this flow drives children of the flow instead of separate roots. Emit
+        # around the gather, and always close the scope — an unclosed flow scope
+        # would leak into whatever ran next in the same context.
+        flow_name = type(self).__name__
+        crewai_event_bus.emit(
+            self, FlowStartedEvent(flow_name=flow_name, inputs=inputs)
+        )
+        try:
+            await asyncio.gather(
+                *(self._execute_method(name, None) for name in self._start_methods)
+            )
+        except Exception as e:
+            crewai_event_bus.emit(
+                self,
+                FlowFinishedEvent(flow_name=flow_name, error=str(e)),
+            )
+            raise
+        crewai_event_bus.emit(
+            self,
+            FlowFinishedEvent(flow_name=flow_name, result=self._last_output),
         )
         return self._last_output
 

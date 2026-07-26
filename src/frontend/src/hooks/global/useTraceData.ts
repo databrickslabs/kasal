@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { ProcessedTraces, RunConfig, RunConfigAgent, RunConfigTask } from '../../types/trace';
+import { CrewSection, ProcessedTraces, RunConfig, RunConfigAgent, RunConfigTask, TimelineItem } from '../../types/trace';
 import {
   processTraceEvent,
   extractOutputForDisplay,
@@ -96,22 +96,78 @@ export function processTraces(rawTraces: Trace[]): ProcessedTraces {
   );
 
   if (sorted.length === 0) {
-    return { agents: [], globalEvents: { start: [], end: [] } };
+    return { agents: [], globalEvents: { start: [], end: [] }, crewSections: [], timelineItems: [] };
   }
 
   const globalStart = new Date(sorted[0].created_at);
   const globalEnd = new Date(sorted[sorted.length - 1].created_at);
   const totalDuration = globalEnd.getTime() - globalStart.getTime();
 
+  // Flow-level rows only. Crew starts/completions are NOT global — they belong to
+  // their own section of the spine (see crewSections below). Rendering them here
+  // is what produced N stacked "CREW STARTED" banners with no run structure.
+  //
+  // Collapsed to a single row each: one JOB can kick the flow off more than once
+  // — a HITL gate pauses the flow, then checkpoint-resume rebuilds and kicks it
+  // off again, so the run legitimately emits several flow_started events. The
+  // timeline shows one run, so it shows the FIRST start and the LAST completion.
+  //
+  // Classified by event_type ALONE, never by event_source. A crew/flow boundary
+  // is run-level by definition, but the backend used to stamp it with whatever
+  // agent/task was last active (the ambient event context leaked onto it), so
+  // rows exist with event_source=<agent role>. Keying off event_source let those
+  // fall through into the agent's task and render "Crew Completed" as an event
+  // row mid-task. Type is the reliable signal, and it also fixes runs already
+  // recorded that way.
+  const isFlowStart = (t: Trace) => t.event_type === 'flow_started';
+  const isFlowEnd = (t: Trace) => t.event_type === 'flow_completed';
+  const isCrewStart = (t: Trace) =>
+    t.event_type === 'crew_started' || t.event_type === 'execution_started';
+  const isCrewEnd = (t: Trace) =>
+    t.event_type === 'crew_completed' || t.event_type === 'execution_completed';
+  const isRunLevel = (t: Trace) =>
+    isFlowStart(t) || isFlowEnd(t) || isCrewStart(t) || isCrewEnd(t);
+
+  const flowStarts = sorted.filter(isFlowStart);
+  const flowEnds = sorted.filter(isFlowEnd);
   const globalEvents = {
-    start: sorted.filter(t =>
-      ((t.event_source === 'crew' && (t.event_type === 'crew_started' || t.event_type === 'execution_started')) ||
-       (t.event_source === 'flow' && t.event_type === 'flow_started'))
-    ),
-    end: sorted.filter(t =>
-      (t.event_source === 'crew' && (t.event_type === 'crew_completed' || t.event_type === 'execution_completed')) ||
-      (t.event_source === 'flow' && t.event_type === 'flow_completed')
-    )
+    start: flowStarts.length > 0 ? [flowStarts[0]] : [],
+    end: flowEnds.length > 0 ? [flowEnds[flowEnds.length - 1]] : []
+  };
+
+  const crewStarts = sorted.filter(isCrewStart);
+  const crewEnds = sorted.filter(isCrewEnd);
+
+  // span_id -> parent_span_id, for walking the DAG up to an owning crew span.
+  const spanToParent = new Map<string, string>();
+  sorted.forEach(t => {
+    if (t.span_id && t.parent_span_id) spanToParent.set(t.span_id, t.parent_span_id);
+  });
+  const crewSpanToIdx = new Map<string, number>();
+  crewStarts.forEach((t, i) => { if (t.span_id) crewSpanToIdx.set(t.span_id, i); });
+
+  /**
+   * Which crew a trace belongs to. Walks span ancestry first (authoritative —
+   * this is the engine's causality DAG). Falls back to "the most recent crew
+   * that had started by then" for spans outside our bridge's hierarchy (e.g. the
+   * openinference instrumentor's own spans, which we don't parent).
+   */
+  const resolveCrewIdx = (trace: Trace): number | undefined => {
+    let sid: string | undefined = trace.span_id;
+    const seen = new Set<string>();
+    while (sid && !seen.has(sid)) {
+      seen.add(sid);
+      const hit = crewSpanToIdx.get(sid);
+      if (hit !== undefined) return hit;
+      sid = spanToParent.get(sid);
+    }
+    if (crewStarts.length === 0) return undefined;
+    const at = new Date(trace.created_at).getTime();
+    let fallback: number | undefined;
+    crewStarts.forEach((c, i) => {
+      if (new Date(c.created_at).getTime() <= at) fallback = i;
+    });
+    return fallback ?? 0;
   };
 
   // Group by agent
@@ -125,6 +181,10 @@ export function processTraces(rawTraces: Trace[]): ProcessedTraces {
 
   // First pass: build span hierarchy and task name index
   sorted.forEach(trace => {
+    // A mis-attributed crew boundary carries a task_id; indexing its span would
+    // map the CREW span to a task and drag that task's children onto the crew.
+    if (isRunLevel(trace)) return;
+
     const taskId = getTaskId(trace);
 
     if (trace.span_id && taskId) {
@@ -155,6 +215,11 @@ export function processTraces(rawTraces: Trace[]): ProcessedTraces {
 
   // Second pass: group traces by agent
   sorted.forEach(trace => {
+    // Run-level boundaries belong to the spine and are never agent work — drop
+    // them here whatever event_source they carry, so a mis-attributed
+    // crew_completed cannot surface as a row inside an agent's task.
+    if (isRunLevel(trace)) return;
+
     const isErrorEvent = trace.event_type?.includes('failed') || trace.event_type?.includes('error');
     const src = trace.event_source?.toLowerCase();
     if (!isErrorEvent && (
@@ -206,6 +271,8 @@ export function processTraces(rawTraces: Trace[]): ProcessedTraces {
 
   // Process each agent's traces
   const agents: ProcessedTraces['agents'] = [];
+  // Owning crew per agent group, parallel to `agents` (index-aligned).
+  const agentCrewIdx: (number | undefined)[] = [];
 
   // A run with NO task ids anywhere is the single light/chat agent path
   // (Agent.kickoff_async) — there is no crew task, so its traces must not be
@@ -318,6 +385,77 @@ export function processTraces(rawTraces: Trace[]): ProcessedTraces {
       duration: agentEnd.getTime() - agentStart.getTime(),
       tasks
     });
+
+    // Attribute the group to a crew by majority vote over its traces. A single
+    // trace can be mis-parented (instrumentor spans we don't own); the bulk of a
+    // group's traces reliably descend from one crew kickoff.
+    const votes = new Map<number, number>();
+    agentTraces.forEach(t => {
+      const idx = resolveCrewIdx(t);
+      if (idx !== undefined) votes.set(idx, (votes.get(idx) || 0) + 1);
+    });
+    let winner: number | undefined;
+    let best = 0;
+    votes.forEach((count, idx) => {
+      if (count > best) { best = count; winner = idx; }
+    });
+    agentCrewIdx.push(winner);
+  });
+
+  // ── Build the crew spine ────────────────────────────────────────────────
+  // Pair each crew start with the first not-yet-claimed completion after it.
+  // Crews within a flow run sequentially, so order pairing is correct and
+  // survives a crew that never completed (it simply has no footer).
+  const crewSections: CrewSection[] = [];
+  if (crewStarts.length === 0) {
+    // Light/chat run, or a run whose crew events never made it to the trace:
+    // one headerless section so the timeline renders exactly as before.
+    crewSections.push({ agentIdxs: agents.map((_, i) => i) });
+  } else {
+    const claimed = new Set<number>();
+    crewStarts.forEach((start, i) => {
+      const startAt = new Date(start.created_at).getTime();
+      let end: Trace | undefined;
+      for (let e = 0; e < crewEnds.length; e++) {
+        if (claimed.has(e)) continue;
+        if (new Date(crewEnds[e].created_at).getTime() >= startAt) {
+          end = crewEnds[e];
+          claimed.add(e);
+          break;
+        }
+      }
+      crewSections.push({
+        crewName: start.trace_metadata && typeof start.trace_metadata === 'object'
+          ? ((start.trace_metadata as Record<string, unknown>).crew_name as string | undefined)
+          : undefined,
+        start,
+        end,
+        agentIdxs: agents
+          .map((_, idx) => idx)
+          .filter(idx => agentCrewIdx[idx] === i),
+      });
+    });
+    // Never drop an agent group: anything unattributed goes to the last section
+    // so the timeline stays a complete view of the run.
+    const placed = new Set(crewSections.flatMap(s => s.agentIdxs));
+    const orphans = agents.map((_, i) => i).filter(i => !placed.has(i));
+    if (orphans.length > 0) {
+      crewSections[crewSections.length - 1].agentIdxs.push(...orphans);
+    }
+  }
+
+  // Flatten the spine into render order.
+  const timelineItems: TimelineItem[] = [];
+  crewSections.forEach(section => {
+    if (section.start) {
+      timelineItems.push({ kind: 'crew-start', trace: section.start, crewName: section.crewName });
+    }
+    section.agentIdxs.forEach(agentIdx => {
+      timelineItems.push({ kind: 'agent', agentIdx, nested: !!section.start });
+    });
+    if (section.end) {
+      timelineItems.push({ kind: 'crew-end', trace: section.end });
+    }
   });
 
   // Extract run configuration from crew_started/execution_started trace metadata
@@ -344,6 +482,8 @@ export function processTraces(rawTraces: Trace[]): ProcessedTraces {
     totalDuration,
     agents,
     globalEvents,
+    crewSections,
+    timelineItems,
     runConfig,
   };
 }

@@ -6,8 +6,8 @@ data related to execution traces.
 """
 
 from typing import List, Dict, Any, Optional
-from datetime import datetime
-from pydantic import BaseModel, Field, ConfigDict
+from datetime import datetime, timezone
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 
 class ExecutionTraceItem(BaseModel):
     """Schema for an execution trace entry."""
@@ -31,7 +31,26 @@ class ExecutionTraceItem(BaseModel):
     span_name: Optional[str] = None
     status_code: Optional[str] = None
     duration_ms: Optional[int] = None
-    
+
+    @field_validator("created_at")
+    @classmethod
+    def _stamp_utc(cls, v: Optional[datetime]) -> Optional[datetime]:
+        """Serialize created_at as an unambiguous UTC instant.
+
+        Rows persisted by the OTel DB exporter take the model default
+        (``datetime.utcnow()``) — naive UTC, which serializes WITHOUT an offset,
+        and a browser parses an offset-less ISO string as LOCAL time. The live
+        event pipe meanwhile sends ``+00:00``. A timeline mixing both sources
+        therefore showed the two drifting apart by the viewer's UTC offset (and
+        computed a total duration inflated by exactly that offset). Stamping UTC
+        on naive values makes both paths agree; already-aware values pass
+        through untouched.
+        """
+        if v is not None and v.tzinfo is None:
+            return v.replace(tzinfo=timezone.utc)
+        return v
+
+
 class ExecutionTraceList(BaseModel):
     """Schema for a paginated list of execution traces."""
     

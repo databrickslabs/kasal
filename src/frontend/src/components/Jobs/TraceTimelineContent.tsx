@@ -42,7 +42,7 @@ import {
   getEventIcon as getEventIconConfig,
 } from './traceEventProcessors';
 import { PaginatedOutput } from '../Common';
-import { ProcessedTraces, RunConfig } from '../../types/trace';
+import { ProcessedTraces, RunConfig, TimelineItem } from '../../types/trace';
 
 // Interface for parsed task data
 interface ParsedTask {
@@ -327,6 +327,12 @@ export interface TraceTimelineContentProps {
 // slack in the task-span accounting).
 const MIN_ROW_DURATION_MS = 50;
 
+// One level of timeline depth (MUI spacing units). The run reads as the
+// execution DAG: FLOW STARTED (0) > CREW STARTED (one level in) > agent card
+// (two levels in). Depth is applied relative to what is actually above a row,
+// so a crew-only run starts at 0 instead of being indented under nothing.
+const CREW_ROW_INDENT = 2;
+
 // Shared duration column: ONE right-aligned muted slot on every event row.
 // The value is the row's ADDITIVE wall-time slice (own timestamp → next
 // visible row; last row → task end) so row durations sum to the task span.
@@ -384,6 +390,26 @@ const TraceTimelineContent = memo<TraceTimelineContentProps>(({
 
   // Use runConfig from prop or from processedTraces
   const runConfig = runConfigProp ?? processedTraces?.runConfig;
+
+  // Render order for the timeline. `processTraces` always supplies this, but the
+  // component also accepts a hand-built ProcessedTraces (tests, and any caller
+  // that only fills in `agents`) — fall back to the pre-spine flat agent list
+  // rather than rendering an empty timeline.
+  const timelineItems: TimelineItem[] = useMemo(() => {
+    if (!processedTraces) return [];
+    if (processedTraces.timelineItems) return processedTraces.timelineItems;
+    return processedTraces.agents.map((_, agentIdx) => ({
+      kind: 'agent' as const, agentIdx, nested: false,
+    }));
+  }, [processedTraces]);
+
+  // Depth is RELATIVE to what is actually above a row. A flow run nests crews
+  // under FLOW STARTED; a plain crew run has no flow row, so its crew header is
+  // itself the root and must not be indented under nothing.
+  const crewIndent = (processedTraces?.globalEvents.start.length ?? 0) > 0
+    ? CREW_ROW_INDENT
+    : 0;
+  const nestedAgentIndent = crewIndent + CREW_ROW_INDENT;
 
   // Compact run summary derived from the already-processed traces
   const summaryStats = useMemo(() => {
@@ -614,9 +640,48 @@ const TraceTimelineContent = memo<TraceTimelineContentProps>(({
               </Box>
             ))}
 
-            {/* Agents and Tasks */}
-            {processedTraces.agents.map((agent, agentIdx) => (
-              <Paper key={agentIdx} sx={{ mb: 2, overflow: 'hidden' }}>
+            {/* Crew spine: FLOW STARTED > (CREW STARTED > agents > CREW COMPLETED) x N.
+                One ordered stream rather than a nested tree — depth is carried by
+                `nested`, which indents a crew's agents under its banner. */}
+            {timelineItems.map((item, itemIdx) => {
+              if (item.kind === 'crew-start' || item.kind === 'crew-end') {
+                // A crew is a CHILD of the flow, so it sits one level in from the
+                // FLOW STARTED / FLOW COMPLETED rows. Start and end are rendered
+                // by the same branch so they cannot drift apart in level or style
+                // — only the icon and label differ.
+                const isStart = item.kind === 'crew-start';
+                return (
+                  <Box
+                    key={`${item.kind}-${itemIdx}`}
+                    sx={{
+                      ml: crewIndent,
+                      mt: isStart && itemIdx > 0 ? 2 : 0,
+                      mb: 1,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 1,
+                    }}
+                  >
+                    {isStart
+                      ? <PlayCircleIcon color="primary" fontSize="small" />
+                      : <CheckCircleIcon color="success" fontSize="small" />}
+                    <Typography variant="body2" color="text.secondary">
+                      {item.trace.event_type.replace(/_/g, ' ').toUpperCase()}
+                    </Typography>
+                    {isStart && item.crewName && (
+                      <Typography variant="body2" fontWeight="bold">{item.crewName}</Typography>
+                    )}
+                    <Typography variant="caption" color="text.secondary">
+                      {new Date(item.trace.created_at).toLocaleTimeString()}
+                    </Typography>
+                  </Box>
+                );
+              }
+              const agentIdx = item.agentIdx;
+              const agent = processedTraces.agents[agentIdx];
+              if (!agent) return null;
+              return (
+              <Paper key={agentIdx} sx={{ mb: 2, overflow: 'hidden', ...(item.nested ? { ml: nestedAgentIndent } : {}) }}>
                 <Box
                   sx={{
                     p: 2,
@@ -771,7 +836,8 @@ const TraceTimelineContent = memo<TraceTimelineContentProps>(({
                   </Box>
                 </Collapse>
               </Paper>
-            ))}
+              );
+            })}
 
             {/* Global End Events */}
             {processedTraces.globalEvents.end.map((event, idx) => (

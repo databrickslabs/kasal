@@ -241,34 +241,18 @@ export const EVENT_PROCESSORS: Record<string, EventProcessor> = {
   // Agent Step — same as agent_execution, instrumentor container
   agent_step: (): ProcessedEvent | null => null,
 
-  // Task Started
-  task_started: (trace: Trace): ProcessedEvent => {
-    const metadata = parseTraceMetadata(trace);
-    const extra = extractExtraData(trace);
+  // Task Started - skip.
+  // It rendered "Starting: <task description>", which is the task header's own
+  // text repeated one line below it, and it carries no output to open. The header
+  // already names the task and shows its start offset, so the row was pure
+  // duplication. (Same treatment as memory_write_started below.)
+  task_started: (): ProcessedEvent | null => null,
 
-    let taskName = 'Task Started';
-    const name = (metadata?.task_name as string) || (extra?.task_name as string);
-    if (name) {
-      // Truncate long task names for display
-      taskName = name.length > 50 ? name.substring(0, 47) + '...' : name;
-    }
-
-    return { type: 'task_start', description: `Starting: ${taskName}` };
-  },
-
-  // Task Completed
-  task_completed: (trace: Trace): ProcessedEvent => {
-    const metadata = parseTraceMetadata(trace);
-    const extra = extractExtraData(trace);
-
-    let taskName = 'Task Completed';
-    const name = (metadata?.task_name as string) || (extra?.task_name as string);
-    if (name) {
-      // Truncate long task names for display
-      taskName = name.length > 50 ? name.substring(0, 47) + '...' : name;
-    }
-
-    return { type: 'task_complete', description: `Completed: ${taskName}` };
+  // Task Completed. Labelled without echoing the description — the row sits
+  // under the task header that already shows it. Kept (unlike task_started)
+  // because this row carries the task OUTPUT and is clickable.
+  task_completed: (): ProcessedEvent => {
+    return { type: 'task_complete', description: 'Task Completed' };
   },
 
   // Memory Write Started - skip
