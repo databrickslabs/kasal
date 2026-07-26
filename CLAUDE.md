@@ -55,7 +55,55 @@ you are editing wins on specifics:
 - **CRITICAL: Never include real URLs, endpoints, or addresses in code**
 - Always use placeholder values like "https://example.com" or environment variables
 - Follow clean architecture principles
+- **Keep files small** — see File Size Limits below (≤400 lines target, 800 hard ceiling)
 - Never commit without running linting tools
+
+### File Size Limits (keep files small)
+
+**Target ≤ 400 lines per source file. 800 is the hard ceiling.** ~75% of the
+codebase is already under 400 lines; the outliers are the exception, not the
+norm, and they are where bugs hide. A 2,000-line module cannot be read in one
+sitting, cannot be reviewed properly, and blows out the context of every future
+change to it.
+
+Applies to `.py`, `.ts`, and `.tsx` under `src/backend/` and `src/frontend/src/`
+(tests included — a 2,800-line test file is as unreviewable as the code it covers).
+
+**The ratchet — this is the operative rule:**
+- **Never create a new file over 400 lines.** If what you are writing will land
+  above that, it is at least two modules; design it that way from the start.
+- **A file already over the ceiling must not grow.** When adding to one, extract
+  the new code (and the cohesive block it belongs to) into a sibling module
+  instead of appending. "It was already 2,000 lines" is not a licence to make it
+  2,100.
+- **Touch it, shrink it.** Any non-trivial edit to a file over 800 lines should
+  leave it smaller than you found it — pull out one coherent seam, not a token
+  gesture.
+- **Do not mass-refactor files you were not asked to touch.** Splitting modules
+  the crew/flow **subprocess** imports is high-risk (see
+  `src/backend/src/engines/kasal/CLAUDE.md`); a drive-by split that passes
+  in-process tests can still break the spawned interpreter. Shrink what the task
+  puts you in, and flag the rest.
+
+**Split along real seams, never at an arbitrary line number.** A good split is
+one another engineer can name:
+- **Services** — split by strategy/concern into a package
+  (`foo_service/` with one module per strategy), not `foo_service_part2.py`.
+- **Custom tools** — the heavy PowerBI/metric-view tools already show the
+  pattern: a thin tool class plus a `*_utils/` package of pure helpers
+  (parsing, emitting, validating). Follow it.
+- **React components** — extract sub-components, `hooks/`, and pure helpers;
+  a component file should be JSX plus wiring, not business logic.
+- **Keep the public import path stable.** Re-export from the package
+  `__init__.py` / `index.ts` so call sites do not churn.
+
+**Known offenders** (do not add to these; shrink when you are in them):
+`powerbi_analysis_tool.py`, `process_crew_executor.py`,
+`prompt_optimization_service.py`, `flow_methods.py`, `dispatcher_service.py`,
+`execution_service.py`, `tool_factory.py`, `ChatWorkspace.tsx`,
+`a2ui/components.tsx`, `WorkflowDesigner.tsx`, `TaskForm.tsx`.
+
+Check before you commit: `wc -l <files you touched>`.
 
 ### Build and Deploy
 - **Build frontend static assets**: `python src/build.py`
