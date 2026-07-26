@@ -89,14 +89,14 @@ vi.mock('../../hooks/workflow/useTabDirtyState', () => ({
 const mockListEnabledTools = vi.fn(() => Promise.resolve([
   { id: 1, name: 'WebSearch', title: 'Web Search' },
 ]));
-vi.mock('../../api/ToolService', () => ({
+vi.mock('../../api/tools/ToolService', () => ({
   ToolService: { listEnabledTools: (...args: unknown[]) => mockListEnabledTools(...args) },
   Tool: {},
 }));
 
 // AgentService
 const mockUpdateAgentFull = vi.fn(() => Promise.resolve({ id: 'agent-123', name: 'Test Agent', llm: 'gpt-4' }));
-vi.mock('../../api/AgentService', () => ({
+vi.mock('../../api/workflow/AgentService', () => ({
   Agent: {},
   AgentService: { updateAgentFull: (...args: unknown[]) => mockUpdateAgentFull(...args) },
 }));

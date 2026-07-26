@@ -17,7 +17,7 @@ import {
   Chip,
 } from '@mui/material';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
-import { UIConfigService, UIConfig, UIConfigUpdate } from '../../api/UIConfigService';
+import { UIConfigService, UIConfig, UIConfigUpdate } from '../../api/config/UIConfigService';
 // Branding palettes + per-deliverable settings live in a shared module so the
 // in-preview "Customize" panel reuses the exact same specs (single source of truth).
 import {

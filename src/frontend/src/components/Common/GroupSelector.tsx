@@ -18,7 +18,7 @@ import {
   HomeOutlined as HomeIcon,
   GroupsOutlined as GroupsIcon
 } from '@mui/icons-material';
-import { GroupWithRole } from '../../api/GroupService';
+import { GroupWithRole } from '../../api/groups/GroupService';
 import toast from 'react-hot-toast';
 import { useRunStatusStore } from '../../store/runStatus';
 import { useUserStore } from '../../store/user';

@@ -15,7 +15,7 @@
 import {
   RecipeJobEntry,
   WorkflowRecipeService,
-} from '../../api/WorkflowRecipeService';
+} from '../../api/workflow/WorkflowRecipeService';
 
 let indexPromise: Promise<Record<string, RecipeJobEntry>> | null = null;
 let fetchedAt = 0;

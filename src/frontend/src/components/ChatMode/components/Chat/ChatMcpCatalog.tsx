@@ -4,7 +4,7 @@ import {
   type DatabricksMcpOption,
   type DatabricksManagedMcpType,
   type DatabricksMcpCatalog as Catalog,
-} from '../../../../api/MCPService';
+} from '../../../../api/tools/MCPService';
 
 /**
  * Chat-native Databricks MCP catalog picker (the "Add server" → Databricks tab in

@@ -37,8 +37,8 @@ import {
   MenuList,
   DialogContentText,
 } from '@mui/material';
-import { GroupService, Group, GroupUser, CreateGroupRequest, AssignUserRequest } from '../../api/GroupService';
-import { UserService, User } from '../../api/UserService';
+import { GroupService, Group, GroupUser, CreateGroupRequest, AssignUserRequest } from '../../api/groups/GroupService';
+import { UserService, User } from '../../api/groups/UserService';
 import { useGroupStore } from '../../store/groups';
 import {
   Add as AddIcon,

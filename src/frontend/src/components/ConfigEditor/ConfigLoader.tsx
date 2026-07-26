@@ -26,7 +26,7 @@ import {
   History as HistoryIcon,
 } from '@mui/icons-material';
 import type { PipelineConfig } from '../../types/configEditor';
-import { RunService } from '../../api/ExecutionHistoryService';
+import { RunService } from '../../api/execution/ExecutionHistoryService';
 import type { Run } from '../../types/run';
 
 interface ConfigLoaderProps {

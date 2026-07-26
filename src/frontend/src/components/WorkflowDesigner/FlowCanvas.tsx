@@ -33,7 +33,7 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import { useThemeManager } from '../../hooks/workflow/useThemeManager';
 import FlowCanvasControls from './FlowCanvasControls';
 import useShortcuts from '../../hooks/global/useShortcuts';
-import { CrewService } from '../../api/CrewService';
+import { CrewService } from '../../api/workflow/CrewService';
 import { CrewResponse } from '../../types/crews';
 import EdgeConfigDialog, { EdgeConfig } from '../Flow/EdgeConfigDialog';
 import { useUILayoutStore } from '../../store/uiLayout';

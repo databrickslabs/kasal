@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
-import { DatabricksService } from '../api/DatabricksService';
-import { MemoryBackendService } from '../api/MemoryBackendService';
+import { DatabricksService } from '../api/databricks/DatabricksService';
+import { MemoryBackendService } from '../api/memory/MemoryBackendService';
 import { isKnowledgeCapableMemoryConfig } from '../types/memoryBackend';
 
 interface KnowledgeConfigState {

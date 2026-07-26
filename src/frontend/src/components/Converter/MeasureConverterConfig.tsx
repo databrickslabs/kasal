@@ -40,7 +40,7 @@ import type {
   SQLDialect,
   PowerBIAuthMethod,
 } from '../../types/converter';
-import { ConverterService } from '../../api/ConverterService';
+import { ConverterService } from '../../api/tools/ConverterService';
 import { usePowerBIOAuth } from '../../hooks/usePowerBIOAuth';
 import toast from 'react-hot-toast';
 

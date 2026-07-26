@@ -1,14 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import PreviewPanel, { parsePreviewContent, PreviewContent } from './PreviewPanel';
-import { UIConfigService } from '../../../../api/UIConfigService';
+import { UIConfigService } from '../../../../api/config/UIConfigService';
 import { THEME_PRESETS, type Theme } from '../../../Configuration/uiConfigShared';
 import { themeToTokens } from '../../../../shared/a2ui';
 import type { RunStep } from './RunTimeline';
 
 // The panel fetches the workspace UI-Configurator palettes on mount; stub the
 // service so tests control (or disable) the configured themes.
-vi.mock('../../../../api/UIConfigService', () => ({
+vi.mock('../../../../api/config/UIConfigService', () => ({
   UIConfigService: { getConfig: vi.fn() },
 }));
 const getConfigMock = vi.mocked(UIConfigService.getConfig);

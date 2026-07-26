@@ -36,7 +36,7 @@ import {
   Cancel as CancelIcon,
   PlayArrow as UseIcon,
 } from '@mui/icons-material';
-import { ConverterService } from '../../api/ConverterService';
+import { ConverterService } from '../../api/tools/ConverterService';
 import type {
   ConversionHistory,
   ConversionJob,

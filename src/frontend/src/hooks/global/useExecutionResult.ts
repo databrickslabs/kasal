@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { Run } from '../../api/ExecutionHistoryService';
+import { Run } from '../../api/execution/ExecutionHistoryService';
 import { useRunResultStore } from '../../store/runResult';
 
 export const useRunResult = () => {

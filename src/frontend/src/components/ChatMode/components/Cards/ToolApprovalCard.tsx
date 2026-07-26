@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { HITLService } from '../../../../api/HITLService';
+import { HITLService } from '../../../../api/execution/HITLService';
 import { useSessionStore } from '../../store/sessionStore';
 
 /**

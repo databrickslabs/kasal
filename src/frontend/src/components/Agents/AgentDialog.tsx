@@ -21,8 +21,8 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import { Agent, Tool, AgentDialogProps } from '../../types/agent';
-import { AgentService } from '../../api/AgentService';
-import { ToolService } from '../../api/ToolService';
+import { AgentService } from '../../api/workflow/AgentService';
+import { ToolService } from '../../api/tools/ToolService';
 import AgentForm from './AgentForm';
 import AgentBestPractices from '../BestPractices/AgentBestPractices';
 

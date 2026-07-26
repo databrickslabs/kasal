@@ -26,9 +26,9 @@ import {
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import SearchIcon from '@mui/icons-material/Search';
-import { ToolService, Tool } from '../../api/ToolService';
-import { AgentService } from '../../api/AgentService';
-import { TaskService } from '../../api/TaskService';
+import { ToolService, Tool } from '../../api/tools/ToolService';
+import { AgentService } from '../../api/workflow/AgentService';
+import { TaskService } from '../../api/workflow/TaskService';
 import { Node } from 'reactflow';
 
 // Define a more specific type for our nodes

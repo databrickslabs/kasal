@@ -17,7 +17,7 @@ import {
   MemoryBackendService, 
   DatabricksIndex, 
   TestConnectionResult 
-} from '../api/MemoryBackendService';
+} from '../api/memory/MemoryBackendService';
 
 interface MemoryBackendState {
   // State

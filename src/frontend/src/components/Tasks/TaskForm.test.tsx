@@ -45,14 +45,14 @@ vi.mock('../../store/crewExecution', () => ({
 
 // The service under test for the Suggest button — a controllable vi.fn().
 const suggestGuardrailMock = vi.fn();
-vi.mock('../../api/GenerateService', () => ({
+vi.mock('../../api/workflow/GenerateService', () => ({
   GenerateService: {
     suggestGuardrail: (...args: unknown[]) => suggestGuardrailMock(...args),
   },
 }));
 
 // Services TaskForm calls on mount — stubbed so render doesn't error.
-vi.mock('../../api/TaskService', () => ({
+vi.mock('../../api/workflow/TaskService', () => ({
   TaskService: {
     listTasks: vi.fn().mockResolvedValue([]),
     createTask: vi.fn(),
@@ -60,7 +60,7 @@ vi.mock('../../api/TaskService', () => ({
   },
 }));
 
-vi.mock('../../api/DatabricksService', () => ({
+vi.mock('../../api/databricks/DatabricksService', () => ({
   DatabricksService: {
     getInstance: () => ({
       getDatabricksEnvironment: vi.fn().mockResolvedValue({}),
@@ -74,7 +74,7 @@ const getModelsMock = vi.fn().mockResolvedValue({
   'databricks-llama': { name: 'databricks-llama' },
   'gpt-4o': { name: 'gpt-4o' },
 });
-vi.mock('../../api/ModelService', () => ({
+vi.mock('../../api/config/ModelService', () => ({
   ModelService: {
     getInstance: () => ({
       getModels: getModelsMock,
@@ -97,7 +97,7 @@ vi.mock('../BestPractices/TaskBestPractices', () => ({
 }));
 
 import TaskForm from './TaskForm';
-import type { Task } from '../../api/TaskService';
+import type { Task } from '../../api/workflow/TaskService';
 
 // ---- Helpers ----
 

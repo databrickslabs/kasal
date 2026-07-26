@@ -27,8 +27,8 @@ import {
 import CloseIcon from '@mui/icons-material/Close';
 import DownloadIcon from '@mui/icons-material/Download';
 import RocketLaunchIcon from '@mui/icons-material/RocketLaunch';
-import { CrewExportService } from '../../api/CrewExportService';
-import { ModelService } from '../../api/ModelService';
+import { CrewExportService } from '../../api/workflow/CrewExportService';
+import { ModelService } from '../../api/config/ModelService';
 import { Models } from '../../types/models';
 import {
   ExportFormat,

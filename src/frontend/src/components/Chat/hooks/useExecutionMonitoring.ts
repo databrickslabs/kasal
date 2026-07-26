@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { ChatMessage } from '../types';
 import { streamExecution } from '../../ChatMode/api/streaming';
 
-import { runService } from '../../../api/ExecutionHistoryService';
+import { runService } from '../../../api/execution/ExecutionHistoryService';
 import { Run } from '../../../types/run';
 import { useTaskExecutionStore } from '../../../store/taskExecutionStore';
 import { useChatMessagesStore } from '../../../store/chatMessagesStore';

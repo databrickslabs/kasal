@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { Node as ReactFlowNode } from 'reactflow';
-import { Task, TaskService } from '../../api/TaskService';
+import { Task, TaskService } from '../../api/workflow/TaskService';
 // import { useTaskStatus } from '../../context/TaskStatusContext';
 // import { convertToInterfaceTask } from '../../utils/taskUtils';
 

@@ -18,7 +18,7 @@ import {
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import { useModelConfigStore } from '../../store/modelConfig';
-import { ModelService } from '../../api/ModelService';
+import { ModelService } from '../../api/config/ModelService';
 
 export interface LLMSelectionDialogProps {
   open: boolean;

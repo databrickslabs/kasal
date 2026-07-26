@@ -9,7 +9,7 @@ const api = {
   listAiSearchIndexes: vi.fn(),
   ensureDatabricksServer: vi.fn(),
 };
-vi.mock('../../../../api/MCPService', () => ({
+vi.mock('../../../../api/tools/MCPService', () => ({
   MCPService: { getInstance: () => api },
   databricksMcpServerName: (o: { name: string }) => o.name.toLowerCase(),
 }));

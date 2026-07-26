@@ -24,7 +24,7 @@ import {
   HITLRejectionAction,
   HITLApprovalResponse,
   ExecutionHITLStatus,
-} from '../../api/HITLService';
+} from '../../api/execution/HITLService';
 
 // Must use vi.hoisted for variables referenced in vi.mock
 const mocks = vi.hoisted(() => ({
@@ -35,8 +35,8 @@ const mocks = vi.hoisted(() => ({
 }));
 
 // Mock HITLService
-vi.mock('../../api/HITLService', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../api/HITLService')>();
+vi.mock('../../api/execution/HITLService', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../api/execution/HITLService')>();
   return {
     ...actual,
     HITLService: {

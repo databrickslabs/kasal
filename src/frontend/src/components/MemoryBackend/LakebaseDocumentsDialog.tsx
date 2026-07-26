@@ -25,7 +25,7 @@ import {
   Search as SearchIcon,
   ContentCopy as CopyIcon,
 } from '@mui/icons-material';
-import { MemoryBackendService, LakebaseDocument } from '../../api/MemoryBackendService';
+import { MemoryBackendService, LakebaseDocument } from '../../api/memory/MemoryBackendService';
 
 interface LakebaseDocumentsDialogProps {
   open: boolean;

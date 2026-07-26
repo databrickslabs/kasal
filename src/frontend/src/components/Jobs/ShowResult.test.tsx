@@ -30,7 +30,7 @@ vi.mock('react-markdown', () => ({
 
 vi.mock('remark-gfm', () => ({ default: () => {} }));
 
-vi.mock('../../api/DatabricksService', () => ({
+vi.mock('../../api/databricks/DatabricksService', () => ({
   DatabricksService: { getConfig: vi.fn().mockResolvedValue(null) },
 }));
 

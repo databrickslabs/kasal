@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { UIConfigService, UIConfig } from '../../../api/UIConfigService';
+import { UIConfigService, UIConfig } from '../../../api/config/UIConfigService';
 import type { Theme } from '../../Configuration/uiConfigShared';
 
 /**

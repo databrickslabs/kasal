@@ -9,7 +9,7 @@ import { GenieSpaceSelector } from './GenieSpaceSelector';
 const mockGetSpaces = vi.hoisted(() => vi.fn());
 const mockSearchSpaces = vi.hoisted(() => vi.fn());
 
-vi.mock('../../api/GenieService', () => ({
+vi.mock('../../api/databricks/GenieService', () => ({
   GenieService: {
     getSpaces: mockGetSpaces,
     searchSpaces: mockSearchSpaces,

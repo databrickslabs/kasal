@@ -31,7 +31,7 @@ import {
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
-import { ScheduleService } from '../../api/ScheduleService';
+import { ScheduleService } from '../../api/execution/ScheduleService';
 import { toast } from 'react-hot-toast';
 import InfoIcon from '@mui/icons-material/Info';
 import { Schedule, ScheduleDialogProps, ConfigViewerDialogProps } from '../../types/schedule';

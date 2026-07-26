@@ -5,7 +5,7 @@ import {
   extractOutputForDisplay,
   extractExtraData,
 } from '../../components/Jobs/traceEventProcessors';
-import TraceService from '../../api/TraceService';
+import TraceService from '../../api/execution/TraceService';
 import { useRunStatusStore, Trace } from '../../store/runStatus';
 import { formatDurationMs } from '../../utils/formatDuration';
 

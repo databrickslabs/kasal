@@ -39,7 +39,7 @@ import {
   RecipeCuration,
   RecipeJobEntry,
   WorkflowRecipeService,
-} from '../../api/WorkflowRecipeService';
+} from '../../api/workflow/WorkflowRecipeService';
 import {
   invalidateRecipeIndex,
   loadRecipeIndex,

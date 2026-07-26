@@ -1,6 +1,6 @@
 import React from 'react';
 import { Document, Page, Text, View, StyleSheet, Font, pdf, Svg, Path } from '@react-pdf/renderer';
-import { Run } from '../api/ExecutionHistoryService';
+import { Run } from '../api/execution/ExecutionHistoryService';
 
 /* eslint-disable react/prop-types */
 

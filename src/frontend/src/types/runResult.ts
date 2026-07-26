@@ -1,4 +1,4 @@
-import { Run } from '../api/ExecutionHistoryService';
+import { Run } from '../api/execution/ExecutionHistoryService';
 
 export interface RunResultContextType {
   selectedRun: Run | null;

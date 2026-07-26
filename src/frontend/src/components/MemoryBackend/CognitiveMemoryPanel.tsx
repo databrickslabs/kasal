@@ -26,7 +26,7 @@ import {
   CognitiveMemoryConfig,
 } from '../../types/memoryBackend';
 import { Models } from '../../types/models';
-import { ModelService } from '../../api/ModelService';
+import { ModelService } from '../../api/config/ModelService';
 import {
   useCognitiveMemoryConfig,
   useMemoryBackendStore,

@@ -33,7 +33,7 @@ vi.mock('../../config/api/ApiConfig', () => ({
 }));
 
 // Mock AgentService
-vi.mock('../../api/AgentService', () => ({
+vi.mock('../../api/workflow/AgentService', () => ({
   AgentService: {
     updateAgentFull: vi.fn(),
     getAgent: vi.fn(),
@@ -42,7 +42,7 @@ vi.mock('../../api/AgentService', () => ({
 }));
 
 // Mock DatabricksService
-vi.mock('../../api/DatabricksService', () => ({
+vi.mock('../../api/databricks/DatabricksService', () => ({
   DatabricksService: {
     getInstance: vi.fn(() => ({
       getDatabricksConfig: vi.fn().mockResolvedValue({

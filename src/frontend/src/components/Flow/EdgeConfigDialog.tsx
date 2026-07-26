@@ -27,8 +27,8 @@ import {
 import { Edge, Node } from 'reactflow';
 import ConditionBuilder, { Condition, conditionsToPython, pythonToConditions } from './ConditionBuilder';
 import SchemaQuickCreateDialog from './SchemaQuickCreateDialog';
-import { SchemaService } from '../../api/SchemaService';
-import { TaskService } from '../../api/TaskService';
+import { SchemaService } from '../../api/workflow/SchemaService';
+import { TaskService } from '../../api/workflow/TaskService';
 import { Schema } from '../../types/schema';
 
 export type FlowLogicType = 'AND' | 'OR' | 'ROUTER' | 'NONE';

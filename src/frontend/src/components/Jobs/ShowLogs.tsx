@@ -16,8 +16,8 @@ import {
 } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import DownloadIcon from '@mui/icons-material/Download';
-import { LogEntry } from '../../api/ExecutionLogs';
-import { executionLogService } from '../../api/ExecutionLogs';
+import { LogEntry } from '../../api/execution/ExecutionLogs';
+import { executionLogService } from '../../api/execution/ExecutionLogs';
 import { ShowLogsProps } from '../../types/common';
 import { useTranslation } from 'react-i18next';
 

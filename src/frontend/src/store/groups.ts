@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
-import { GroupService, GroupWithRole } from '../api/GroupService';
+import { GroupService, GroupWithRole } from '../api/groups/GroupService';
 import { useUserStore } from './user';
 
 interface GroupState {

@@ -20,11 +20,11 @@ import {
 // Mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('../../../api/AgentService', () => ({
+vi.mock('../../../api/workflow/AgentService', () => ({
   AgentService: { createAgent: vi.fn() },
 }));
 
-vi.mock('../../../api/TaskService', () => ({
+vi.mock('../../../api/workflow/TaskService', () => ({
   TaskService: { createTask: vi.fn() },
 }));
 

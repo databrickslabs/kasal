@@ -11,9 +11,9 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Node, Edge } from 'reactflow';
 import SaveFlow from './SaveFlow';
 import { useTabManagerStore } from '../../store/tabManager';
-import { FlowService } from '../../api/FlowService';
+import { FlowService } from '../../api/workflow/FlowService';
 
-vi.mock('../../api/FlowService', () => ({
+vi.mock('../../api/workflow/FlowService', () => ({
   FlowService: {
     updateFlow: vi.fn().mockResolvedValue({ id: 'flow-1', name: 'My Flow' }),
   },

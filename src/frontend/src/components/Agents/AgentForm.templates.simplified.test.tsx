@@ -32,7 +32,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 
 // Mock the GenerateService
-vi.mock('../../api/GenerateService', () => ({
+vi.mock('../../api/workflow/GenerateService', () => ({
   GenerateService: {
     generateTemplates: vi.fn(),
   },

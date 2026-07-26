@@ -18,8 +18,8 @@ import { useTranslation } from 'react-i18next';
 import * as yaml from 'yaml';
 import { Node, Edge } from 'reactflow';
 import { toast } from 'react-hot-toast';
-import { AgentService } from '../../api/AgentService';
-import { TaskService } from '../../api/TaskService';
+import { AgentService } from '../../api/workflow/AgentService';
+import { TaskService } from '../../api/workflow/TaskService';
 import { AgentYaml, TaskYaml } from '../../types/crew';
 import { createEdge, edgeExists } from '../../utils/edgeUtils';
 

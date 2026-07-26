@@ -26,8 +26,8 @@ import {
   CheckCircle as CheckCircleIcon,
   Error as ErrorIcon,
 } from '@mui/icons-material';
-import { DatabricksService, DatabricksConfig } from '../../api/DatabricksService';
-import { AgentService, Agent } from '../../api/AgentService';
+import { DatabricksService, DatabricksConfig } from '../../api/databricks/DatabricksService';
+import { AgentService, Agent } from '../../api/workflow/AgentService';
 import { apiClient } from '../../config/api/ApiConfig';
 import { AxiosProgressEvent } from 'axios';
 import { useKnowledgeConfigStore } from '../../store/knowledgeConfigStore';
@@ -111,7 +111,7 @@ export const KnowledgeFileUpload: React.FC<KnowledgeFileUploadProps> = ({
       const loadAgents = async () => {
         try {
           // Dynamic import to avoid circular dependencies
-          const { AgentService } = await import('../../api/AgentService');
+          const { AgentService } = await import('../../api/workflow/AgentService');
           const agents = await AgentService.listAgents();
           setAvailableAgents(agents);
           if (selectedAgents.length === 0 && agents.length > 0) {
@@ -306,7 +306,7 @@ export const KnowledgeFileUpload: React.FC<KnowledgeFileUploadProps> = ({
     try {
       const { path: filePath, filename: fileName, size, execution_id, uploaded_at, volume_info, upload_method, simulated } = uploadResp || {};
       // Dynamic import to avoid circular dependencies
-      const { AgentService } = await import('../../api/AgentService');
+      const { AgentService } = await import('../../api/workflow/AgentService');
 
       console.log('[DEBUG] updateAgentKnowledgeSources called:', {
         selectedAgents,

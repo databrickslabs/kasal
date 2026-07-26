@@ -4,7 +4,7 @@ import { FlowConfiguration, FlowFormData } from '../../types/flow';
 import { CrewTask } from '../../types/crewPlan';
 import { v4 as uuidv4 } from 'uuid';
 import { createEdge } from '../../utils/edgeUtils';
-import { FlowService } from '../../api/FlowService';
+import { FlowService } from '../../api/workflow/FlowService';
 import { createUniqueEdges } from './WorkflowUtils';
 import { _generateCrewPositions, validateNodePositions } from '../../utils/flowWizardUtils';
 import { useTabManagerStore } from '../../store/tabManager';

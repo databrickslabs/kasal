@@ -1,13 +1,13 @@
 import { create } from 'zustand';
 import { Node, Edge } from 'reactflow';
-import { jobExecutionService } from '../api/JobExecutionService';
+import { jobExecutionService } from '../api/execution/JobExecutionService';
 import { useWorkflowStore } from './workflow';
 import { useTabManagerStore } from './tabManager';
 import { useFlowExecutionStore } from './flowExecutionStore';
 import { Tool } from '../types/tool';
-import { FlowService, FlowCheckpoint } from '../api/FlowService';
+import { FlowService, FlowCheckpoint } from '../api/workflow/FlowService';
 import { assessTrifecta, TrifectaAssessment } from '../utils/toolCapabilityManifest';
-import { ToolService } from '../api/ToolService';
+import { ToolService } from '../api/tools/ToolService';
 
 interface RunHistoryItem {
   id: string;
@@ -471,7 +471,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
 
       // Force refresh tasks from database to get latest tools and configs
       console.log('[CrewExecution] Refreshing task data from database before execution');
-      const { TaskService } = await import('../api/TaskService');
+      const { TaskService } = await import('../api/workflow/TaskService');
       nodes = await Promise.all(
         nodes.map(async (node) => {
           if (node.type === 'taskNode' && (node.data?.taskId || node.data?.id)) {
@@ -804,7 +804,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
       // Force refresh tasks from database to get latest tools and configs
       if (hasTaskNodes) {
         console.log('[TabExecution] Refreshing task data from database before execution');
-        const { TaskService } = await import('../api/TaskService');
+        const { TaskService } = await import('../api/workflow/TaskService');
         nodes = await Promise.all(
           nodes.map(async (node) => {
             if (node.type === 'taskNode' && (node.data?.taskId || node.data?.id)) {

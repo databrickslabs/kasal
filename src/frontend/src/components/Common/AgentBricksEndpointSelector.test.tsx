@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { AgentBricksEndpointSelector } from './AgentBricksEndpointSelector';
-import type { AgentBricksEndpoint } from '../../api/AgentBricksService';
+import type { AgentBricksEndpoint } from '../../api/databricks/AgentBricksService';
 
 // ---------------------------------------------------------------------------
 // AgentBricksService is the only external dependency. The selector calls
@@ -13,7 +13,7 @@ import type { AgentBricksEndpoint } from '../../api/AgentBricksService';
 const getEndpoints = vi.fn();
 const searchEndpoints = vi.fn();
 const getEndpointByName = vi.fn();
-vi.mock('../../api/AgentBricksService', () => ({
+vi.mock('../../api/databricks/AgentBricksService', () => ({
   AgentBricksService: {
     getEndpoints: (...a: unknown[]) => getEndpoints(...a),
     searchEndpoints: (...a: unknown[]) => searchEndpoints(...a),

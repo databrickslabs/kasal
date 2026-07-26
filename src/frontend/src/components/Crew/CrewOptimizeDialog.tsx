@@ -37,8 +37,8 @@ import {
   LLMJudge,
   PromptOptimizationRun,
   PromptOptimizationService,
-} from '../../api/PromptOptimizationService';
-import { ModelService } from '../../api/ModelService';
+} from '../../api/config/PromptOptimizationService';
+import { ModelService } from '../../api/config/ModelService';
 
 interface CrewOptimizeDialogProps {
   open: boolean;

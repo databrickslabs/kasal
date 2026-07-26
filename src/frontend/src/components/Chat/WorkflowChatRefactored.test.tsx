@@ -22,13 +22,13 @@ import { Node, Edge } from 'reactflow';
 Element.prototype.scrollIntoView = vi.fn();
 
 // Mock all dependencies
-vi.mock('../../api/DispatcherService', () => ({
+vi.mock('../../api/execution/DispatcherService', () => ({
   default: {
     dispatch: vi.fn(),
   },
 }));
 
-vi.mock('../../api/ChatHistoryService', () => ({
+vi.mock('../../api/chat/ChatHistoryService', () => ({
   ChatHistoryService: {
     getOrCreateSession: vi.fn().mockResolvedValue({ session_id: 'test-session-123' }),
     saveMessage: vi.fn().mockResolvedValue(undefined),
@@ -38,7 +38,7 @@ vi.mock('../../api/ChatHistoryService', () => ({
   },
 }));
 
-vi.mock('../../api/ModelService', () => ({
+vi.mock('../../api/config/ModelService', () => ({
   ModelService: {
     getInstance: vi.fn().mockReturnValue({
       getEnabledModels: vi.fn().mockResolvedValue({
@@ -54,7 +54,7 @@ vi.mock('../../api/ModelService', () => ({
   },
 }));
 
-vi.mock('../../api/TraceService', () => ({
+vi.mock('../../api/execution/TraceService', () => ({
   default: {
     getTraces: vi.fn().mockResolvedValue([]),
     getTracesByJobId: vi.fn().mockResolvedValue([]),
@@ -271,7 +271,7 @@ describe('WorkflowChatRefactored', () => {
     });
 
     it('clears input after sending message', async () => {
-      const DispatcherService = await import('../../api/DispatcherService');
+      const DispatcherService = await import('../../api/execution/DispatcherService');
       (DispatcherService.default.dispatch as Mock).mockResolvedValue({
         dispatcher: { intent: 'unknown', confidence: 0.5 },
         generation_result: null,
@@ -293,7 +293,7 @@ describe('WorkflowChatRefactored', () => {
     });
 
     it('does not send empty messages', async () => {
-      const DispatcherService = await import('../../api/DispatcherService');
+      const DispatcherService = await import('../../api/execution/DispatcherService');
 
       render(<WorkflowChat {...defaultProps} />);
 
@@ -304,7 +304,7 @@ describe('WorkflowChatRefactored', () => {
     });
 
     it('handles shift+enter without sending', async () => {
-      const DispatcherService = await import('../../api/DispatcherService');
+      const DispatcherService = await import('../../api/execution/DispatcherService');
 
       render(<WorkflowChat {...defaultProps} />);
 
@@ -515,7 +515,7 @@ describe('WorkflowChatRefactored', () => {
 
   describe('Message Dispatch', () => {
     it('dispatches message to service when sending', async () => {
-      const DispatcherService = await import('../../api/DispatcherService');
+      const DispatcherService = await import('../../api/execution/DispatcherService');
       (DispatcherService.default.dispatch as Mock).mockResolvedValue({
         dispatcher: { intent: 'generate_agent', confidence: 0.95 },
         generation_result: {
@@ -542,7 +542,7 @@ describe('WorkflowChatRefactored', () => {
     });
 
     it('handles dispatch errors gracefully', async () => {
-      const DispatcherService = await import('../../api/DispatcherService');
+      const DispatcherService = await import('../../api/execution/DispatcherService');
       (DispatcherService.default.dispatch as Mock).mockRejectedValue(new Error('Network error'));
 
       render(<WorkflowChat {...defaultProps} />);
@@ -813,7 +813,7 @@ describe('setMessages stale-closure fix', () => {
 
   it('setMessages via send uses getState, not stale closure', async () => {
     const { __storeState } = await import('../../store/chatMessagesStore') as { __storeState: { messagesBySession: Record<string, unknown[]>; setMessages: ReturnType<typeof vi.fn> } };
-    const DispatcherService = await import('../../api/DispatcherService');
+    const DispatcherService = await import('../../api/execution/DispatcherService');
     (DispatcherService.default.dispatch as Mock).mockResolvedValue({
       dispatcher: { intent: 'unknown', confidence: 0.5 },
       generation_result: null,

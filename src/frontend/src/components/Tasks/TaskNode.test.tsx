@@ -64,7 +64,7 @@ vi.mock('../../hooks/workflow/useTabDirtyState', () => ({
 }));
 
 // Mock ToolService
-vi.mock('../../api/ToolService', () => ({
+vi.mock('../../api/tools/ToolService', () => ({
   ToolService: {
     listEnabledTools: vi.fn(() => Promise.resolve([])),
   },
@@ -73,7 +73,7 @@ vi.mock('../../api/ToolService', () => ({
 
 // Mock TaskService
 const mockUpdateTask = vi.fn(() => Promise.resolve({ id: 'task-123', tools: [] }));
-vi.mock('../../api/TaskService', () => ({
+vi.mock('../../api/workflow/TaskService', () => ({
   Task: {},
   TaskService: {
     updateTask: (...args: unknown[]) => mockUpdateTask(...args),

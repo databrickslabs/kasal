@@ -19,10 +19,10 @@ import {
   Chip,
 } from '@mui/material';
 import { AgentGenerationDialogProps } from '../../types/agent';
-import { GenerateService } from '../../api/GenerateService';
-import { ModelService } from '../../api/ModelService';
+import { GenerateService } from '../../api/workflow/GenerateService';
+import { ModelService } from '../../api/config/ModelService';
 import { Models } from '../../types/models';
-import { ToolService } from '../../api/ToolService';
+import { ToolService } from '../../api/tools/ToolService';
 import { Tool } from '../../types/tool';
 import { useAPIKeysStore } from '../../store/apiKeys';
 import * as ApiKeyUtils from '../../utils/apiKeyUtils';

@@ -30,7 +30,7 @@ import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
 // Resolve public asset path using Vite's base URL (handles Databricks Apps proxy path)
 const kasalIcon16 = `${import.meta.env.BASE_URL}kasal-icon-16.png`;
 
-import DispatcherService, { DispatchResult, ConfigureCrewResult, CatalogListResult, CatalogLoadResult, FlowListResult, FlowLoadResult, StreamingGenerationResult } from '../../api/DispatcherService';
+import DispatcherService, { DispatchResult, ConfigureCrewResult, CatalogListResult, CatalogLoadResult, FlowListResult, FlowLoadResult, StreamingGenerationResult } from '../../api/execution/DispatcherService';
 import { useWorkflowStore } from '../../store/workflow';
 import { useCrewExecutionStore } from '../../store/crewExecution';
 import { useChatMessagesStore, deduplicateMessages } from '../../store/chatMessagesStore';
@@ -38,9 +38,9 @@ import { useKnowledgeConfigStore } from '../../store/knowledgeConfigStore';
 import { useModelConfigStore } from '../../store/modelConfig';
 import { useTabManagerStore } from '../../store/tabManager';
 import { Node as FlowNode } from 'reactflow';
-import { ChatHistoryService } from '../../api/ChatHistoryService';
-import { ModelService } from '../../api/ModelService';
-import TraceService from '../../api/TraceService';
+import { ChatHistoryService } from '../../api/chat/ChatHistoryService';
+import { ModelService } from '../../api/config/ModelService';
+import TraceService from '../../api/execution/TraceService';
 import { CanvasLayoutManager } from '../../utils/CanvasLayoutManager';
 import { buildModelLabels } from '../../utils/modelDisplay';
 import { useUILayoutState, useUILayoutStore } from '../../store/uiLayout';
@@ -1991,7 +1991,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
 
                             // Update the task in the backend
                             if (node.data.taskId) {
-                              import('../../api/TaskService').then(({ TaskService }) => {
+                              import('../../api/workflow/TaskService').then(({ TaskService }) => {
                                 TaskService.updateTask(node.data.taskId, {
                                   tools: updatedTools,
                                   tool_configs: updatedToolConfigs

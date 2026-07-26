@@ -17,7 +17,7 @@ import {
 import { type TaskAdvancedConfigProps } from '../../types/task';
 import { TASK_CALLBACKS, type TaskCallbackOption } from '../../types/taskCallbacks';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
-import { SchemaService } from '../../api/SchemaService';
+import { SchemaService } from '../../api/workflow/SchemaService';
 import { DatabricksVolumeConfigComponent, type DatabricksVolumeConfig } from './DatabricksVolumeConfig';
 
 export type ConditionType = 'is_data_missing';

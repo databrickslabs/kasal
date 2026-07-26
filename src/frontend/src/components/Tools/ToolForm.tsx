@@ -38,7 +38,7 @@ import AddIcon from '@mui/icons-material/Add';
 import ContentCopyOutlinedIcon from '@mui/icons-material/ContentCopyOutlined';
 
 import { Tool, ToolIcon } from '../../types/tool';
-import { Tool as ServiceTool, ToolService } from '../../api/ToolService';
+import { Tool as ServiceTool, ToolService } from '../../api/tools/ToolService';
 import { useTranslation } from 'react-i18next';
 import SecurityDisclaimer from './SecurityDisclaimer';
 import { usePermissionStore } from '../../store/permissions';

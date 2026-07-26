@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { SaveMessageRequest, ChatSession, ChatMessage as BackendChatMessage } from '../../../api/ChatHistoryService';
-import { ChatHistoryServiceEnhanced as ChatHistoryService } from '../../../api/ChatHistoryServiceEnhanced';
+import { SaveMessageRequest, ChatSession, ChatMessage as BackendChatMessage } from '../../../api/chat/ChatHistoryService';
+import { ChatHistoryServiceEnhanced as ChatHistoryService } from '../../../api/chat/ChatHistoryServiceEnhanced';
 import { ChatMessage } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import { useChatMessagesStore, deduplicateMessages } from '../../../store/chatMessagesStore';

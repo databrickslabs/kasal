@@ -22,7 +22,7 @@ import {
   DatabricksMcpOption,
   DatabricksManagedMcpType,
   databricksMcpServerName,
-} from '../../../api/MCPService';
+} from '../../../api/tools/MCPService';
 import { MCPServerConfig } from './MCPConfiguration';
 
 /**

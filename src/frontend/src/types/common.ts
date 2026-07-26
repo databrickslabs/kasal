@@ -1,5 +1,5 @@
 import { Agent } from './agent';
-import { LogEntry } from '../api/ExecutionLogs';
+import { LogEntry } from '../api/execution/ExecutionLogs';
 import { ResultValue } from './result';
 
 export type JobResult = {
@@ -178,7 +178,7 @@ export interface ShowLogsProps {
   connectionError: string | null;
 }
 
-import { Run } from '../api/ExecutionHistoryService';
+import { Run } from '../api/execution/ExecutionHistoryService';
 
 export interface ShowResultProps {
   open: boolean;

@@ -25,8 +25,8 @@ import { useTranslation } from 'react-i18next';
 import {
   PromptOptimizationRun,
   PromptOptimizationService,
-} from '../../api/PromptOptimizationService';
-import { ModelService } from '../../api/ModelService';
+} from '../../api/config/PromptOptimizationService';
+import { ModelService } from '../../api/config/ModelService';
 
 import { OPTIMIZABLE_TEMPLATES } from './optimizableTemplates';
 

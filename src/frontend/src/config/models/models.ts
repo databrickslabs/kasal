@@ -7,7 +7,7 @@ import { Models } from '../../types/models';
  * New code should use ModelService instead of importing from this file directly:
  * 
  * ```
- * import { ModelService } from '../api/ModelService';
+ * import { ModelService } from '../api/config/ModelService';
  * 
  * // In an async function:
  * const modelService = ModelService.getInstance();

@@ -20,7 +20,7 @@ import SearchIcon from '@mui/icons-material/Search';
 import ClearIcon from '@mui/icons-material/Clear';
 import PushPinIcon from '@mui/icons-material/PushPin';
 import PushPinOutlinedIcon from '@mui/icons-material/PushPinOutlined';
-import { AgentBricksService, AgentBricksEndpoint, AgentBricksEndpointsResponse } from '../../api/AgentBricksService';
+import { AgentBricksService, AgentBricksEndpoint, AgentBricksEndpointsResponse } from '../../api/databricks/AgentBricksService';
 
 interface AgentBricksEndpointSelectorProps {
   value: string | string[] | null;

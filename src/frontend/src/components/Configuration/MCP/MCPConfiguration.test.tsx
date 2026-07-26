@@ -31,7 +31,7 @@ const mockMCPService = {
   ensureDatabricksServer: vi.fn(),
 };
 
-vi.mock('../../../api/MCPService', () => ({
+vi.mock('../../../api/tools/MCPService', () => ({
   MCPService: { getInstance: () => mockMCPService },
   databricksMcpServerName: (o: { kind: string; name: string }) => o.name.toLowerCase(),
 }));

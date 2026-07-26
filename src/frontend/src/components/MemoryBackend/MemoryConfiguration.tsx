@@ -43,7 +43,7 @@ import { AxiosError } from 'axios';
 import { apiClient } from '../../config/api/ApiConfig';
 import { useMemoryBackendStore } from '../../store/memoryBackend';
 import { CognitiveMemoryPanel } from './CognitiveMemoryPanel';
-import DatabricksVectorSearchService from '../../api/DatabricksVectorSearchService';
+import DatabricksVectorSearchService from '../../api/databricks/DatabricksVectorSearchService';
 import {
   MemoryBackendType,
   EndpointInfo,
@@ -57,7 +57,7 @@ import {
   CognitiveMemoryConfig,
   DEFAULT_LAKEBASE_CONFIG,
 } from '../../types/memoryBackend';
-import { MemoryBackendService } from '../../api/MemoryBackendService';
+import { MemoryBackendService } from '../../api/memory/MemoryBackendService';
 import { EMBEDDING_MODELS } from './constants';
 import { 
   validateVectorSearchIndexName

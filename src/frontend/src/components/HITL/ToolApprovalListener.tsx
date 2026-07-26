@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import HITLApprovalDialog from './HITLApprovalDialog';
-import { HITLService } from '../../api/HITLService';
+import { HITLService } from '../../api/execution/HITLService';
 import { useExecutionStore } from '../ChatMode/store/executionStore';
 
 /**

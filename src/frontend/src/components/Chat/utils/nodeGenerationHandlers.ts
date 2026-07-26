@@ -1,6 +1,6 @@
 import { Node, Edge } from 'reactflow';
-import { AgentService } from '../../../api/AgentService';
-import { TaskService } from '../../../api/TaskService';
+import { AgentService } from '../../../api/workflow/AgentService';
+import { TaskService } from '../../../api/workflow/TaskService';
 import { Agent } from '../../../types/agent';
 import { Task } from '../../../types/task';
 import { GeneratedAgent, GeneratedTask, GeneratedCrew, ChatMessage } from '../types';
@@ -8,7 +8,7 @@ import { CanvasLayoutManager } from '../../../utils/CanvasLayoutManager';
 import { useWorkflowStore } from '../../../store/workflow';
 import { useUILayoutStore } from '../../../store/uiLayout';
 import { useCrewExecutionStore } from '../../../store/crewExecution';
-import { ConfigureCrewResult } from '../../../api/DispatcherService';
+import { ConfigureCrewResult } from '../../../api/execution/DispatcherService';
 import { EdgeCategory, getEdgeStyleConfig } from '../../../config/edgeConfig';
 import type {
   PlanReadyData,

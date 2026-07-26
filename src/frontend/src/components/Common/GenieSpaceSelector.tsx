@@ -21,7 +21,7 @@ import SearchIcon from '@mui/icons-material/Search';
 import ClearIcon from '@mui/icons-material/Clear';
 import PushPinIcon from '@mui/icons-material/PushPin';
 import PushPinOutlinedIcon from '@mui/icons-material/PushPinOutlined';
-import { GenieService, GenieSpace, GenieSpacesResponse } from '../../api/GenieService';
+import { GenieService, GenieSpace, GenieSpacesResponse } from '../../api/databricks/GenieService';
 
 interface GenieSpaceSelectorProps {
   value: string | string[] | null;

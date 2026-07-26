@@ -27,7 +27,7 @@ vi.mock('../../store/permissions', () => ({
 }));
 
 // Mock the ToolService
-vi.mock('../../api/ToolService', () => ({
+vi.mock('../../api/tools/ToolService', () => ({
   ToolService: {
     listTools: vi.fn().mockResolvedValue([
       {

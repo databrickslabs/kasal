@@ -11,7 +11,7 @@ import LLMLogs from './LLMLogs';
 // Mock the log service
 const mockGetLLMLogs = vi.fn();
 
-vi.mock('../../api/LogService', () => ({
+vi.mock('../../api/execution/LogService', () => ({
   default: {
     getLLMLogs: (...args: any[]) => mockGetLLMLogs(...args),
   },

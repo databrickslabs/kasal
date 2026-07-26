@@ -24,8 +24,8 @@ import {
 import CloseIcon from '@mui/icons-material/Close';
 import SearchIcon from '@mui/icons-material/Search';
 import StorageIcon from '@mui/icons-material/Storage';
-import { ToolService, Tool } from '../../api/ToolService';
-import { MCPService } from '../../api/MCPService';
+import { ToolService, Tool } from '../../api/tools/ToolService';
+import { MCPService } from '../../api/tools/MCPService';
 import { MCPServerConfig } from '../Configuration/MCP/MCPConfiguration';
 
 export interface QuickToolSelectionDialogProps {

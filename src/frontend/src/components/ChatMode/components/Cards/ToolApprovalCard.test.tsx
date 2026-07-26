@@ -10,7 +10,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 const mockApproveGate = vi.fn();
 const mockRejectGate = vi.fn();
-vi.mock('../../../../api/HITLService', () => ({
+vi.mock('../../../../api/execution/HITLService', () => ({
   HITLService: {
     approveGate: (...args: unknown[]) => mockApproveGate(...args),
     rejectGate: (...args: unknown[]) => mockRejectGate(...args),

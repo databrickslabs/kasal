@@ -46,19 +46,19 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
-vi.mock('../../api/DatabricksService', () => ({
+vi.mock('../../api/databricks/DatabricksService', () => ({
   DatabricksService: {
     getInstance: mockGetInstance,
   },
 }));
 
-vi.mock('../../api/MemoryBackendService', () => ({
+vi.mock('../../api/memory/MemoryBackendService', () => ({
   MemoryBackendService: {
     getConfig: mockGetMemoryConfig,
   },
 }));
 
-vi.mock('../../api/ToolService', () => ({
+vi.mock('../../api/tools/ToolService', () => ({
   ToolService: {
     listTools: mockListTools,
     toggleToolEnabled: mockToggleToolEnabled,

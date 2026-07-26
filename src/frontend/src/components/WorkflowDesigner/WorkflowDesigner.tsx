@@ -31,7 +31,7 @@ import { useExecutionHistoryResize } from '../../hooks/workflow/useExecutionHist
 import { useResponsiveLayout } from '../../hooks/workflow/useResponsiveLayout';
 
 import { v4 as _uuidv4 } from 'uuid';
-import { FlowService as _FlowService } from '../../api/FlowService';
+import { FlowService as _FlowService } from '../../api/workflow/FlowService';
 import { useAPIKeysStore as _useAPIKeysStore } from '../../store/apiKeys';
 import { FlowFormData as _FlowFormData, FlowConfiguration as _FlowConfiguration } from '../../types/flow';
 import { createEdge as _createEdge } from '../../utils/edgeUtils';
@@ -64,8 +64,8 @@ import InteractiveTutorial from '../Tutorial/InteractiveTutorial';
 import APIKeys from '../Configuration/APIKeys/APIKeys';
 import Logs from '../Jobs/LLMLogs';
 import ShowLogs from '../Jobs/ShowLogs';
-import { executionLogService } from '../../api/ExecutionLogs';
-import type { LogEntry } from '../../api/ExecutionLogs';
+import { executionLogService } from '../../api/execution/ExecutionLogs';
+import type { LogEntry } from '../../api/execution/ExecutionLogs';
 import Configuration from '../Configuration/Configuration';
 import ToolForm from '../Tools/ToolForm';
 import { CrewFlowSelectionDialog } from '../Crew/CrewFlowDialog';

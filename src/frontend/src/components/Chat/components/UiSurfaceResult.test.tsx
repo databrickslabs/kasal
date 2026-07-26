@@ -11,7 +11,7 @@ import type { Surface } from '../../../shared/a2ui';
 // ---------------------------------------------------------------------------
 
 const mockGetConfig = vi.fn();
-vi.mock('../../../api/UIConfigService', () => ({
+vi.mock('../../../api/config/UIConfigService', () => ({
   UIConfigService: {
     getConfig: (...args: unknown[]) => mockGetConfig(...args),
     // useA2uiThemes seeds synchronously from the session cache and subscribes

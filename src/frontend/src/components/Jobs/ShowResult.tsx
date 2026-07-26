@@ -45,10 +45,10 @@ import { toSurface } from '../ChatMode/utils/surfaceAdapter';
 import { useThemeStore } from '../../store/theme';
 import { ShowResultProps } from '../../types/common';
 import { ResultValue } from '../../types/result';
-import { DatabricksService } from '../../api/DatabricksService';
+import { DatabricksService } from '../../api/databricks/DatabricksService';
 import UCMVResultViewer, { isUCMVResult, UCMVResult } from './UCMVResultViewer';
 import ValidatorResultViewer, { isValidatorResult } from './ValidatorResultViewer';
-import { runService } from '../../api/ExecutionHistoryService';
+import { runService } from '../../api/execution/ExecutionHistoryService';
 
 // eslint-disable-next-line react/prop-types
 const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {

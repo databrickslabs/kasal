@@ -17,7 +17,7 @@ import {
   InputAdornment
 } from '@mui/material';
 import StorageIcon from '@mui/icons-material/Storage';
-import { MCPService } from '../../api/MCPService';
+import { MCPService } from '../../api/tools/MCPService';
 import { MCPServerConfig } from '../Configuration/MCP/MCPConfiguration';
 
 interface MCPServerSelectorProps {

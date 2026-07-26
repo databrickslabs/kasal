@@ -30,7 +30,7 @@ import {
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import DeleteIcon from '@mui/icons-material/Delete';
-import { DatabricksService } from '../../api/DatabricksService';
+import { DatabricksService } from '../../api/databricks/DatabricksService';
 
 export interface MetricViewDeployerConfig {
   databricks_host?: string;

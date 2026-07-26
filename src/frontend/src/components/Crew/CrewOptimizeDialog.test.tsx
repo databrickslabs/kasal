@@ -17,8 +17,8 @@ import { describe, it, expect, vi, beforeEach, Mock } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import CrewOptimizeDialog from './CrewOptimizeDialog';
-import { PromptOptimizationService } from '../../api/PromptOptimizationService';
-import { ModelService } from '../../api/ModelService';
+import { PromptOptimizationService } from '../../api/config/PromptOptimizationService';
+import { ModelService } from '../../api/config/ModelService';
 
 // react-markdown 9.x is ESM-only; passthrough mock renders the raw string.
 vi.mock('react-markdown', () => ({
@@ -32,7 +32,7 @@ vi.mock('react-hot-toast', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
-vi.mock('../../api/PromptOptimizationService', () => ({
+vi.mock('../../api/config/PromptOptimizationService', () => ({
   PromptOptimizationService: {
     listRuns: vi.fn(),
     listCrewEvals: vi.fn(),
@@ -48,7 +48,7 @@ vi.mock('../../api/PromptOptimizationService', () => ({
   },
 }));
 
-vi.mock('../../api/ModelService', () => {
+vi.mock('../../api/config/ModelService', () => {
   const instance = { getEnabledModels: vi.fn() };
   return { ModelService: { getInstance: () => instance } };
 });

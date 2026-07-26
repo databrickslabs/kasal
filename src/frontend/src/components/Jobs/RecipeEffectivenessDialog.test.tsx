@@ -12,7 +12,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 
 const getEffectiveness = vi.fn();
-vi.mock('../../api/WorkflowRecipeService', () => ({
+vi.mock('../../api/workflow/WorkflowRecipeService', () => ({
   WorkflowRecipeService: {
     getEffectiveness: (...a: unknown[]) => getEffectiveness(...a),
   },

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { AgentService, Agent } from '../api/AgentService';
+import { AgentService, Agent } from '../api/workflow/AgentService';
 
 interface AgentCache {
   [agentId: string]: {

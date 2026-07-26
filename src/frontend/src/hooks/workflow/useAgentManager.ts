@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { Node as ReactFlowNode } from 'reactflow';
-import { Agent, AgentService } from '../../api/AgentService';
+import { Agent, AgentService } from '../../api/workflow/AgentService';
 
 interface UseAgentManagerProps {
   nodes: ReactFlowNode[];

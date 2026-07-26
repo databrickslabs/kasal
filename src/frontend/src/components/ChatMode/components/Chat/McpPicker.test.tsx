@@ -17,7 +17,7 @@ vi.mock('../../api/mcp', async (importOriginal) => ({
 
 // Agent Bricks endpoints are fetched lazily when the popover opens.
 const getAgentBricksEndpoints = vi.fn();
-vi.mock('../../../../api/AgentBricksService', () => ({
+vi.mock('../../../../api/databricks/AgentBricksService', () => ({
   AgentBricksService: {
     getEndpoints: (...a: unknown[]) => getAgentBricksEndpoints(...a),
   },

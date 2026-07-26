@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { GroupWithRole } from '../api/GroupService';
+import type { GroupWithRole } from '../api/groups/GroupService';
 
 const getMyGroups = vi.fn();
 
-vi.mock('../api/GroupService', () => ({
+vi.mock('../api/groups/GroupService', () => ({
   GroupService: { getInstance: () => ({ getMyGroups }) },
 }));
 

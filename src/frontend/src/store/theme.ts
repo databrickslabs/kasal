@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { ThemeService } from '../api/ThemeService';
+import { ThemeService } from '../api/config/ThemeService';
 
 // Helper to determine if a theme is dark mode
 const isDarkTheme = (themeName: string): boolean => {

@@ -16,9 +16,9 @@ import {
   MenuItem,
   SelectChangeEvent,
 } from '@mui/material';
-import type { Task } from '../../api/TaskService';
-import { GenerateService } from '../../api/GenerateService';
-import { ModelService } from '../../api/ModelService';
+import type { Task } from '../../api/workflow/TaskService';
+import { GenerateService } from '../../api/workflow/GenerateService';
+import { ModelService } from '../../api/config/ModelService';
 import { Models } from '../../types/models';
 import { TaskGenerationDialogProps } from '../../types/task';
 import { useAPIKeysStore } from '../../store/apiKeys';

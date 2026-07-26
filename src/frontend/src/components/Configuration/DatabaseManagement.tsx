@@ -51,7 +51,7 @@ import {
 } from '@mui/icons-material';
 import { apiClient, config } from '../../config/api/ApiConfig';
 import { useDatabaseStore } from '../../store/databaseStore';
-import { APIKeysService } from '../../api/APIKeysService';
+import { APIKeysService } from '../../api/config/APIKeysService';
 
 // Type guard for Axios errors with response data
 interface ErrorWithResponse {

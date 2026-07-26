@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import SharedWorkspaceNotice from './SharedWorkspaceNotice';
 import { useGroupStore } from '../../../../store/groups';
-import type { GroupWithRole } from '../../../../api/GroupService';
+import type { GroupWithRole } from '../../../../api/groups/GroupService';
 
 const SHARED: GroupWithRole = {
   id: 'team_acme',

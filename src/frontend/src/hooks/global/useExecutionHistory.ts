@@ -1,9 +1,9 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import type { Run } from '../../api/ExecutionHistoryService';
+import type { Run } from '../../api/execution/ExecutionHistoryService';
 import { useRunStatusStore } from '../../store/runStatus';
 import { toast } from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
-import { runService } from '../../api/ExecutionHistoryService';
+import { runService } from '../../api/execution/ExecutionHistoryService';
 import { logger } from '../../utils/logger';
 import { useGroupStore } from '../../store/groups';
 

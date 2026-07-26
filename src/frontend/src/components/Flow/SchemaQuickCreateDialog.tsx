@@ -15,7 +15,7 @@ import {
   Alert,
 } from '@mui/material';
 import { Delete as DeleteIcon, Add as AddIcon } from '@mui/icons-material';
-import { SchemaService } from '../../api/SchemaService';
+import { SchemaService } from '../../api/workflow/SchemaService';
 import { Schema } from '../../types/schema';
 
 interface SchemaField {

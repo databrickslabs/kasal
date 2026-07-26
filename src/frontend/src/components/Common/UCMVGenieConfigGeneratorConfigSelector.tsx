@@ -27,7 +27,7 @@ import {
   Tab,
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import { DatabricksService } from '../../api/DatabricksService';
+import { DatabricksService } from '../../api/databricks/DatabricksService';
 
 export interface UCMVGenieConfigGeneratorConfig {
   space_title?: string;

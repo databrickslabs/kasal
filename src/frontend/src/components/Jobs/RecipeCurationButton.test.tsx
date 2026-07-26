@@ -14,7 +14,7 @@ const getByJob = vi.fn();
 const curate = vi.fn(async () => undefined);
 const getEffectiveness = vi.fn();
 
-vi.mock('../../api/WorkflowRecipeService', () => ({
+vi.mock('../../api/workflow/WorkflowRecipeService', () => ({
   WorkflowRecipeService: {
     getByJob: (...a: unknown[]) => getByJob(...a),
     curate: (...a: unknown[]) => curate(...a),

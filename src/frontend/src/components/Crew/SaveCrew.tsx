@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField } from '@mui/material';
-import { CrewService } from '../../api/CrewService';
+import { CrewService } from '../../api/workflow/CrewService';
 import axios from 'axios';
 import { SaveCrewProps } from '../../types/crews';
 import { Edge } from 'reactflow';

@@ -74,7 +74,7 @@ vi.mock('../../store/databaseStore', () => ({
   useDatabaseStore: () => mockDatabaseStoreState,
 }));
 
-vi.mock('../../api/APIKeysService', () => ({
+vi.mock('../../api/config/APIKeysService', () => ({
   APIKeysService: {
     getInstance: vi.fn(() => ({
       getAPIKeys: mockGetAPIKeys,

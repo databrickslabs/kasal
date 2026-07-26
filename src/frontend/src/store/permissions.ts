@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
-import { GroupService } from '../api/GroupService';
+import { GroupService } from '../api/groups/GroupService';
 import { useUserStore } from './user';
 
 // Define permission types based on backend privileges

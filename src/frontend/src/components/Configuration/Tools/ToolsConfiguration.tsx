@@ -29,9 +29,9 @@ import RocketLaunchIcon from '@mui/icons-material/RocketLaunch';
 import BuildIcon from '@mui/icons-material/Build';
 
 import { usePermissionStore } from '../../../store/permissions';
-import { GroupToolService, type GroupToolMapping } from '../../../api/GroupToolService';
-import { ToolService, type Tool } from '../../../api/ToolService';
-import { APIKeysService, type ApiKey } from '../../../api/APIKeysService';
+import { GroupToolService, type GroupToolMapping } from '../../../api/groups/GroupToolService';
+import { ToolService, type Tool } from '../../../api/tools/ToolService';
+import { APIKeysService, type ApiKey } from '../../../api/config/APIKeysService';
 import SecurityDisclaimer from '../../Tools/SecurityDisclaimer';
 import { Tool as UITool } from '../../../types/tool';
 

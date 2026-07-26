@@ -25,7 +25,7 @@ import {
   FormControlLabel,
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import { DatabricksService } from '../../api/DatabricksService';
+import { DatabricksService } from '../../api/databricks/DatabricksService';
 
 export interface DatabricksDashboardCreatorConfig {
   dashboard_title?: string;

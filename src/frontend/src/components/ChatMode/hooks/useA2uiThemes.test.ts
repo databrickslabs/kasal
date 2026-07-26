@@ -13,7 +13,7 @@ vi.mock('../../../config/api/ApiConfig', () => ({
 }));
 
 import { useA2uiThemes } from './useA2uiThemes';
-import { UIConfigService, UIConfigUpdate } from '../../../api/UIConfigService';
+import { UIConfigService, UIConfigUpdate } from '../../../api/config/UIConfigService';
 
 const cfg = (themes: Record<string, unknown>, enabled = true) => ({
   data: { enabled, catalog_type: 'full', style_json: JSON.stringify({ themes }) },

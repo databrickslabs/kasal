@@ -41,7 +41,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import CheckIcon from '@mui/icons-material/Check';
 import CloseIcon from '@mui/icons-material/Close';
-import { SchemaService } from '../../../api/SchemaService';
+import { SchemaService } from '../../../api/workflow/SchemaService';
 import { Schema, SchemaCreate } from '../../../types/schema';
 
 interface NotificationState {

@@ -31,7 +31,7 @@ import {
   HelpOutline as HelpOutlineIcon,
 } from '@mui/icons-material';
 import { Models } from '../../types/models';
-import { ModelService } from '../../api/ModelService';
+import { ModelService } from '../../api/config/ModelService';
 import { useCrewExecutionStore, ReasoningConfig } from '../../store/crewExecution';
 import { usePermissionStore } from '../../store/permissions';
 import { useWorkflowStore } from '../../store/workflow';

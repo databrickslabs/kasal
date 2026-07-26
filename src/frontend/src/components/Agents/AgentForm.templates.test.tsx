@@ -4,7 +4,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import AgentForm from './AgentForm';
 
 // Mock AgentService
-vi.mock('../../api/AgentService', () => ({
+vi.mock('../../api/workflow/AgentService', () => ({
   AgentService: {
     createAgentFull: vi.fn(),
     updateAgentFull: vi.fn(),
@@ -13,14 +13,14 @@ vi.mock('../../api/AgentService', () => ({
 }));
 
 // Mock ToolService
-vi.mock('../../api/ToolService', () => ({
+vi.mock('../../api/tools/ToolService', () => ({
   ToolService: {
     listTools: vi.fn().mockResolvedValue([]),
   },
 }));
 
 // Mock ModelService
-vi.mock('../../api/ModelService', () => ({
+vi.mock('../../api/config/ModelService', () => ({
   ModelService: {
     listModels: vi.fn().mockResolvedValue({
       'test-model': {
@@ -44,7 +44,7 @@ vi.mock('../../api/LLMProviderService', () => ({
 }));
 
 // Mock GenerateService
-vi.mock('../../api/GenerateService', () => ({
+vi.mock('../../api/workflow/GenerateService', () => ({
   GenerateService: {
     generateTemplates: vi.fn().mockResolvedValue({
       system_template: 'Generated system template',

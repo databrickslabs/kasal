@@ -3,7 +3,7 @@ import { KasalMcpServer, listKasalMcpServers } from '../../api/mcp';
 import { useExecutionStore } from '../../store/executionStore';
 import { useAppStore } from '../../store/appStore';
 import { usePermissionStore } from '../../../../store/permissions';
-import { AgentBricksService, AgentBricksEndpoint } from '../../../../api/AgentBricksService';
+import { AgentBricksService, AgentBricksEndpoint } from '../../../../api/databricks/AgentBricksService';
 
 /**
  * The chat input's "+" control (left of Send): pick the MCP servers (and Agent

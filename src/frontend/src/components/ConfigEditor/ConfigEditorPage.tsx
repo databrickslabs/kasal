@@ -38,8 +38,8 @@ import { getKeyStatus, countTodos } from '../../types/configEditor';
 import ConfigSidebar from './ConfigSidebar';
 import KeyEditor from './KeyEditor';
 import ConfigLoader from './ConfigLoader';
-import { runService } from '../../api/ExecutionHistoryService';
-import { HITLService } from '../../api/HITLService';
+import { runService } from '../../api/execution/ExecutionHistoryService';
+import { HITLService } from '../../api/execution/HITLService';
 
 const ConfigEditorPage: React.FC = () => {
   const theme = useTheme();

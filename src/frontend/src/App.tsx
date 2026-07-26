@@ -6,8 +6,8 @@ import ThemeProvider from './theme/ThemeProvider';
 import ShortcutsCircle from './components/Common/ShortcutsCircle';
 import SSEConnectionManager from './components/Common/SSEConnectionManager';
 import ToolApprovalListener from './components/HITL/ToolApprovalListener';
-import { LanguageService } from './api/LanguageService';
-import DatabaseManagementService from './api/DatabaseManagementService';
+import { LanguageService } from './api/config/LanguageService';
+import DatabaseManagementService from './api/config/DatabaseManagementService';
 import { usePermissionLoader } from './hooks/usePermissions';
 import { useUserStore } from './store/user';
 import { useGroupStore } from './store/groups';
@@ -17,7 +17,6 @@ import './config/i18n/config';
 const RunHistory = lazy(() => import('./components/Jobs/ExecutionHistory'));
 const WorkflowDesigner = lazy(() => import('./components/WorkflowDesigner'));
 const ToolForm = lazy(() => import('./components/Tools/ToolForm'));
-const WorkflowTest = lazy(() => import('./components/WorkflowDesigner/WorkflowTest').then(module => ({ default: module.WorkflowTest })));
 const Documentation = lazy(() => import('./components/Documentation').then(module => ({ default: module.Documentation })));
 const ConverterPage = lazy(() => import('./components/Converter/ConverterPage'));
 const ConfigEditorPage = lazy(() => import('./components/ConfigEditor/ConfigEditorPage'));
@@ -125,7 +124,6 @@ function App() {
             <Route path="/tools" element={<ToolForm />} />
             <Route path="/converter" element={<ConverterPage />} />
             <Route path="/config-editor" element={<ConfigEditorPage />} />
-            <Route path="/workflow-test" element={<WorkflowTest />} />
             <Route path="/docs/*" element={<Documentation />} />
           </Routes>
         </Suspense>

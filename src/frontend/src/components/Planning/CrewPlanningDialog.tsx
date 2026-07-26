@@ -20,15 +20,15 @@ import {
   FormControlLabel,
 } from '@mui/material';
 import { CrewPlanningDialogProps } from '../../types/crewPlan';
-import { ToolService } from '../../api/ToolService';
+import { ToolService } from '../../api/tools/ToolService';
 import { Tool as _Tool } from '../../types/tool';
 import { useModelConfigStore } from '../../store/modelConfig';
 import { useCrewExecutionStore } from '../../store/crewExecution';
-import { ModelService } from '../../api/ModelService';
+import { ModelService } from '../../api/config/ModelService';
 import { Models } from '../../types/models';
 import { useAPIKeysStore } from '../../store/apiKeys';
 import * as ApiKeyUtils from '../../utils/apiKeyUtils';
-import { CrewPlanningService } from '../../api/CrewPlanningService';
+import { CrewPlanningService } from '../../api/workflow/CrewPlanningService';
 
 // Define a proper type for the model objects
 interface _ModelConfig {

@@ -23,7 +23,7 @@ vi.mock('../../../utils/taskIdUtils', () => ({
   mapEventToStatus: vi.fn().mockReturnValue('running'),
 }));
 
-vi.mock('../../../api/ExecutionHistoryService', () => ({
+vi.mock('../../../api/execution/ExecutionHistoryService', () => ({
   runService: {
     getRuns: vi.fn().mockResolvedValue({ runs: [] }),
     getRunByJobId: vi.fn().mockResolvedValue(null),

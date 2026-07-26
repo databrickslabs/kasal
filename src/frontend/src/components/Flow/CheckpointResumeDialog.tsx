@@ -34,7 +34,7 @@ import {
   CheckCircle as CheckCircleIcon
 } from '@mui/icons-material';
 import { useTranslation } from 'react-i18next';
-import { FlowCheckpoint, CrewCheckpoint } from '../../api/FlowService';
+import { FlowCheckpoint, CrewCheckpoint } from '../../api/workflow/FlowService';
 
 interface CheckpointResumeDialogProps {
   open: boolean;

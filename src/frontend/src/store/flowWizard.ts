@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { CrewResponse } from '../types/crews';
 import { CrewTask } from '../types/crewPlan';
 import { Action, Listener, StartingPoint as _FlowStartingPoint, WizardStep, FlowEdgeFormData } from '../types/flow';
-import { CrewService } from '../api/CrewService';
+import { CrewService } from '../api/workflow/CrewService';
 
 interface FlowWizardState {
   activeStep: WizardStep;

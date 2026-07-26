@@ -1,5 +1,5 @@
 import { ApiKey } from '../types/apiKeys';
-import { DatabricksService } from '../api/DatabricksService';
+import { DatabricksService } from '../api/databricks/DatabricksService';
 
 /**
  * API Key Utility Functions

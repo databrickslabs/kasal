@@ -11,9 +11,9 @@ import { describe, it, expect, vi, beforeEach, Mock } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import PromptConfiguration from './PromptConfiguration';
-import { PromptService } from '../../api/PromptService';
+import { PromptService } from '../../api/config/PromptService';
 
-vi.mock('../../api/PromptService', () => {
+vi.mock('../../api/config/PromptService', () => {
   const instance = {
     getAllPrompts: vi.fn(),
     updatePrompt: vi.fn(),

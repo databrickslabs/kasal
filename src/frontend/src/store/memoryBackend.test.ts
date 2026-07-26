@@ -1,7 +1,7 @@
 import { vi, Mock, beforeEach, afterEach, describe, it, test, expect } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useMemoryBackendStore, useMemoryBackendConfig, useMemoryBackendType, useDatabricksConfig } from './memoryBackend';
-import { MemoryBackendService } from '../api/MemoryBackendService';
+import { MemoryBackendService } from '../api/memory/MemoryBackendService';
 import { 
   MemoryBackendType, 
   DEFAULT_MEMORY_BACKEND_CONFIG, 
@@ -10,7 +10,7 @@ import {
 } from '../types/memoryBackend';
 
 // Mock the MemoryBackendService
-vi.mock('../api/MemoryBackendService');
+vi.mock('../api/memory/MemoryBackendService');
 
 describe('memoryBackendStore', () => {
   beforeEach(() => {

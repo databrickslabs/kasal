@@ -24,7 +24,7 @@ import apiClient from '../../config/api/ApiConfig';
 import { useUserPreferencesStore } from '../../store/userPreferencesStore';
 import { useTranslation } from 'react-i18next';
 import ShowLogs from './ShowLogs';
-import { executionLogService, LogEntry } from '../../api/ExecutionLogs';
+import { executionLogService, LogEntry } from '../../api/execution/ExecutionLogs';
 import { useRunResult } from '../../hooks/global/useExecutionResult';
 import { useTraceData } from '../../hooks/global/useTraceData';
 import TraceTimelineContent from './TraceTimelineContent';

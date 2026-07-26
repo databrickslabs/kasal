@@ -40,7 +40,7 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorIcon from '@mui/icons-material/Error';
 
 import { useTranslation } from 'react-i18next';
-import { MCPService } from '../../../api/MCPService';
+import { MCPService } from '../../../api/tools/MCPService';
 import DatabricksMcpCatalog from './DatabricksMcpCatalog';
 
 // Define MCP Server configuration interface

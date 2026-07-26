@@ -22,13 +22,13 @@ import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import WarningIcon from '@mui/icons-material/Warning';
 import BuildIcon from '@mui/icons-material/Build';
-import { GroupService } from '../../api/GroupService';
-import { DatabricksService, DatabricksConfig } from '../../api/DatabricksService';
-import { MemoryBackendService } from '../../api/MemoryBackendService';
+import { GroupService } from '../../api/groups/GroupService';
+import { DatabricksService, DatabricksConfig } from '../../api/databricks/DatabricksService';
+import { MemoryBackendService } from '../../api/memory/MemoryBackendService';
 import { MemoryBackendConfig } from '../../types/memoryBackend';
 import { usePermissionStore } from '../../store/permissions';
-import { ToolService, Tool as ServiceTool } from '../../api/ToolService';
-import { MCPService } from '../../api/MCPService';
+import { ToolService, Tool as ServiceTool } from '../../api/tools/ToolService';
+import { MCPService } from '../../api/tools/MCPService';
 import type { MCPServerConfig } from '../Configuration/MCP/MCPConfiguration';
 
 interface WorkspaceInfo {

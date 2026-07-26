@@ -22,7 +22,7 @@ import SmartToyIcon from '@mui/icons-material/SmartToy';
 import InputIcon from '@mui/icons-material/Input';
 import ChatIcon from '@mui/icons-material/Chat';
 import { useFlowConfigStore } from '../../../store/flowConfig';
-import { EngineConfigService } from '../../../api/EngineConfigService';
+import { EngineConfigService } from '../../../api/config/EngineConfigService';
 import { useCrewExecutionStore } from '../../../store/crewExecution';
 
 const EnginesConfiguration: React.FC = () => {

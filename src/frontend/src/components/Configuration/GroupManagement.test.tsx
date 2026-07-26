@@ -23,7 +23,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 // Mock GroupService as singleton
-vi.mock('../../api/GroupService', () => ({
+vi.mock('../../api/groups/GroupService', () => ({
   GroupService: {
     getInstance: vi.fn(() => ({
       getGroups: mocks.mockGetGroups,
@@ -38,7 +38,7 @@ vi.mock('../../api/GroupService', () => ({
 }));
 
 // Mock UserService as singleton
-vi.mock('../../api/UserService', () => ({
+vi.mock('../../api/groups/UserService', () => ({
   UserService: {
     getInstance: vi.fn(() => ({
       getUsers: mocks.mockGetUsers,

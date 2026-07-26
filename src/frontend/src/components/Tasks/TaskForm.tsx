@@ -29,7 +29,7 @@ import {
   FormControlLabel,
   CircularProgress,
 } from '@mui/material';
-import { type Task } from '../../api/TaskService';
+import { type Task } from '../../api/workflow/TaskService';
 import { type Agent } from '../../types/agent';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import OpenInFullIcon from '@mui/icons-material/OpenInFull';
@@ -38,9 +38,9 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
 import { TaskAdvancedConfig } from './TaskAdvancedConfig';
-import { TaskService } from '../../api/TaskService';
-import { GenerateService } from '../../api/GenerateService';
-import { DatabricksService } from '../../api/DatabricksService';
+import { TaskService } from '../../api/workflow/TaskService';
+import { GenerateService } from '../../api/workflow/GenerateService';
+import { DatabricksService } from '../../api/databricks/DatabricksService';
 import { useCrewExecutionStore } from '../../store/crewExecution';
 import useStableResize from '../../hooks/global/useStableResize';
 import { GenieSpaceSelector } from '../Common/GenieSpaceSelector';
@@ -69,7 +69,7 @@ import { PBIVisualUCMVMapperConfigSelector, PBIVisualUCMVMapperConfig } from '..
 import { DatabricksDashboardCreatorConfigSelector, DatabricksDashboardCreatorConfig } from '../Common/DatabricksDashboardCreatorConfigSelector';
 import { PerplexityConfig, SerperConfig } from '../../types/config';
 import { type LLMGuardrailConfig } from '../../types/task';
-import { ModelService } from '../../api/ModelService';
+import { ModelService } from '../../api/config/ModelService';
 import { type ModelConfig } from '../../types/models';
 import TaskBestPractices from '../BestPractices/TaskBestPractices';
 

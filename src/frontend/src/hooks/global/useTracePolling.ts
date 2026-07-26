@@ -25,7 +25,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { apiClient } from '../../config/api/ApiConfig';
 import { SSE_ENABLED } from '../../utils/sseTransport';
-import { HITLService } from '../../api/HITLService';
+import { HITLService } from '../../api/execution/HITLService';
 import { useRunStatusStore } from '../../store/runStatus';
 import { useFlowExecutionStore } from '../../store/flowExecutionStore';
 import { useTaskExecutionStore } from '../../store/taskExecutionStore';

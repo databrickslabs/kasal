@@ -10,10 +10,10 @@ import { describe, it, expect, vi, beforeEach, Mock } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import PromptOptimization from './PromptOptimization';
-import { PromptOptimizationService } from '../../api/PromptOptimizationService';
-import { ModelService } from '../../api/ModelService';
+import { PromptOptimizationService } from '../../api/config/PromptOptimizationService';
+import { ModelService } from '../../api/config/ModelService';
 
-vi.mock('../../api/PromptOptimizationService', () => ({
+vi.mock('../../api/config/PromptOptimizationService', () => ({
   PromptOptimizationService: {
     listRuns: vi.fn(),
     startOptimization: vi.fn(),
@@ -21,7 +21,7 @@ vi.mock('../../api/PromptOptimizationService', () => ({
   },
 }));
 
-vi.mock('../../api/ModelService', () => {
+vi.mock('../../api/config/ModelService', () => {
   const instance = { getEnabledModels: vi.fn() };
   return { ModelService: { getInstance: () => instance } };
 });

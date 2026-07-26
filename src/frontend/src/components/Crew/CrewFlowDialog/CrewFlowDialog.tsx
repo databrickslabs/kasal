@@ -21,8 +21,8 @@ import {
   Tab,
   Divider
 } from '@mui/material';
-import { CrewService, CrewFeedbackService, CrewFeedbackEntry } from '../../../api/CrewService';
-import { FlowService } from '../../../api/FlowService';
+import { CrewService, CrewFeedbackService, CrewFeedbackEntry } from '../../../api/workflow/CrewService';
+import { FlowService } from '../../../api/workflow/FlowService';
 import { CrewResponse } from '../../../types/crews';
 import { FlowResponse } from '../../../types/flow';
 import { CrewFlowSelectionDialogProps } from '../../../types/crewflowDialog';
@@ -39,8 +39,8 @@ import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import CrewOptimizeDialog from '../CrewOptimizeDialog';
 import FileUploadIcon from '@mui/icons-material/FileUpload';
 import EditFlowForm from '../../Flow/EditFlowForm';
-import { AgentService } from '../../../api/AgentService';
-import { TaskService } from '../../../api/TaskService';
+import { AgentService } from '../../../api/workflow/AgentService';
+import { TaskService } from '../../../api/workflow/TaskService';
 import { Agent } from '../../../types/agent';
 import { Task } from '../../../types/task';
 import GroupIcon from '@mui/icons-material/Group';

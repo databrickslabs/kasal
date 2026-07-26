@@ -10,7 +10,7 @@ import { Theme } from '@mui/material/styles';
 import ConditionEditForm from './ConditionEditForm';
 import type { FlowFormData } from '../../types/flow';
 import { apiClient } from '../../config/api/ApiConfig';
-import { CrewService } from '../../api/CrewService';
+import { CrewService } from '../../api/workflow/CrewService';
 
 interface ConditionFlowNodeData {
   conditionId: string;

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField } from '@mui/material';
-import { FlowService } from '../../api/FlowService';
+import { FlowService } from '../../api/workflow/FlowService';
 import axios from 'axios';
 import { Edge, Node } from 'reactflow';
 import { useTabManagerStore } from '../../store/tabManager';

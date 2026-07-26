@@ -1,13 +1,13 @@
 import { vi, Mock, beforeEach, afterEach, describe, it, expect } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useKnowledgeConfigStore } from './knowledgeConfigStore';
-import { MemoryBackendService } from '../api/MemoryBackendService';
-import { DatabricksService } from '../api/DatabricksService';
+import { MemoryBackendService } from '../api/memory/MemoryBackendService';
+import { DatabricksService } from '../api/databricks/DatabricksService';
 import { MemoryBackendType } from '../types/memoryBackend';
 
 // Mock the API services so the store never hits the network.
-vi.mock('../api/MemoryBackendService');
-vi.mock('../api/DatabricksService');
+vi.mock('../api/memory/MemoryBackendService');
+vi.mock('../api/databricks/DatabricksService');
 
 // Snapshot of the pristine initial state so we can fully reset between tests.
 const INITIAL_STATE = {

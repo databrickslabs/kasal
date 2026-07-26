@@ -112,7 +112,7 @@ vi.mock('./WorkflowDialogManager', () => ({
 }));
 vi.mock('../Chat/utils/chatHelpers', () => ({ handleNodesGenerated: vi.fn() }));
 vi.mock('./WorkflowUtils', () => ({ setupResizeObserverErrorHandling: vi.fn() }));
-vi.mock('../../api/ExecutionLogs', () => ({ executionLogService: { getHistoricalLogs: vi.fn(), connectToLogs: vi.fn() } }));
+vi.mock('../../api/execution/ExecutionLogs', () => ({ executionLogService: { getHistoricalLogs: vi.fn(), connectToLogs: vi.fn() } }));
 
 import WorkflowDesigner from './WorkflowDesigner';
 import { useUILayoutStore } from '../../store/uiLayout';

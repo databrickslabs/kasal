@@ -19,7 +19,7 @@ import { nodeTypes as importedNodeTypes, edgeTypes as importedEdgeTypes } from '
 
 import useShortcuts from '../../hooks/global/useShortcuts';
 import { Agent } from '../../types/agent';
-import { ToolService } from '../../api/ToolService';
+import { ToolService } from '../../api/tools/ToolService';
 import { Tool as ToolType } from '../../types/agent';
 import { useJobManagementStore } from '../../store/jobManagement';
 import { useCrewExecutionStore } from '../../store/crewExecution';

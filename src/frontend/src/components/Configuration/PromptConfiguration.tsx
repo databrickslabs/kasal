@@ -23,7 +23,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import RestoreIcon from '@mui/icons-material/RestoreOutlined';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import { Tooltip } from '@mui/material';
-import { PromptService, PromptTemplate } from '../../api/PromptService';
+import { PromptService, PromptTemplate } from '../../api/config/PromptService';
 import { OPTIMIZABLE_TEMPLATES } from './optimizableTemplates';
 
 const OPTIMIZABLE_NAMES = new Set(OPTIMIZABLE_TEMPLATES.map((tpl) => tpl.name));

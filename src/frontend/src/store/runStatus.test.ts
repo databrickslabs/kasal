@@ -11,14 +11,14 @@ import { Trace } from '../types/trace';
 import { ExtendedRun } from '../types/run';
 
 // Mock the runService used by fetchInitialRunHistory
-vi.mock('../api/ExecutionHistoryService', () => ({
+vi.mock('../api/execution/ExecutionHistoryService', () => ({
   runService: {
     getRuns: vi.fn(),
     invalidateRunsCache: vi.fn(),
   },
 }));
 
-import { runService } from '../api/ExecutionHistoryService';
+import { runService } from '../api/execution/ExecutionHistoryService';
 
 describe('runStatus store', () => {
   beforeEach(() => {

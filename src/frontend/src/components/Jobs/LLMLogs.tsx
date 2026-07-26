@@ -27,7 +27,7 @@ import KeyboardArrowDown from '@mui/icons-material/KeyboardArrowDown';
 import KeyboardArrowUp from '@mui/icons-material/KeyboardArrowUp';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import { LLMLog, LogRowProps } from '../../types/common';
-import logService from '../../api/LogService';
+import logService from '../../api/execution/LogService';
 import { useTranslation } from 'react-i18next';
 
 // Row component for expandable details

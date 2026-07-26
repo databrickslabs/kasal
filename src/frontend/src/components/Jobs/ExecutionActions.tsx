@@ -6,7 +6,7 @@ import PreviewIcon from '@mui/icons-material/Preview';
 import TerminalIcon from '@mui/icons-material/Terminal';
 import ScheduleIcon from '@mui/icons-material/Schedule';
 import VisibilityIcon from '@mui/icons-material/Visibility';
-import { Run } from '../../api/ExecutionHistoryService';
+import { Run } from '../../api/execution/ExecutionHistoryService';
 import { generateRunPDF } from '../../utils/pdfGenerator';
 import { useTranslation } from 'react-i18next';
 import ExecutionStopButton from './ExecutionStopButton';

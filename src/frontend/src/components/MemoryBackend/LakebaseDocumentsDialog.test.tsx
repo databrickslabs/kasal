@@ -2,9 +2,9 @@ import { describe, it, expect, vi, beforeEach, afterEach, Mock } from 'vitest';
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import { MemoryBackendService } from '../../api/MemoryBackendService';
+import { MemoryBackendService } from '../../api/memory/MemoryBackendService';
 
-vi.mock('../../api/MemoryBackendService', () => ({
+vi.mock('../../api/memory/MemoryBackendService', () => ({
   MemoryBackendService: {
     getLakebaseTableData: vi.fn(),
   },

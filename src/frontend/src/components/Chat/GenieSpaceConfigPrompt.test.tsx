@@ -16,7 +16,7 @@ const { mockPatchTaskToolConfigs, mockSetNodes } = vi.hoisted(() => ({
   }),
 }));
 
-vi.mock('../../api/TaskService', () => ({
+vi.mock('../../api/workflow/TaskService', () => ({
   TaskService: { patchTaskToolConfigs: mockPatchTaskToolConfigs },
 }));
 

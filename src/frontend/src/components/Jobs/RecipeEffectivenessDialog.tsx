@@ -34,7 +34,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import {
   RecipeEffectiveness,
   WorkflowRecipeService,
-} from '../../api/WorkflowRecipeService';
+} from '../../api/workflow/WorkflowRecipeService';
 
 const pct = (value: number | null | undefined): string =>
   value === null || value === undefined ? '—' : `${Math.round(value * 100)}%`;

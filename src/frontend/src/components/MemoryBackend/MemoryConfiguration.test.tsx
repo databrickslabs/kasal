@@ -66,17 +66,17 @@ vi.mock('../../store/memoryBackend', () => ({
   useCognitiveMemoryConfig: () => ({}),
 }));
 
-vi.mock('../../api/DatabricksVectorSearchService', () => ({
+vi.mock('../../api/databricks/DatabricksVectorSearchService', () => ({
   default: mockDVSService,
 }));
 
-vi.mock('../../api/MemoryBackendService', () => ({
+vi.mock('../../api/memory/MemoryBackendService', () => ({
   MemoryBackendService: mockMBService,
 }));
 
 // CognitiveMemoryPanel (rendered inside this component) fetches enabled models;
 // stub it so the model dropdown resolves deterministically without real API churn.
-vi.mock('../../api/ModelService', () => ({
+vi.mock('../../api/config/ModelService', () => ({
   ModelService: {
     getInstance: () => ({
       getActiveModels: vi.fn().mockResolvedValue({}),

@@ -6,7 +6,7 @@ import SchemaQuickCreateDialog from './SchemaQuickCreateDialog';
 
 const mockCreateSchema = vi.fn();
 
-vi.mock('../../api/SchemaService', () => ({
+vi.mock('../../api/workflow/SchemaService', () => ({
   SchemaService: { getInstance: () => ({ createSchema: mockCreateSchema }) },
 }));
 

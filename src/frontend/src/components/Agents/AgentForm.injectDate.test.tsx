@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event';
 import AgentForm from './AgentForm';
 
 // Mock AgentService
-vi.mock('../../api/AgentService', () => ({
+vi.mock('../../api/workflow/AgentService', () => ({
   AgentService: {
     createAgent: vi.fn().mockResolvedValue({
       id: 'new-agent-id',
@@ -32,14 +32,14 @@ vi.mock('../../api/AgentService', () => ({
 }));
 
 // Mock ToolService
-vi.mock('../../api/ToolService', () => ({
+vi.mock('../../api/tools/ToolService', () => ({
   ToolService: {
     listTools: vi.fn().mockResolvedValue([]),
   },
 }));
 
 // Mock ModelService with getInstance pattern
-vi.mock('../../api/ModelService', () => ({
+vi.mock('../../api/config/ModelService', () => ({
   ModelService: {
     getInstance: vi.fn(() => ({
       getActiveModels: vi.fn().mockResolvedValue({
@@ -72,7 +72,7 @@ vi.mock('../../api/LLMProviderService', () => ({
 }));
 
 // Mock GenerateService
-vi.mock('../../api/GenerateService', () => ({
+vi.mock('../../api/workflow/GenerateService', () => ({
   GenerateService: {
     generateTemplates: vi.fn().mockResolvedValue({
       system_template: 'Generated system template',
@@ -83,7 +83,7 @@ vi.mock('../../api/GenerateService', () => ({
 }));
 
 // Mock DefaultMemoryBackendService
-vi.mock('../../api/DefaultMemoryBackendService', () => ({
+vi.mock('../../api/memory/DefaultMemoryBackendService', () => ({
   DefaultMemoryBackendService: {
     getInstance: vi.fn(() => ({
       getDefaultConfig: vi.fn().mockReturnValue(null),
@@ -92,7 +92,7 @@ vi.mock('../../api/DefaultMemoryBackendService', () => ({
 }));
 
 // Mock DatabricksService
-vi.mock('../../api/DatabricksService', () => ({
+vi.mock('../../api/databricks/DatabricksService', () => ({
   DatabricksService: {
     getInstance: vi.fn(() => ({
       getDatabricksConfig: vi.fn().mockResolvedValue(null),
@@ -523,7 +523,7 @@ describe('AgentForm - Inject Date Feature', () => {
 
   describe('Form Submission', () => {
     it('should include inject_date=true and date_format in form submission for new agent', async () => {
-      const { AgentService } = await import('../../api/AgentService');
+      const { AgentService } = await import('../../api/workflow/AgentService');
 
       render(<AgentForm {...defaultProps} />);
 
@@ -560,7 +560,7 @@ describe('AgentForm - Inject Date Feature', () => {
     });
 
     it('should include inject_date=false in form submission when toggled off', async () => {
-      const { AgentService } = await import('../../api/AgentService');
+      const { AgentService } = await import('../../api/workflow/AgentService');
 
       render(<AgentForm {...defaultProps} />);
 
@@ -596,7 +596,7 @@ describe('AgentForm - Inject Date Feature', () => {
     });
 
     it('should update existing agent with inject_date and date_format', async () => {
-      const { AgentService } = await import('../../api/AgentService');
+      const { AgentService } = await import('../../api/workflow/AgentService');
 
       const existingAgent = {
         id: 'agent-123',
@@ -638,7 +638,7 @@ describe('AgentForm - Inject Date Feature', () => {
     });
 
     it('should handle undefined date_format in submission when field is empty', async () => {
-      const { AgentService } = await import('../../api/AgentService');
+      const { AgentService } = await import('../../api/workflow/AgentService');
 
       render(<AgentForm {...defaultProps} />);
 

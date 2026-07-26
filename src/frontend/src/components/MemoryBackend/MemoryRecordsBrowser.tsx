@@ -55,7 +55,7 @@ import AccountTreeIcon from '@mui/icons-material/AccountTree';
 
 import { apiClient } from '../../config/api/ApiConfig';
 import { ConceptForceGraph } from './ConceptForceGraph';
-import { runService } from '../../api/ExecutionHistoryService';
+import { runService } from '../../api/execution/ExecutionHistoryService';
 import { Run } from '../../types/run';
 
 // Sentinel run id for the opt-in "show every run at once" (full graph) view.

@@ -33,7 +33,7 @@ import PersonIcon from '@mui/icons-material/Person';
 import WorkspacesIcon from '@mui/icons-material/Workspaces';
 import DeleteIcon from '@mui/icons-material/Delete';
 import WarningIcon from '@mui/icons-material/Warning';
-import { UserService, User, UserPermissionUpdate } from '../../api/UserService';
+import { UserService, User, UserPermissionUpdate } from '../../api/groups/UserService';
 
 interface NotificationState {
   open: boolean;

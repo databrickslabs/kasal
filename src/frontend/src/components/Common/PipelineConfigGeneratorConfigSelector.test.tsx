@@ -9,7 +9,7 @@ import {
 
 // Mock the Databricks service used by the "Connect" button.
 const mockListWarehouses = vi.hoisted(() => vi.fn());
-vi.mock('../../api/DatabricksService', () => ({
+vi.mock('../../api/databricks/DatabricksService', () => ({
   DatabricksService: { listWarehouses: mockListWarehouses },
 }));
 

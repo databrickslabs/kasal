@@ -29,7 +29,7 @@ import {
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
-import { DatabricksService } from '../../api/DatabricksService';
+import { DatabricksService } from '../../api/databricks/DatabricksService';
 
 export interface GenieSpaceConfig {
   space_title?: string;

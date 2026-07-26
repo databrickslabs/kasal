@@ -42,10 +42,10 @@ import {
   HITLService,
   HITLApprovalResponse,
   HITLRejectionAction,
-} from '../../api/HITLService';
+} from '../../api/execution/HITLService';
 import UCMVResultViewer, { isUCMVResult, UCMVResult } from '../Jobs/UCMVResultViewer';
 import { GenieSpaceConfigSelector, GenieSpaceConfig } from '../Common/GenieSpaceConfigSelector';
-import { runService } from '../../api/ExecutionHistoryService';
+import { runService } from '../../api/execution/ExecutionHistoryService';
 import SaveIcon from '@mui/icons-material/Save';
 import DownloadIcon from '@mui/icons-material/Download';
 import { CrewOutputRenderer } from './CrewOutputRenderer';

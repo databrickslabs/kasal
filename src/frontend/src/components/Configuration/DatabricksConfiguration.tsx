@@ -22,11 +22,11 @@ import SaveIcon from '@mui/icons-material/Save';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import StorageIcon from '@mui/icons-material/Storage';
 import { useTranslation } from 'react-i18next';
-import { DatabricksService, DatabricksConfig, DatabricksTokenStatus, DatabricksConnectionStatus } from '../../api/DatabricksService';
-import { MemoryBackendService } from '../../api/MemoryBackendService';
+import { DatabricksService, DatabricksConfig, DatabricksTokenStatus, DatabricksConnectionStatus } from '../../api/databricks/DatabricksService';
+import { MemoryBackendService } from '../../api/memory/MemoryBackendService';
 import { MemoryBackendType, isValidMemoryBackendConfig, isKnowledgeCapableMemoryConfig } from '../../types/memoryBackend';
 import { useKnowledgeConfigStore } from '../../store/knowledgeConfigStore';
-import { ToolService } from '../../api/ToolService';
+import { ToolService } from '../../api/tools/ToolService';
 
 import apiClient from '../../config/api/ApiConfig';
 import { AxiosError } from 'axios';

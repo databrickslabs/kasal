@@ -9,7 +9,7 @@ import { MCPServerSelector } from './MCPServerSelector';
 const mockGetMcpServers = vi.hoisted(() => vi.fn());
 
 // Mock MCPService
-vi.mock('../../api/MCPService', () => ({
+vi.mock('../../api/tools/MCPService', () => ({
   MCPService: {
     getInstance: vi.fn(() => ({
       getMcpServers: mockGetMcpServers,

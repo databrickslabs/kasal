@@ -15,7 +15,7 @@ import React, { useState, useCallback } from 'react';
 import { Box, Typography, Button, Chip, Stack } from '@mui/material';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import { GenieSpaceSelector } from '../Common/GenieSpaceSelector';
-import { TaskService } from '../../api/TaskService';
+import { TaskService } from '../../api/workflow/TaskService';
 import { useWorkflowStore } from '../../store/workflow';
 import type { ToolConfigNeededData } from '../../hooks/global/useCrewGenerationSSE';
 

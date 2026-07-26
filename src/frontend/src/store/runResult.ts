@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Run } from '../api/ExecutionHistoryService';
+import { Run } from '../api/execution/ExecutionHistoryService';
 
 interface RunResultState {
   selectedRun: Run | null;

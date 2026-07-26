@@ -83,14 +83,14 @@ vi.mock('react-hot-toast', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
-vi.mock('../../api/ExecutionLogs', () => ({
+vi.mock('../../api/execution/ExecutionLogs', () => ({
   executionLogService: {
     connectToJobLogs: vi.fn(),
     disconnectFromJob: vi.fn(),
   },
 }));
 
-vi.mock('../../api/ScheduleService', () => ({
+vi.mock('../../api/execution/ScheduleService', () => ({
   ScheduleService: {
     getInstance: () => ({
       createScheduleFromRun: vi.fn(),
