@@ -11,15 +11,17 @@ import pytest
 from unittest.mock import AsyncMock, patch
 from types import SimpleNamespace
 
-from src.api.memory_backend_router import (
-    get_workspace_url,
-    validate_memory_config,
-    get_databricks_indexes,
+from src.api.memory_backend import vectorsearch_router as _vectorsearch
+from src.api.memory_backend.configs_router import validate_memory_config
+from src.api.memory_backend.vectorsearch_router import (
     create_databricks_index,
-    get_lakebase_table_data,
-    get_lakebase_entity_data,
+    get_databricks_indexes,
+    get_workspace_url,
 )
-import importlib
+from src.api.memory_backend.lakebase_router import (
+    get_lakebase_entity_data,
+    get_lakebase_table_data,
+)
 from src.schemas.memory_backend import MemoryBackendConfig, DatabricksMemoryConfig, MemoryBackendType
 
 
@@ -70,15 +72,14 @@ async def test_get_workspace_url_and_indexes_and_connection():
     assert ws["workspace_url"] == "https://x"
 
     # test connection
-    with patch('src.api.memory_backend_router.extract_user_token_from_request', return_value='tok'):
+    with patch('src.api.memory_backend.vectorsearch_router.extract_user_token_from_request', return_value='tok'):
         svc.test_databricks_connection = AsyncMock(return_value={"success": True})
         cfg = DatabricksMemoryConfig(
             endpoint_name='ep',
             memory_index='catalog.schema.unified',
             embedding_dimension=1024,
         )
-        m = importlib.import_module('src.api.memory_backend_router')
-        out = await m.test_databricks_connection(config=cfg, request=None, group_context=ctx, service=svc)
+        out = await _vectorsearch.test_databricks_connection(config=cfg, request=None, group_context=ctx, service=svc)
         assert out["success"] is True
 
         # indexes
@@ -114,7 +115,7 @@ async def test_create_databricks_index_validations_and_success():
         "table_name": "t",
         "primary_key": "id",
     }
-    with patch('src.api.memory_backend_router.extract_user_token_from_request', return_value='tok'):
+    with patch('src.api.memory_backend.vectorsearch_router.extract_user_token_from_request', return_value='tok'):
         svc.create_databricks_index = AsyncMock(return_value={"success": True})
         out = await create_databricks_index(request=req, req=None, group_context=ctx, service=svc)
         assert out["success"] is True

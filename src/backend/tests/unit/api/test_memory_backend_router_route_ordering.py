@@ -11,7 +11,8 @@ from unittest.mock import AsyncMock, MagicMock
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from src.api.memory_backend_router import router, get_memory_backend_service
+from src.api.memory_backend import router
+from src.api.memory_backend.dependencies import get_memory_backend_service
 from src.core.dependencies import get_group_context
 from src.db.database_router import get_smart_db_session
 from src.schemas.memory_backend import MemoryBackendType

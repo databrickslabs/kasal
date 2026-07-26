@@ -39,7 +39,7 @@ from src.api.healthcheck_router import router as healthcheck_router
 from src.api.hitl_router import router as hitl_router
 from src.api.logs_router import router as logs_router
 from src.api.mcp_router import router as mcp_router
-from src.api.memory_backend_router import router as memory_backend_router
+from src.api.memory_backend import router as memory_backend_router
 from src.api.mlflow_router import router as mlflow_router
 from src.api.models_router import router as models_router
 from src.api.powerbi_router import router as powerbi_router

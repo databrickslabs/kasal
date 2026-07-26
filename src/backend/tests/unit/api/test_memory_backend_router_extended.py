@@ -1,5 +1,5 @@
 """
-Extended tests for memory_backend_router.py to cover missing lines.
+Extended tests for the src/api/memory_backend package to cover missing lines.
 Focuses on: get_memory_backend_service factory (line 44),
 set_default_memory_config not-found, one_click_databricks_setup
 workspace_url paths, and various endpoints with missing branches.
@@ -8,15 +8,14 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from types import SimpleNamespace
 
-from src.api.memory_backend_router import (
-    get_memory_backend_service,
-    set_default_memory_config,
-    get_memory_stats,
-    one_click_databricks_setup,
+from src.api.memory_backend import lakebase_router as _lakebase
+from src.api.memory_backend.configs_router import set_default_memory_config
+from src.api.memory_backend.vectorsearch_router import (
     get_workspace_url,
+    one_click_databricks_setup,
 )
-import importlib
-_m = importlib.import_module("src.api.memory_backend_router")
+from src.api.memory_backend.dependencies import get_memory_backend_service
+from src.api.memory_backend.records_router import get_memory_stats
 from src.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
 
 
@@ -41,7 +40,7 @@ def test_get_memory_backend_service_creates_instance():
     from src.services.memory_backend_service import MemoryBackendService
 
     fake_session = MagicMock()
-    with patch("src.api.memory_backend_router.MemoryBackendService") as MockSvc:
+    with patch("src.api.memory_backend.dependencies.MemoryBackendService") as MockSvc:
         MockSvc.return_value = MagicMock(spec=MemoryBackendService)
         svc = get_memory_backend_service(session=fake_session)
         MockSvc.assert_called_once_with(fake_session)
@@ -71,7 +70,7 @@ async def test_lakebase_conn_success():
     )
     ctx = AdminCtx()
 
-    out = await _m.test_lakebase_connection(
+    out = await _lakebase.test_lakebase_connection(
         group_context=ctx, service=svc, request=None
     )
     assert out["success"] is True
@@ -86,7 +85,7 @@ async def test_lakebase_conn_with_instance_name():
     )
     ctx = AdminCtx()
 
-    out = await _m.test_lakebase_connection(
+    out = await _lakebase.test_lakebase_connection(
         group_context=ctx, service=svc, request={"instance_name": "my-instance"}
     )
     svc.test_lakebase_connection.assert_called_once_with(instance_name="my-instance")
@@ -99,7 +98,7 @@ async def test_lakebase_conn_exception_returns_error():
     svc.test_lakebase_connection = AsyncMock(side_effect=Exception("network error"))
     ctx = AdminCtx()
 
-    out = await _m.test_lakebase_connection(
+    out = await _lakebase.test_lakebase_connection(
         group_context=ctx, service=svc, request=None
     )
     assert out["success"] is False
