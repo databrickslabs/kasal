@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { CrewSection, ProcessedTraces, RunConfig, RunConfigAgent, RunConfigTask, TimelineItem } from '../../types/execution/trace';
+import { CrewSection, ProcessedTraces, RunConfig, RunConfigAgent, RunConfigTask, SelectedTraceEvent, TimelineItem } from '../../types/execution/trace';
 import {
   processTraceEvent,
   extractOutputForDisplay,
@@ -26,27 +26,9 @@ interface UseTraceDataReturn {
   expandedTasks: Set<string>;
   toggleAgent: (index: number) => void;
   toggleTask: (taskKey: string) => void;
-  selectedEvent: {
-    type: string;
-    description: string;
-    intrinsicMs?: number;
-    output?: string | Record<string, unknown>;
-    extraData?: Record<string, unknown>;
-  } | null;
-  setSelectedEvent: (event: {
-    type: string;
-    description: string;
-    intrinsicMs?: number;
-    output?: string | Record<string, unknown>;
-    extraData?: Record<string, unknown>;
-  } | null) => void;
-  handleEventClick: (event: {
-    type: string;
-    description: string;
-    intrinsicMs?: number;
-    output?: string | Record<string, unknown>;
-    extraData?: Record<string, unknown>;
-  }) => void;
+  selectedEvent: SelectedTraceEvent | null;
+  setSelectedEvent: (event: SelectedTraceEvent | null) => void;
+  handleEventClick: (event: SelectedTraceEvent) => void;
   selectedTaskDescription: {
     taskName: string;
     taskId?: string;
@@ -59,7 +41,12 @@ interface UseTraceDataReturn {
     fullDescription?: string;
     isLoading: boolean;
   } | null) => void;
-  handleTaskDescriptionClick: (taskName: string, taskId?: string, e?: React.MouseEvent) => void;
+  handleTaskDescriptionClick: (task: {
+    taskName: string;
+    taskId?: string;
+    configTaskId?: string;
+    fullDescription?: string;
+  }, e?: React.MouseEvent) => void;
   formatDuration: (ms: number) => string;
   formatTimeDelta: (start: Date, timestamp: Date) => string;
   truncateTaskName: (name: string, maxLength?: number) => string;
@@ -178,6 +165,45 @@ export function processTraces(rawTraces: Trace[]): ProcessedTraces {
   const spanIdToAgent = new Map<string, string>();
   const taskIdToName = new Map<string, string>();
   const taskIdToAgent = new Map<string, string>();
+  // Runtime task id -> the task's id in the tasks table (stamped by the engine
+  // as `frontend_task_id`). The task id on a trace is the ENGINE's per-run Task
+  // uuid, which has no row in `tasks` — fetching /tasks/{that} is a guaranteed
+  // 404, so only this id is ever safe to look up.
+  const taskIdToConfigId = new Map<string, string>();
+  // Runtime task id -> the FULL, untruncated description. Every per-event copy
+  // is capped server-side (event_context at 500 chars, trace_metadata.task_name
+  // at 200), so the complete text only exists in two places: the task's own
+  // task_started span (`task_description_full`, written once per task) and the
+  // crew config captured on the crew boundary (`crew_tasks[].description`).
+  const taskIdToFullDescription = new Map<string, string>();
+
+  const rememberFullDescription = (taskId: string, description: string) => {
+    const known = taskIdToFullDescription.get(taskId);
+    if (!known || description.length > known.length) {
+      taskIdToFullDescription.set(taskId, description);
+    }
+  };
+
+  sorted.forEach(trace => {
+    const meta = trace.trace_metadata && typeof trace.trace_metadata === 'object'
+      ? trace.trace_metadata as Record<string, unknown>
+      : null;
+    const own = meta?.task_description_full;
+    const ownTaskId = getTaskId(trace);
+    if (own && ownTaskId) {
+      rememberFullDescription(ownTaskId, String(own));
+    }
+
+    const crewTasks = meta?.crew_tasks;
+    if (!Array.isArray(crewTasks)) return;
+    crewTasks.forEach(entry => {
+      if (!entry || typeof entry !== 'object') return;
+      const { id, description } = entry as { id?: unknown; description?: unknown };
+      if (id && description) {
+        rememberFullDescription(String(id), String(description));
+      }
+    });
+  });
 
   // First pass: build span hierarchy and task name index
   sorted.forEach(trace => {
@@ -186,6 +212,9 @@ export function processTraces(rawTraces: Trace[]): ProcessedTraces {
     if (isRunLevel(trace)) return;
 
     const taskId = getTaskId(trace);
+    const meta = trace.trace_metadata && typeof trace.trace_metadata === 'object'
+      ? trace.trace_metadata as Record<string, unknown>
+      : null;
 
     if (trace.span_id && taskId) {
       spanIdToTaskId.set(trace.span_id, taskId);
@@ -195,13 +224,24 @@ export function processTraces(rawTraces: Trace[]): ProcessedTraces {
     }
 
     if (taskId && !taskIdToName.has(taskId)) {
-      const meta = trace.trace_metadata && typeof trace.trace_metadata === 'object'
-        ? trace.trace_metadata as Record<string, unknown>
-        : null;
-      const name = (meta?.task_name as string)
-        || (trace.event_type === 'task_started' && trace.event_context ? trace.event_context : null);
+      // Longest wins: task_name is capped at 200 chars server-side while
+      // event_context keeps 500, so neither is reliably the fuller copy.
+      // Never truncated here — the row renderer clips for display, and the
+      // description dialog needs whatever text we actually have.
+      const candidates = [
+        meta?.task_name as string | undefined,
+        trace.event_type === 'task_started' ? trace.event_context : undefined,
+      ].filter((v): v is string => !!v);
+      const name = candidates.sort((a, b) => b.length - a.length)[0];
       if (name) {
-        taskIdToName.set(taskId, name.length > 80 ? name.substring(0, 77) + '...' : name);
+        taskIdToName.set(taskId, name);
+      }
+    }
+
+    if (taskId && !taskIdToConfigId.has(taskId)) {
+      const configId = meta?.frontend_task_id;
+      if (configId) {
+        taskIdToConfigId.set(taskId, String(configId));
       }
     }
 
@@ -302,7 +342,7 @@ export function processTraces(rawTraces: Trace[]): ProcessedTraces {
         } else {
           const baseName = taskIdToName.get(traceTaskId)
             || (trace.event_context && trace.event_context !== trace.event_type
-                ? (trace.event_context.length > 80 ? trace.event_context.substring(0, 77) + '...' : trace.event_context)
+                ? trace.event_context
                 : 'Task');
           taskKey = taskMap.has(baseName) ? `${baseName} (${++taskCounter})` : baseName;
           taskIdToUniqueKey.set(traceTaskId, taskKey);
@@ -331,9 +371,7 @@ export function processTraces(rawTraces: Trace[]): ProcessedTraces {
           t => t.event_context && t.event_context !== t.event_type
         )?.event_context;
         const trimmedCtx = ctx?.trim();
-        displayName = trimmedCtx
-          ? (trimmedCtx.length > 80 ? trimmedCtx.substring(0, 77) + '...' : trimmedCtx)
-          : agentName;
+        displayName = trimmedCtx || agentName;
       }
       const taskStart = new Date(taskTraces[0].created_at);
       const taskEnd = new Date(taskTraces[taskTraces.length - 1].created_at);
@@ -354,6 +392,7 @@ export function processTraces(rawTraces: Trace[]): ProcessedTraces {
           type: processed.type,
           description: processed.description,
           timestamp,
+          traceId: typeof trace.id === 'number' ? trace.id : undefined,
           intrinsicMs: processed.durationMs,
           output: extractOutputForDisplay(trace.output),
           extraData: extractExtraData(trace)
@@ -367,9 +406,17 @@ export function processTraces(rawTraces: Trace[]): ProcessedTraces {
           : taskEnd.getTime() - event.timestamp.getTime(),
       }));
 
+      const resolvedTaskId = getTaskId(taskTraces[0]) || undefined;
+
       return {
         taskName: displayName,
-        taskId: getTaskId(taskTraces[0]) || undefined,
+        taskId: resolvedTaskId,
+        configTaskId: resolvedTaskId ? taskIdToConfigId.get(resolvedTaskId) : undefined,
+        // Full text from the crew config when the run carried one; the capped
+        // per-event copy otherwise.
+        fullDescription: resolvedTaskId
+          ? taskIdToFullDescription.get(resolvedTaskId)
+          : undefined,
         startTime: taskStart,
         endTime: taskEnd,
         duration: taskEnd.getTime() - taskStart.getTime(),
@@ -502,6 +549,8 @@ const formatTimeDelta = (start: Date, timestamp: Date): string => {
   return `+${deltaSec.toFixed(1)}s`;
 };
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 const truncateTaskName = (name: string, maxLength = 80): string => {
   if (name.length <= maxLength) return name;
   return name.substring(0, maxLength) + '...';
@@ -527,13 +576,7 @@ export function useTraceData({
   const [expandedAgents, setExpandedAgents] = useState<Set<number>>(new Set());
   const [expandedTasks, setExpandedTasks] = useState<Set<string>>(new Set());
   const [viewMode, setViewMode] = useState<'summary' | 'timeline'>('summary');
-  const [selectedEvent, setSelectedEvent] = useState<{
-    type: string;
-    description: string;
-    intrinsicMs?: number;
-    output?: string | Record<string, unknown>;
-    extraData?: Record<string, unknown>;
-  } | null>(null);
+  const [selectedEvent, setSelectedEvent] = useState<SelectedTraceEvent | null>(null);
   const [selectedTaskDescription, setSelectedTaskDescription] = useState<{
     taskName: string;
     taskId?: string;
@@ -654,41 +697,81 @@ export function useTraceData({
     });
   }, []);
 
-  const handleEventClick = useCallback((event: {
-    type: string;
-    description: string;
-    intrinsicMs?: number;
-    output?: string | Record<string, unknown>;
-    extraData?: Record<string, unknown>;
-  }) => {
-    setSelectedEvent(event);
+  /**
+   * Open an event's output dialog, then pull the stored row for it.
+   *
+   * The copy held in the browser is whatever the live transport delivered, and
+   * for subprocess runs that is the pipe frame — `output` truncated to 500
+   * chars, no prompt metadata. The database row is the authoritative one, and
+   * it is fetched here, on click, rather than shipping every row's full output
+   * to the browser up front.
+   */
+  const handleEventClick = useCallback(async (event: SelectedTraceEvent) => {
+    const { traceId } = event;
+    setSelectedEvent({ ...event, isLoadingOutput: !!traceId });
+
+    if (!traceId) return;
+
+    try {
+      const stored = await TraceService.getTraceById(traceId);
+      setSelectedEvent(prev => {
+        // The user may have moved on to another row while this was in flight.
+        if (!prev || prev.traceId !== traceId) return prev;
+        return {
+          ...prev,
+          output: extractOutputForDisplay(stored.output) ?? prev.output,
+          extraData: extractExtraData(stored) ?? prev.extraData,
+          isLoadingOutput: false,
+        };
+      });
+    } catch {
+      // Keep whatever the live view had; it is abridged but not wrong.
+      setSelectedEvent(prev =>
+        prev && prev.traceId === traceId ? { ...prev, isLoadingOutput: false } : prev
+      );
+    }
   }, []);
 
-  const handleTaskDescriptionClick = useCallback(async (taskName: string, taskId?: string, e?: React.MouseEvent) => {
+  const handleTaskDescriptionClick = useCallback(async (task: {
+    taskName: string;
+    taskId?: string;
+    configTaskId?: string;
+    fullDescription?: string;
+  }, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
+
+    const { taskName, taskId, configTaskId } = task;
+    // What the run actually saw. Already complete when the crew config was
+    // captured; otherwise it is the per-event copy, which the backend caps.
+    const runtimeText = task.fullDescription || taskName;
+    const mayBeCapped = !task.fullDescription;
+
+    // Only the tasks-table id is fetchable. The trace's own task id is the
+    // engine's per-run uuid and always 404s — asking for it just logged errors.
+    // Dynamic paths stamp non-uuid placeholders (e.g. "call"); those 404 too.
+    const shouldFetch = mayBeCapped && !!configTaskId && UUID_RE.test(configTaskId);
 
     setSelectedTaskDescription({
       taskName,
       taskId,
-      fullDescription: undefined,
-      isLoading: !!taskId
+      fullDescription: runtimeText,
+      isLoading: shouldFetch
     });
 
-    if (taskId) {
-      try {
-        const taskDetails = await TraceService.getTaskDetails(taskId);
-        setSelectedTaskDescription(prev => prev ? {
-          ...prev,
-          fullDescription: taskDetails.description || taskName,
-          isLoading: false
-        } : null);
-      } catch {
-        setSelectedTaskDescription(prev => prev ? {
-          ...prev,
-          fullDescription: taskName,
-          isLoading: false
-        } : null);
-      }
+    if (!shouldFetch) return;
+
+    try {
+      const taskDetails = await TraceService.getTaskDetails(configTaskId as string);
+      const stored = taskDetails.description || '';
+      setSelectedTaskDescription(prev => prev ? {
+        ...prev,
+        // The stored description is the pre-interpolation template, so it only
+        // wins when it carries text the capped runtime copy lost.
+        fullDescription: stored.length > runtimeText.length ? stored : runtimeText,
+        isLoading: false
+      } : null);
+    } catch {
+      setSelectedTaskDescription(prev => prev ? { ...prev, isLoading: false } : null);
     }
   }, []);
 

@@ -353,3 +353,44 @@ describe('processTraces — crew run (has task ids)', () => {
     expect(stray!.unassigned).toBe(false);
   });
 });
+
+describe('processTraces — task descriptions are never truncated', () => {
+  const longDescription =
+    'Answer this question about the conversations you have read. ' +
+    'Give only the specific detail asked for, in a few words. '.repeat(4);
+
+  it('keeps the whole task name (the row renderer clips, the data does not)', () => {
+    const result = processTraces([
+      makeTrace({ event_source: 'Worker', event_type: 'task_started', task_id: 'T1',
+                  event_context: longDescription }),
+      makeTrace({ event_source: 'Worker', event_type: 'task_completed', task_id: 'T1',
+                  event_context: longDescription, output: { content: 'done' } }),
+    ]);
+
+    const task = result.agents[0].tasks[0];
+    expect(task.taskName).toBe(longDescription);
+    expect(task.taskName).not.toContain('...');
+  });
+
+  it('carries the crew config description and the tasks-table id', () => {
+    const result = processTraces([
+      makeTrace({ event_source: 'crew', event_type: 'crew_started', event_context: 'crew',
+                  span_id: 'C1',
+                  trace_metadata: {
+                    crew_agents: [{ role: 'Worker' }],
+                    crew_tasks: [{ id: 'T1', description: longDescription }],
+                  } }),
+      makeTrace({ event_source: 'Worker', event_type: 'task_started',
+                  // Mirrors production: the per-event copy is capped, the id on
+                  // the trace is the engine's runtime uuid, and the tasks-table
+                  // id rides along as frontend_task_id.
+                  event_context: longDescription.slice(0, 80),
+                  trace_metadata: { task_id: 'T1', frontend_task_id: 'db-task-1' } }),
+    ]);
+
+    const task = result.agents.find(a => a.agent === 'Worker')!.tasks[0];
+    expect(task.fullDescription).toBe(longDescription);
+    expect(task.configTaskId).toBe('db-task-1');
+    expect(task.taskId).toBe('T1');
+  });
+});

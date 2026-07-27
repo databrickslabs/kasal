@@ -403,3 +403,46 @@ describe('ICON_CONFIG', () => {
     expect(ICON_CONFIG['memory_backend_error'].color).toBe('error');
   });
 });
+
+// ============================================================================
+// LLM rows raised by the memory layer
+// ============================================================================
+
+describe('memory-labelling LLM rows', () => {
+  it('names the request for what it is', () => {
+    const result = EVENT_PROCESSORS.llm_call(makeTrace({
+      event_type: 'llm_call',
+      trace_metadata: {
+        model: 'databricks/some-model',
+        prompt: 'x'.repeat(1564),
+        llm_purpose: 'memory_labelling',
+      },
+    }));
+
+    expect(result?.description).toBe('Memory Labelling — some-model (1,564 chars)');
+  });
+
+  it('names the response for what it is', () => {
+    const result = EVENT_PROCESSORS.llm_response(makeTrace({
+      event_type: 'llm_response',
+      output: { content: 'y'.repeat(318) },
+      trace_metadata: { llm_purpose: 'memory_labelling' },
+    }));
+
+    expect(result?.description).toBe('Memory Labels (318 chars)');
+  });
+
+  it('leaves the agent\'s own LLM rows alone', () => {
+    const request = EVENT_PROCESSORS.llm_call(makeTrace({
+      event_type: 'llm_call',
+      trace_metadata: { model: 'some-model', prompt: 'x'.repeat(2549) },
+    }));
+    const response = EVENT_PROCESSORS.llm_response(makeTrace({
+      event_type: 'llm_response',
+      output: { content: 'y'.repeat(1398) },
+    }));
+
+    expect(request?.description).toBe('LLM Request — some-model (2,549 chars)');
+    expect(response?.description).toBe('LLM Response (1,398 chars)');
+  });
+});

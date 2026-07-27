@@ -39,6 +39,11 @@ export interface TraceEvent {
   type: string;
   description: string;
   timestamp: Date;
+  /** The `execution_trace` row this event came from. Absent for rows delivered
+   *  as live SSE frames, which carry no DB id — and whose `output` is the
+   *  500-char pipe preview, not the stored one. Present ids let the event
+   *  dialog fetch the full output on demand. */
+  traceId?: number;
   /** Additive wall-time slice: own timestamp → next visible row (last row →
    *  task end). Row durations sum to the task span by construction. */
   duration?: number;
@@ -49,6 +54,20 @@ export interface TraceEvent {
   extraData?: Record<string, unknown>;
 }
 
+/**
+ * The event whose output dialog is open. Mirrors TraceEvent, plus the state of
+ * the on-demand fetch of the stored output (`isLoadingOutput`).
+ */
+export interface SelectedTraceEvent {
+  type: string;
+  description: string;
+  traceId?: number;
+  intrinsicMs?: number;
+  output?: string | Record<string, unknown>;
+  extraData?: Record<string, unknown>;
+  isLoadingOutput?: boolean;
+}
+
 export interface GroupedTrace {
   agent: string;
   startTime: Date;
@@ -56,7 +75,16 @@ export interface GroupedTrace {
   duration: number;
   tasks: {
     taskName: string;
+    /** The engine's per-run Task uuid — identity only. It has no row in the
+     *  `tasks` table, so it must never be used to fetch task details. */
     taskId?: string;
+    /** The task's id in the `tasks` table, when the engine stamped one
+     *  (`frontend_task_id`). The only id that is safe to look up. */
+    configTaskId?: string;
+    /** Complete, untruncated description from the captured crew config. Absent
+     *  when the run carried no crew config — then `taskName` is the best copy
+     *  we have, and it is subject to the backend's per-event caps. */
+    fullDescription?: string;
     startTime: Date;
     endTime: Date;
     duration: number;

@@ -17,7 +17,6 @@ import {
   Card,
   CardContent,
   Stack,
-  Alert,
   ToggleButton,
   ToggleButtonGroup,
 } from '@mui/material';
@@ -28,7 +27,6 @@ import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import PlayCircleIcon from '@mui/icons-material/PlayCircle';
-import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import TimelineIcon from '@mui/icons-material/Timeline';
 import StorageIcon from '@mui/icons-material/Storage';
 import AssignmentIcon from '@mui/icons-material/Assignment';
@@ -42,235 +40,11 @@ import {
   getEventIcon as getEventIconConfig,
 } from './traceEventProcessors';
 import { PaginatedOutput } from '../Common';
-import { ProcessedTraces, RunConfig, TimelineItem } from '../../types/execution/trace';
+import { TaskDescriptionDialog } from './TaskDescriptionDialog';
+import { LlmEventDetails } from './LlmEventDetails';
+import { isLlmEvent } from './llmEventText';
+import { ProcessedTraces, RunConfig, SelectedTraceEvent, TimelineItem } from '../../types/execution/trace';
 
-// Interface for parsed task data
-interface ParsedTask {
-  taskNumber: number;
-  taskTitle: string;
-  taskDescription: string;
-  expectedOutput: string;
-  agent: string;
-  agentGoal: string;
-  taskTools: string;
-  agentTools: string;
-}
-
-// Helper function to parse task description into structured data
-const parseTaskDescription = (description: string): { header: string; tasks: ParsedTask[]; footer: string } | null => {
-  if (!description) return null;
-
-  if (!description.includes('Task Number') && !description.includes('task_description')) {
-    return null;
-  }
-
-  const result: { header: string; tasks: ParsedTask[]; footer: string } = {
-    header: '',
-    tasks: [],
-    footer: ''
-  };
-
-  const headerMatch = description.match(/^(.*?)(?=Task Number \d)/s);
-  if (headerMatch) {
-    result.header = headerMatch[1].trim();
-  }
-
-  const footerMatch = description.match(/Create the most descriptive plan.*$/s);
-  if (footerMatch) {
-    result.footer = footerMatch[0].trim();
-  }
-
-  const taskBlocks = description.split(/(?=Task Number \d+)/);
-
-  for (const block of taskBlocks) {
-    if (!block.trim() || !block.includes('Task Number')) continue;
-
-    const task: ParsedTask = {
-      taskNumber: 0,
-      taskTitle: '',
-      taskDescription: '',
-      expectedOutput: '',
-      agent: '',
-      agentGoal: '',
-      taskTools: '',
-      agentTools: ''
-    };
-
-    const titleMatch = block.match(/Task Number (\d+)\s*-\s*([^\n"]+)/);
-    if (titleMatch) {
-      task.taskNumber = parseInt(titleMatch[1], 10);
-      task.taskTitle = titleMatch[2].trim();
-    }
-
-    const descMatch = block.match(/"task_description":\s*([^\n]*(?:\n(?!"task_expected_output")[^\n]*)*)/);
-    if (descMatch) {
-      task.taskDescription = descMatch[1].trim().replace(/^["']|["']$/g, '');
-    }
-
-    const outputMatch = block.match(/"task_expected_output":\s*([^\n]*(?:\n(?!"agent":)[^\n]*)*)/);
-    if (outputMatch) {
-      task.expectedOutput = outputMatch[1].trim().replace(/^["']|["']$/g, '');
-    }
-
-    const agentMatch = block.match(/"agent":\s*([^\n]+)/);
-    if (agentMatch) {
-      task.agent = agentMatch[1].trim().replace(/^["']|["']$/g, '');
-    }
-
-    const goalMatch = block.match(/"agent_goal":\s*([^\n]+)/);
-    if (goalMatch) {
-      task.agentGoal = goalMatch[1].trim().replace(/^["']|["']$/g, '');
-    }
-
-    const toolsMatch = block.match(/"task_tools":\s*\[([^\]]*)\]/s);
-    if (toolsMatch) {
-      const toolsContent = toolsMatch[1].trim();
-      if (toolsContent) {
-        const toolNameMatches = toolsContent.match(/name='([^']+)'/g);
-        if (toolNameMatches) {
-          task.taskTools = toolNameMatches.map(m => m.replace(/name='|'/g, '')).join(', ');
-        } else {
-          task.taskTools = toolsContent.length > 100 ? 'Custom Tools' : toolsContent;
-        }
-      } else {
-        task.taskTools = 'None';
-      }
-    }
-
-    const agentToolsMatch = block.match(/"agent_tools":\s*"?([^"\n]+)"?/);
-    if (agentToolsMatch) {
-      task.agentTools = agentToolsMatch[1].trim();
-    }
-
-    if (task.taskNumber > 0) {
-      result.tasks.push(task);
-    }
-  }
-
-  return result.tasks.length > 0 ? result : null;
-};
-
-// Component to render formatted task description
-const FormattedTaskDescription: React.FC<{ description: string }> = ({ description }) => {
-  const parsed = parseTaskDescription(description);
-
-  if (!parsed) {
-    return (
-      <Typography
-        variant="body1"
-        sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.6 }}
-      >
-        {description}
-      </Typography>
-    );
-  }
-
-  return (
-    <Box>
-      {parsed.header && (
-        <Alert severity="info" sx={{ mb: 2 }}>
-          <Typography variant="body2">{parsed.header}</Typography>
-        </Alert>
-      )}
-
-      <Stack spacing={2}>
-        {parsed.tasks.map((task) => (
-          <Card key={task.taskNumber} variant="outlined" sx={{ borderRadius: 2 }}>
-            <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
-                <Chip
-                  label={`Task ${task.taskNumber}`}
-                  color="primary"
-                  size="small"
-                  icon={<AssignmentIcon />}
-                />
-                <Typography variant="subtitle1" fontWeight="bold" sx={{ flex: 1 }}>
-                  {task.taskTitle}
-                </Typography>
-              </Box>
-
-              {task.taskDescription && (
-                <Box sx={{ mb: 2 }}>
-                  <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
-                    <AssignmentIcon fontSize="inherit" /> Description
-                  </Typography>
-                  <Paper sx={{ p: 1.5, bgcolor: 'action.hover', borderRadius: 1 }}>
-                    <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
-                      {task.taskDescription}
-                    </Typography>
-                  </Paper>
-                </Box>
-              )}
-
-              {task.expectedOutput && (
-                <Box sx={{ mb: 2 }}>
-                  <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
-                    <CheckCircleIcon fontSize="inherit" /> Expected Output
-                  </Typography>
-                  <Paper sx={{ p: 1.5, bgcolor: 'success.main', color: 'success.contrastText', borderRadius: 1, opacity: 0.9 }}>
-                    <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
-                      {task.expectedOutput}
-                    </Typography>
-                  </Paper>
-                </Box>
-              )}
-
-              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
-                <Box sx={{ flex: '1 1 200px', minWidth: 0 }}>
-                  <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
-                    <PersonIcon fontSize="inherit" /> Agent
-                  </Typography>
-                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                    <Chip
-                      label={task.agent}
-                      size="small"
-                      color="secondary"
-                      variant="outlined"
-                      icon={<PersonIcon />}
-                    />
-                    {task.agentGoal && (
-                      <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.5 }}>
-                        <TargetIcon fontSize="inherit" /> {task.agentGoal}
-                      </Typography>
-                    )}
-                  </Box>
-                </Box>
-
-                <Box sx={{ flex: '1 1 200px', minWidth: 0 }}>
-                  <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
-                    <BuildIcon fontSize="inherit" /> Tools
-                  </Typography>
-                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                    {task.taskTools && task.taskTools !== 'None' ? (
-                      task.taskTools.split(', ').map((tool, idx) => (
-                        <Chip
-                          key={idx}
-                          label={tool}
-                          size="small"
-                          color="info"
-                          variant="outlined"
-                          icon={<BuildIcon />}
-                        />
-                      ))
-                    ) : (
-                      <Chip label="No tools" size="small" variant="outlined" />
-                    )}
-                  </Box>
-                </Box>
-              </Box>
-            </CardContent>
-          </Card>
-        ))}
-      </Stack>
-
-      {parsed.footer && (
-        <Alert severity="success" sx={{ mt: 2 }}>
-          <Typography variant="body2" fontWeight="medium">{parsed.footer}</Typography>
-        </Alert>
-      )}
-    </Box>
-  );
-};
 
 export interface TraceTimelineContentProps {
   processedTraces: ProcessedTraces | null;
@@ -283,27 +57,9 @@ export interface TraceTimelineContentProps {
   expandedTasks: Set<string>;
   toggleAgent: (index: number) => void;
   toggleTask: (taskKey: string) => void;
-  selectedEvent: {
-    type: string;
-    description: string;
-    intrinsicMs?: number;
-    output?: string | Record<string, unknown>;
-    extraData?: Record<string, unknown>;
-  } | null;
-  setSelectedEvent: (event: {
-    type: string;
-    description: string;
-    intrinsicMs?: number;
-    output?: string | Record<string, unknown>;
-    extraData?: Record<string, unknown>;
-  } | null) => void;
-  handleEventClick: (event: {
-    type: string;
-    description: string;
-    intrinsicMs?: number;
-    output?: string | Record<string, unknown>;
-    extraData?: Record<string, unknown>;
-  }) => void;
+  selectedEvent: SelectedTraceEvent | null;
+  setSelectedEvent: (event: SelectedTraceEvent | null) => void;
+  handleEventClick: (event: SelectedTraceEvent) => void;
   selectedTaskDescription: {
     taskName: string;
     taskId?: string;
@@ -316,7 +72,12 @@ export interface TraceTimelineContentProps {
     fullDescription?: string;
     isLoading: boolean;
   } | null) => void;
-  handleTaskDescriptionClick: (taskName: string, taskId?: string, e?: React.MouseEvent) => void;
+  handleTaskDescriptionClick: (task: {
+    taskName: string;
+    taskId?: string;
+    configTaskId?: string;
+    fullDescription?: string;
+  }, e?: React.MouseEvent) => void;
   formatDuration: (ms: number) => string;
   formatTimeDelta: (start: Date, timestamp: Date) => string;
   truncateTaskName: (name: string, maxLength?: number) => string;
@@ -586,13 +347,27 @@ const TraceTimelineContent = memo<TraceTimelineContentProps>(({
                             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
                               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0, flex: 1 }}>
                                 <AssignmentIcon fontSize="small" color="action" />
-                                <Typography
-                                  variant="subtitle2"
-                                  fontWeight="medium"
-                                  sx={{ wordBreak: 'break-word' }}
-                                >
-                                  {task.taskName}
-                                </Typography>
+                                <Tooltip title="Click to view full description" arrow placement="top">
+                                  <Typography
+                                    variant="subtitle2"
+                                    fontWeight="medium"
+                                    onClick={(e) => handleTaskDescriptionClick(task, e)}
+                                    sx={{
+                                      wordBreak: 'break-word',
+                                      // Descriptions run long — clamp the card
+                                      // title to two lines and keep the whole
+                                      // text one click away in the dialog.
+                                      display: '-webkit-box',
+                                      WebkitLineClamp: 2,
+                                      WebkitBoxOrient: 'vertical',
+                                      overflow: 'hidden',
+                                      cursor: 'pointer',
+                                      '&:hover': { color: 'primary.main', textDecoration: 'underline' },
+                                    }}
+                                  >
+                                    {task.taskName}
+                                  </Typography>
+                                </Tooltip>
                               </Box>
                               <Chip
                                 size="small"
@@ -739,14 +514,14 @@ const TraceTimelineContent = memo<TraceTimelineContentProps>(({
                               {expandedTasks.has(taskKey) ? <ExpandLessIcon /> : <ExpandMoreIcon />}
                             </IconButton>
                             <Tooltip
-                              title={task.taskName.length > 80 ? "Click to view full description" : ""}
+                              title="Click to view full description"
                               arrow
                               placement="top"
                             >
                               <Typography
                                 variant="body2"
                                 fontWeight="medium"
-                                onClick={(e) => handleTaskDescriptionClick(task.taskName, task.taskId, e)}
+                                onClick={(e) => handleTaskDescriptionClick(task, e)}
                                 sx={{
                                   maxWidth: '500px',
                                   overflow: 'hidden',
@@ -1084,63 +859,10 @@ const TraceTimelineContent = memo<TraceTimelineContentProps>(({
         </DialogActions>
       </Dialog>
 
-      {/* Task Description Dialog */}
-      <Dialog
-        open={!!selectedTaskDescription}
+      <TaskDescriptionDialog
+        value={selectedTaskDescription}
         onClose={() => setSelectedTaskDescription(null)}
-        maxWidth="md"
-        fullWidth
-      >
-        {selectedTaskDescription && (
-          <>
-            <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Box>
-                <Typography variant="h6">Task Description</Typography>
-                {selectedTaskDescription.taskId && (
-                  <Typography variant="caption" color="text.secondary">
-                    Task ID: {selectedTaskDescription.taskId}
-                  </Typography>
-                )}
-              </Box>
-              <IconButton onClick={() => setSelectedTaskDescription(null)} size="small">
-                <CloseIcon />
-              </IconButton>
-            </DialogTitle>
-            <DialogContent dividers>
-              {selectedTaskDescription.isLoading ? (
-                <Box display="flex" justifyContent="center" alignItems="center" minHeight="100px">
-                  <CircularProgress size={24} />
-                  <Typography sx={{ ml: 2 }} color="text.secondary">
-                    Loading task details...
-                  </Typography>
-                </Box>
-              ) : (
-                <Box sx={{ maxHeight: '60vh', overflow: 'auto' }}>
-                  <FormattedTaskDescription
-                    description={selectedTaskDescription.fullDescription || selectedTaskDescription.taskName}
-                  />
-                </Box>
-              )}
-            </DialogContent>
-            <DialogActions>
-              <Button
-                onClick={() => {
-                  navigator.clipboard.writeText(
-                    selectedTaskDescription.fullDescription || selectedTaskDescription.taskName
-                  );
-                }}
-                startIcon={<ContentCopyIcon />}
-                size="small"
-              >
-                Copy Description
-              </Button>
-              <Button onClick={() => setSelectedTaskDescription(null)} size="small">
-                Close
-              </Button>
-            </DialogActions>
-          </>
-        )}
-      </Dialog>
+      />
 
       {/* Output Details Dialog */}
       <Dialog
@@ -1335,15 +1057,30 @@ const TraceTimelineContent = memo<TraceTimelineContentProps>(({
                   </Box>
                 ) : null}
 
-                {/* Paginated output display */}
-                <PaginatedOutput
-                  content={selectedEvent.output}
-                  pageSize={10000}
-                  enableMarkdown={true}
-                  showCopyButton={true}
-                  maxHeight="55vh"
-                  eventType={selectedEvent.type}
-                />
+                {/* The row's output. What the browser holds may be the live
+                    500-char pipe preview, so the stored row is fetched when the
+                    dialog opens — show that it is in flight. */}
+                {selectedEvent.isLoadingOutput && (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                    <CircularProgress size={14} />
+                    <Typography variant="caption" color="text.secondary">
+                      Loading the full output…
+                    </Typography>
+                  </Box>
+                )}
+
+                {isLlmEvent(selectedEvent.type) ? (
+                  <LlmEventDetails event={selectedEvent} />
+                ) : (
+                  <PaginatedOutput
+                    content={selectedEvent.output}
+                    pageSize={10000}
+                    enableMarkdown={true}
+                    showCopyButton={true}
+                    maxHeight="55vh"
+                    eventType={selectedEvent.type}
+                  />
+                )}
               </Box>
             </DialogContent>
             <DialogActions>

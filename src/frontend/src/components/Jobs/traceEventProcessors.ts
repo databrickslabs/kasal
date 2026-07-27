@@ -42,6 +42,17 @@ export function parseTraceMetadata(trace: Trace): Record<string, unknown> | null
 }
 
 /**
+ * Is this LLM row the memory layer labelling the record it is saving?
+ *
+ * The engine stamps `llm_purpose` on LLM calls raised from inside a memory
+ * save. Those run after their task has completed, so without the marker the
+ * timeline shows the agent apparently still working past "Task Completed".
+ */
+export function isMemoryLabelling(metadata: Record<string, unknown> | null): boolean {
+  return metadata?.llm_purpose === 'memory_labelling';
+}
+
+/**
  * Extract extra_data from output or trace
  */
 export function extractExtraData(trace: Trace): Record<string, unknown> | undefined {
@@ -169,11 +180,16 @@ export const EVENT_PROCESSORS: Record<string, EventProcessor> = {
     const messageCount = metadata?.message_count as number | undefined;
     const promptLen = (metadata?.prompt as string)?.length || 0;
 
-    let description = 'LLM Request';
+    // Memory bookkeeping, not the agent reasoning: the memory layer asks the
+    // LLM to label the record it is saving, after the task has finished. Named
+    // so the row does not read as work the task is still doing.
+    const label = isMemoryLabelling(metadata) ? 'Memory Labelling' : 'LLM Request';
+
+    let description = label;
     if (modelName) {
       const modelParts = modelName.split('/');
       const shortModel = modelParts[modelParts.length - 1];
-      description = `LLM Request — ${shortModel}`;
+      description = `${label} — ${shortModel}`;
     }
     if (promptLen > 0) {
       description += ` (${promptLen.toLocaleString()} chars)`;
@@ -228,9 +244,10 @@ export const EVENT_PROCESSORS: Record<string, EventProcessor> = {
       }
     }
 
+    const label = isMemoryLabelling(metadata) ? 'Memory Labels' : 'LLM Response';
     const description = outputLen > 0
-      ? `LLM Response (${outputLen.toLocaleString()} chars)`
-      : 'LLM Response';
+      ? `${label} (${outputLen.toLocaleString()} chars)`
+      : label;
 
     return { type: 'llm_response', description };
   },

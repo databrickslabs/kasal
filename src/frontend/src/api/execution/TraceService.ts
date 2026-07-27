@@ -172,6 +172,19 @@ export const TraceService = {
     }
   },
 
+  /**
+   * One trace row, straight from the database.
+   *
+   * The timeline's in-memory copy of a row can be an abridged one — live SSE
+   * frames from a subprocess run truncate `output` to 500 chars. This is what
+   * the event dialog calls when you open a row, so the full output is fetched
+   * on demand instead of every run's outputs being carried in the browser.
+   */
+  async getTraceById(traceId: number): Promise<Trace> {
+    const response = await apiClient.get<Trace>(`/traces/${traceId}`);
+    return response.data;
+  },
+
   async getTaskDetails(taskId: string): Promise<TaskDetails> {
     try {
       // Use taskId as is, without conversion
