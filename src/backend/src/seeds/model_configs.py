@@ -229,14 +229,29 @@ DEFAULT_MODELS = {
         # AWQ-4bit build (cpatonn/...-AWQ-4bit). context_window=28672 MUST match vLLM
         # --max-model-len: vLLM enforces prompt_tokens + max_tokens <= max-model-len
         # and 400s "passed N input and requested M output" otherwise, so the window
-        # has to cover a large prompt PLUS max_output_tokens (8192). At 0.85 util the
+        # has to cover a large prompt PLUS max_output_tokens. At 0.85 util the
         # GPU (shared with Ollama's embedder) fits ~31.8K of KV, so 28672 leaves
         # margin. vLLM MUST be launched with --enable-auto-tool-choice
         # --tool-call-parser qwen3_coder, else CrewAI planning/reasoning (which force
         # tool_choice="function") 400 with "requires --tool-call-parser to be set".
         # vLLM keeps legacy served-name aliases so older runs still resolve.
         "context_window": 28672,
-        "max_output_tokens": 8192,
+        # 4096, not 8192, and the number is derived rather than picked.
+        #
+        # Compaction triggers at 0.85 x window (24,371 tokens) but does not
+        # account for the output request, while what the server actually serves
+        # is window - max_tokens. At 8192 that ceiling is 20,480 — BELOW the
+        # compaction threshold — so a tool-heavy conversation between 20,480 and
+        # 24,371 tokens is too big to serve and too small to be compacted. Every
+        # attempt 400s with "passed N input and requested 8192 output", the agent
+        # retries at the same size, and the run loops until it fails. Observed on
+        # a 4-tool-call knowledge-search turn: 20,481 + 8,192 = one token over.
+        #
+        # Keeping max_output <= 15% of the window (4,300 here) puts the servable
+        # input ceiling (24,576) ABOVE the compaction threshold, so the trimmer
+        # always gets to act first. A ~3B-active MoE producing a 20k-token prompt
+        # AND an 8k answer was not a real working point anyway.
+        "max_output_tokens": 4096,
     },
     # --- Kimi (Moonshot AI — OpenAI-compatible API at https://api.moonshot.ai/v1,
     # override with KIMI_ENDPOINT; key = KIMI_API_KEY in the API Keys service) ---

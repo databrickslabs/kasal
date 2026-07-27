@@ -30,6 +30,23 @@ logger = logging.getLogger(__name__)
 
 _MAX_TOOL_ROUNDS = 15
 
+#: Characters per token assumed when estimating a prompt's size.
+#:
+#: chars/4 is the prose rule of thumb; tool-calling conversations are JSON and
+#: tokenize denser. Measured against vLLM's own count on two rejected Qwen
+#: requests, chars/4 was ~15% low. 3.4 covers that without being so pessimistic
+#: that a normal turn gets compacted for nothing.
+_CHARS_PER_TOKEN = 3.4
+
+#: Tokens held back from every budget calculation.
+#:
+#: Servers count a few tokens nobody models client-side: the chat template's
+#: role scaffolding and the generation prompt appended after the last message.
+#: Both observed failures overflowed by EXACTLY one token — the budget maths was
+#: right up to that scaffolding — so the reserve exists to make equality safe
+#: rather than to cover a large error.
+_WINDOW_SAFETY_TOKENS = 128
+
 # OpenAI's GPT-5.6 line refuses `reasoning_effort` on /v1/chat/completions when
 # the request also carries function tools:
 #
@@ -280,6 +297,14 @@ class OpenAICompletion(BaseLLM):
 
         Tool/function schemas count toward the server-side prompt, so they are
         included when given.
+
+        Divides by ``_CHARS_PER_TOKEN`` rather than a flat 4: the classic chars/4
+        rule is calibrated on prose, and these conversations are mostly tool JSON
+        — braces, quotes, ids and numbers all tokenize denser than English. Two
+        observed vLLM rejections had the server counting 15% more tokens than
+        chars/4 predicted, both overflowing by exactly one token. The estimate is
+        a BUDGETING input, so it must err high; an over-estimate compacts a
+        little early, an under-estimate fails the request outright.
         """
         total = 0
         for message in messages:
@@ -296,7 +321,7 @@ class OpenAICompletion(BaseLLM):
                 total += len(str(message["tool_calls"]))
         if tools:
             total += len(str(tools))
-        return total // 4
+        return int(total / _CHARS_PER_TOKEN)
 
     def _raw_context_window(self) -> int:
         """The model's FULL advertised window, 0 when unknown.
@@ -336,7 +361,7 @@ class OpenAICompletion(BaseLLM):
             return
         input_tokens = self._estimate_tokens(params.get("messages") or [], params.get("tools"))
         margin = max(2048, int(input_tokens * 0.15))
-        allowed = window - input_tokens - margin
+        allowed = window - input_tokens - margin - _WINDOW_SAFETY_TOKENS
         if allowed < want:
             params[key] = max(256, allowed)
             logger.warning(
@@ -381,15 +406,49 @@ class OpenAICompletion(BaseLLM):
                 return int(configured * CONTEXT_WINDOW_USAGE_RATIO)
         return self.get_context_window_size()
 
+    def _input_budget(self, from_agent: Any = None) -> int:
+        """How many prompt tokens may actually be sent. 0 when unknown.
+
+        The server enforces ``prompt + max_tokens <= window``, so the room for
+        the PROMPT is the window minus the output we are about to ask for — not
+        the 0.85-derated window the trim used to compare against.
+
+        The difference is what made a run unrecoverable. With a 28,672 window and
+        an 8,192 output request, compaction triggered at 24,371 (0.85 x window)
+        while the server would only serve 20,480. A conversation between those
+        two numbers was too big to serve and too small to compact: every attempt
+        was rejected, the agent retried at the same size, and the run looped
+        until it failed.
+
+        Falls back to the derated window when no output size is configured —
+        there is no reservation to subtract, and the derate remains a sane
+        default.
+        """
+        reserved_output = self.max_completion_tokens or self.max_tokens or 0
+        if not reserved_output:
+            return self._effective_context_window(from_agent)
+
+        raw = self._raw_context_window()
+        if not raw:
+            # Window unknown to the table: _effective_context_window may still
+            # have the agent's own figure, which is already derated.
+            return self._effective_context_window(from_agent)
+
+        budget = raw - reserved_output - _WINDOW_SAFETY_TOKENS
+        # A configured output larger than the window itself would leave nothing.
+        # Keep a floor so the trim degrades to "compact hard" instead of "delete
+        # every tool result and still be over".
+        return max(budget, int(raw * 0.25))
+
     def _trim_conversation_to_window(
         self, conversation: list[dict[str, Any]], from_agent: Any = None
     ) -> None:
         """Best-effort in-place trim so a tool-heavy turn cannot overflow the
         context window (which previously failed the whole run): once the
-        estimated size (chars/4 ≈ tokens) approaches the 0.85-derated window,
-        the OLDEST tool results are replaced with a stub — never the system
-        prompt, user messages, or tool_call structure (pairing must survive).
-        Honors Agent.respect_context_window (default on; previously inert).
+        estimated size exceeds what the server will actually accept as a prompt
+        (see ``_input_budget``), the OLDEST tool results are replaced with a stub
+        — never the system prompt, user messages, or tool_call structure (pairing
+        must survive). Honors Agent.respect_context_window (default on).
 
         Compaction is lossy, so every trim that actually drops something emits a
         ContextCompactionEvent — it used to happen with no trace at all, which
@@ -397,7 +456,7 @@ class OpenAICompletion(BaseLLM):
         """
         if from_agent is not None and getattr(from_agent, "respect_context_window", True) is False:
             return
-        window = self._effective_context_window(from_agent)
+        window = self._input_budget(from_agent)
         if not window:
             return
 

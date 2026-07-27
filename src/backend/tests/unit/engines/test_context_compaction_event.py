@@ -152,3 +152,88 @@ def test_event_is_registered_all_the_way_to_a_trace_row():
     span_name, event_type = _EVENT_SPAN_MAP["ContextCompactionEvent"]
     assert event_type == "context_compaction"
     assert SPAN_NAME_MAP[span_name] == "context_compaction"
+
+
+# ---------------------------------------------------------------------------
+# The budget the trim compares against, and the estimate it uses
+# ---------------------------------------------------------------------------
+#
+# Two vLLM rejections in production, both EXACTLY one token over a 28,672
+# window:
+#
+#   "You passed 20481 input tokens and requested 8192 output tokens"
+#   "You passed 27734 input tokens and requested 939 output tokens"
+#
+# Neither was compacted first. Compaction compared against 0.85 x window
+# (24,371) while the server would only accept window - max_tokens as a prompt,
+# so a conversation between those numbers was too big to serve and too small to
+# compact: every attempt was rejected, the agent retried at the same size, and
+# the run looped until it failed.
+
+
+def _sized_llm(model="gpt-4o", window=28672, max_tokens=8192):
+    """An LLM whose window is known to the table, with an output reservation."""
+    from kasal_engine.llm.constants import LLM_CONTEXT_WINDOW_SIZES
+
+    LLM_CONTEXT_WINDOW_SIZES[model] = window
+    return OpenAICompletion(model=model, api_key="x", max_tokens=max_tokens)
+
+
+def test_input_budget_leaves_room_for_the_output_request():
+    """What the server will accept as a prompt is window - max_tokens, not
+    0.85 x window."""
+    from kasal_engine.llm.completion import _WINDOW_SAFETY_TOKENS
+
+    llm = _sized_llm(window=28672, max_tokens=8192)
+
+    budget = llm._input_budget()
+
+    # Against the RAW window, which round-trips through the 0.85 derate and can
+    # land a token low — conservative, which is the safe direction here.
+    assert budget == llm._raw_context_window() - 8192 - _WINDOW_SAFETY_TOKENS
+    assert budget < int(28672 * 0.85), "the old threshold was above what fits"
+
+
+def test_input_budget_falls_back_when_no_output_is_reserved():
+    """Nothing to subtract — the derated window stays the sane default."""
+    llm = OpenAICompletion(model="gpt-4o", api_key="x")
+    assert llm._input_budget() == llm._effective_context_window()
+
+
+def test_the_prompt_that_was_rejected_is_now_compacted_first():
+    """~20.5k tokens against a 28,672 window with 8,192 reserved: the exact
+    shape of the first rejection."""
+    llm = _sized_llm(window=28672, max_tokens=8192)
+    conversation = _conversation(tool_messages=12, chars=5800)
+
+    assert llm._estimate_tokens(conversation) > llm._input_budget()
+    llm._trim_conversation_to_window(conversation)
+
+    assert _stub_count(conversation) > 0, "must compact rather than overflow"
+    assert llm._estimate_tokens(conversation) <= llm._input_budget()
+
+
+def test_the_estimate_errs_high_rather_than_low():
+    """chars/4 counted ~15% under what vLLM charged for tool JSON, and an
+    under-estimate is a rejected request while an over-estimate only compacts
+    slightly early."""
+    llm = _sized_llm()
+    text = "R" * 34000
+    estimate = llm._estimate_tokens([{"role": "tool", "content": text}])
+
+    assert estimate > 34000 // 4
+
+
+def test_the_clamp_keeps_a_reserve_so_equality_cannot_tip_over():
+    """Both failures were one token over: the maths was right up to the chat
+    template's own scaffolding, which nothing counts client-side."""
+    from kasal_engine.llm.completion import _WINDOW_SAFETY_TOKENS
+
+    llm = _sized_llm(window=28672, max_tokens=8192)
+    messages = [{"role": "user", "content": "R" * 60000}]
+    params = {"messages": messages, "max_tokens": 8192}
+
+    llm._clamp_output_budget(params)
+
+    estimate = llm._estimate_tokens(messages)
+    assert estimate + params["max_tokens"] + _WINDOW_SAFETY_TOKENS <= 28672
