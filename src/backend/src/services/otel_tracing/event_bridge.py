@@ -7,6 +7,7 @@ the openinference CrewAI instrumentor provides.
 """
 
 import logging
+import threading
 from collections import OrderedDict
 from typing import Any, Optional
 
@@ -120,6 +121,12 @@ _MLFLOW_TOOL_END_SPANS = {"CrewAI.tool.complete", "CrewAI.tool.error"}
 _MEMORY_WRAPPER_TOOLS = {"search_memory", "save_to_memory"}
 
 
+#: Ceiling for the one untruncated task description recorded per task span.
+#: Generous enough for real task prompts, bounded so a runaway description
+#: cannot bloat the trace row.
+_FULL_TASK_DESCRIPTION_MAX = 20000
+
+
 def _safe_str(val: Any, max_len: int = 500) -> str:
     """Safely convert a value to a truncated string."""
     if val is None:
@@ -172,6 +179,22 @@ def _get_task_name(event: Any) -> str:
         if name:
             return _safe_str(name)
     return ""
+
+
+def _get_full_task_description(event: Any) -> str:
+    """The task's description with no display cap applied.
+
+    ``_get_task_name`` truncates to 500 chars and it is stamped on EVERY event
+    of the task, so the cap keeps the trace table small. That copy is also the
+    only text the timeline has, which left long descriptions unreadable in the
+    UI. This returns the whole thing so it can be recorded ONCE, on the task's
+    own span — one row per task rather than one per event.
+    """
+    task = getattr(event, "task", None)
+    desc = getattr(task, "description", None) if task else None
+    if not desc:
+        desc = getattr(event, "task_name", None)
+    return _safe_str(desc, _FULL_TASK_DESCRIPTION_MAX)
 
 
 def _get_tool_name(event: Any) -> str:
@@ -244,6 +267,13 @@ class OTelEventBridge:
         # correlation between two events on the same thread, not a
         # time-based fallback cache.
         self._pending_save_content: Optional[str] = None
+        # Threads currently inside a memory save. ``Memory._analyze_for_save``
+        # asks the LLM to label the record being written, on the same
+        # background thread and between that save's started/completed events —
+        # so an LLM call from one of these threads is memory bookkeeping, not
+        # the agent's own reasoning. Keyed by thread so a save running
+        # concurrently with the agent's next LLM call cannot mislabel it.
+        self._memory_save_threads: set = set()
         # An LLM guardrail validates a task's output by making its OWN LLM
         # call(s) through CrewAI's internal "Guardrail Agent", which carries no
         # task. Those child spans would otherwise land in a separate
@@ -462,11 +492,21 @@ class OTelEventBridge:
                 # since the background save can finish during a later task.
                 if event_type == "memory_write_started":
                     self._pending_save_task_ids.append(self._current_task_id)
+                    self._memory_save_threads.add(threading.get_ident())
                 elif event_type in ("memory_write", "memory_write_failed"):
+                    self._memory_save_threads.discard(threading.get_ident())
                     if self._pending_save_task_ids:
                         started_task_id = self._pending_save_task_ids.pop(0)
                         if started_task_id:
                             event_task_id = started_task_id
+
+            # An LLM call raised from inside a save is the record-labelling call
+            # (see _memory_save_threads) — mark it so the timeline does not read
+            # it as the agent thinking after its task already finished.
+            is_memory_labelling = (
+                event_type in ("llm_call", "llm_response", "llm_call_failed")
+                and threading.get_ident() in self._memory_save_threads
+            )
 
             # A run-level event inherited whatever agent/task was last active
             # (see _RUN_LEVEL_EVENTS). Drop it: these are crew/flow boundaries,
@@ -592,6 +632,15 @@ class OTelEventBridge:
                     span.set_attribute("kasal.agent_name", agent_name)
                 if task_name:
                     span.set_attribute("kasal.task_name", task_name[:500])
+                # Record the description in full ONCE, on the task's own span:
+                # every other copy is capped for size, and the timeline's task
+                # dialog has nothing else to show.
+                if event_type == "task_started":
+                    full_description = _get_full_task_description(event)
+                    if len(full_description) > len(task_name or ""):
+                        span.set_attribute(
+                            "kasal.extra.task_description_full", full_description
+                        )
                 # Stamp the resolved task_id so the frontend groups this span
                 # under the running task instead of "Unassigned" (getTaskId reads
                 # task_id from the span's metadata before falling back to parent).
@@ -601,6 +650,8 @@ class OTelEventBridge:
                 # identifiable as guardrail validation within the task.
                 if guardrail_child:
                     span.set_attribute("kasal.extra.guardrail_validation", True)
+                if is_memory_labelling:
+                    span.set_attribute("kasal.extra.llm_purpose", "memory_labelling")
                 if tool_name:
                     span.set_attribute("kasal.tool_name", tool_name)
                 if output:

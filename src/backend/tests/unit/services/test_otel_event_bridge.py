@@ -16,7 +16,9 @@ from src.services.otel_tracing.event_bridge import (
     _safe_str,
     _get_agent_name,
     _get_task_name,
+    _get_full_task_description,
     _get_tool_name,
+    _FULL_TASK_DESCRIPTION_MAX,
     _get_output,
     _EVENT_SPAN_MAP,
     _SKIP_EVENTS,
@@ -229,6 +231,28 @@ class TestGetTaskName:
         event = _make_event(task=task)
         result = _get_task_name(event)
         assert result == ""
+
+
+class TestGetFullTaskDescription:
+    """Tests for the _get_full_task_description helper function."""
+
+    def test_keeps_text_that_get_task_name_would_truncate(self):
+        long_description = "x" * 600
+        task = SimpleNamespace(description=long_description, name="analysis")
+        event = _make_event(task=task)
+        assert len(_get_task_name(event)) == 500
+        assert _get_full_task_description(event) == long_description
+
+    def test_falls_back_to_task_name_when_no_task_object(self):
+        event = _make_event(task_name="y" * 600)
+        assert _get_full_task_description(event) == "y" * 600
+
+    def test_bounded_so_a_runaway_description_cannot_bloat_the_row(self):
+        event = _make_event(task_name="z" * (_FULL_TASK_DESCRIPTION_MAX + 100))
+        assert len(_get_full_task_description(event)) == _FULL_TASK_DESCRIPTION_MAX
+
+    def test_no_task_returns_empty_string(self):
+        assert _get_full_task_description(_make_event()) == ""
 
 
 # ---------------------------------------------------------------------------
@@ -611,6 +635,66 @@ class TestOTelEventBridgeEmitSpan:
         span.set_attribute.assert_any_call("kasal.task_name", "Gather data")
         span.set_attribute.assert_any_call("kasal.tool_name", "web_search")
         span.set_attribute.assert_any_call("kasal.output_content", "Found results")
+
+    def test_task_started_carries_the_untruncated_description(self):
+        """The one uncapped copy rides on the task's own span."""
+        tracer, span = _make_tracer()
+        bridge = OTelEventBridge(tracer, "job-full-desc")
+        long_description = "d" * 900
+
+        bridge._emit_span(
+            "CrewAI.task.execute",
+            "task_started",
+            _make_event(task=SimpleNamespace(description=long_description, name="t")),
+        )
+
+        span.set_attribute.assert_any_call("kasal.task_name", long_description[:500])
+        span.set_attribute.assert_any_call(
+            "kasal.extra.task_description_full", long_description
+        )
+
+    def test_other_events_do_not_repeat_the_full_description(self):
+        """Every event of a task carries the capped copy — only one carries the
+        whole thing, or the trace table pays for it on every row."""
+        tracer, span = _make_tracer()
+        bridge = OTelEventBridge(tracer, "job-full-desc-once")
+
+        bridge._emit_span(
+            "CrewAI.agent.execute",
+            "agent_execution",
+            _make_event(task=SimpleNamespace(description="d" * 900, name="t")),
+        )
+
+        full_calls = [
+            c for c in span.set_attribute.call_args_list
+            if c.args and c.args[0] == "kasal.extra.task_description_full"
+        ]
+        assert full_calls == []
+
+    def test_llm_call_inside_a_memory_save_is_marked_as_labelling(self):
+        """The memory layer's own LLM call runs between the save's started and
+        completed events, after the task finished — mark it as bookkeeping."""
+        tracer, span = _make_tracer()
+        bridge = OTelEventBridge(tracer, "job-mem-label")
+
+        bridge._emit_span("kasal.memory.save_started", "memory_write_started", _make_event())
+        bridge._emit_span("kasal.llm.call_started", "llm_call", _make_event(model="m"))
+
+        span.set_attribute.assert_any_call("kasal.extra.llm_purpose", "memory_labelling")
+
+    def test_llm_call_outside_a_memory_save_is_not_marked(self):
+        tracer, span = _make_tracer()
+        bridge = OTelEventBridge(tracer, "job-mem-label-off")
+
+        bridge._emit_span("kasal.memory.save_started", "memory_write_started", _make_event())
+        bridge._emit_span("kasal.memory.save_completed", "memory_write", _make_event())
+        bridge._emit_span("kasal.llm.call_started", "llm_call", _make_event(model="m"))
+
+        purpose_calls = [
+            c for c in span.set_attribute.call_args_list
+            if c.args and c.args[0] == "kasal.extra.llm_purpose"
+        ]
+        assert purpose_calls == []
 
     def test_memory_event_inherits_current_agent_task(self):
         """A memory event without its own agent/task is attributed to the most
