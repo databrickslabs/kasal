@@ -12,7 +12,7 @@ makes ``WorkflowRecipeRepository.list_missing_embeddings`` unscoped.
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.workflow_recipe_trial import WorkflowRecipeTrial
@@ -74,3 +74,23 @@ class WorkflowRecipeTrialRepository:
         stmt = stmt.order_by(WorkflowRecipeTrial.created_at.desc()).limit(limit)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+    async def delete_by_groups(self, group_ids: Optional[List[str]] = None) -> int:
+        """Delete a workspace's trials — or every trial when ``group_ids`` is
+        omitted, matching the unscoped (admin) arm of run deletion.
+
+        Trials measure runs; once the runs they describe are gone the ledger
+        reports on nothing, and its ``linked_job_id`` values point at rows that
+        no longer exist.
+
+        An empty LIST means "these zero workspaces" and deletes nothing —
+        only omitting the argument is the deliberate delete-everything.
+        """
+        if group_ids is not None and not group_ids:
+            return 0
+        stmt = delete(WorkflowRecipeTrial)
+        if group_ids is not None:
+            stmt = stmt.where(WorkflowRecipeTrial.group_id.in_(group_ids))
+        result = await self.session.execute(stmt)
+        await self.session.flush()
+        return result.rowcount or 0

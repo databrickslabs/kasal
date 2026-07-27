@@ -513,6 +513,69 @@ class TestDeleteAllExecutions:
         assert result.success is True
         assert "No executions found" in result.message
 
+    @pytest.mark.asyncio
+    async def test_deleting_runs_also_deletes_the_recipes_distilled_from_them(
+        self, service, mock_history_repo, mock_session
+    ):
+        """A recipe outliving its runs points at a job_id that no longer exists
+        and keeps feeding exemplars from crews the user believes they erased."""
+        group_ids = [str(uuid.uuid4())]
+        mock_result = MagicMock()
+        mock_result.fetchall.return_value = [(str(uuid.uuid4()),)]
+        mock_session.execute = AsyncMock(return_value=mock_result)
+        mock_history_repo.delete_all_executions = AsyncMock(return_value={
+            'run_count': 1, 'task_status_count': 0, 'error_trace_count': 0
+        })
+
+        with patch('src.services.execution_trace_service.ExecutionTraceService') as mock_trace_service, \
+             patch('src.services.execution_logs_service.ExecutionLogsService') as mock_logs_service, \
+             patch('src.services.workflow_recipe_service.WorkflowRecipeService') as mock_recipes, \
+             patch('src.services.execution_service.ExecutionService') as mock_exec_service:
+            trace_instance = MagicMock()
+            trace_instance.repository = MagicMock()
+            trace_instance.repository.delete_by_job_id = AsyncMock(return_value=1)
+            mock_trace_service.return_value = trace_instance
+
+            logs_instance = MagicMock()
+            logs_instance.delete_by_execution_id = AsyncMock(return_value=1)
+            mock_logs_service.return_value = logs_instance
+
+            recipe_instance = MagicMock()
+            recipe_instance.delete_for_groups = AsyncMock(
+                return_value={'recipe_count': 4, 'trial_count': 9}
+            )
+            mock_recipes.return_value = recipe_instance
+            mock_exec_service.executions = {}
+
+            result = await service.delete_all_executions(group_ids=group_ids)
+
+        recipe_instance.delete_for_groups.assert_awaited_once_with(group_ids)
+        assert "4 recipes" in result.message
+        assert "9 recipe trials" in result.message
+
+    @pytest.mark.asyncio
+    async def test_recipes_are_cleared_even_when_no_runs_remain(
+        self, service, mock_session
+    ):
+        """A library left behind by an earlier delete must still be clearable —
+        the early return for "no executions" used to skip it."""
+        group_ids = [str(uuid.uuid4())]
+        mock_result = MagicMock()
+        mock_result.fetchall.return_value = []
+        mock_session.execute = AsyncMock(return_value=mock_result)
+
+        with patch('src.services.workflow_recipe_service.WorkflowRecipeService') as mock_recipes:
+            recipe_instance = MagicMock()
+            recipe_instance.delete_for_groups = AsyncMock(
+                return_value={'recipe_count': 2, 'trial_count': 0}
+            )
+            mock_recipes.return_value = recipe_instance
+
+            result = await service.delete_all_executions(group_ids=group_ids)
+
+        recipe_instance.delete_for_groups.assert_awaited_once_with(group_ids)
+        assert "2 recipes" in result.message
+
 
 class TestDeleteExecution:
     """Tests for delete_execution method."""

@@ -1,8 +1,11 @@
-"""Workflow recipes — read-only reuse candidates for a generation prompt.
+"""Workflow recipes — reuse candidates for a generation prompt.
 
-Phase 2 of workflow reuse. This exposes retrieval ONLY: it answers "have you
-built something like this before?" and returns the matching recipes. It never
-creates, runs, or modifies anything, so a wrong suggestion costs a glance.
+Phase 2 of workflow reuse. Retrieval answers "have you built something like this
+before?" and returns the matching recipes; it never creates or runs anything, so
+a wrong suggestion costs a glance.
+
+Writes are limited to what the workspace decides about its own library: curating
+a recipe, recording that one was taken up, and deleting one outright.
 
 The reuse decision itself stays with the caller and, ultimately, the human at
 the canvas — a retrieved plan is never executed unreviewed.
@@ -101,6 +104,30 @@ async def curate_recipe(
     if recipe is None:
         raise NotFoundError(f"Workflow recipe {recipe_id} not found")
     return service.to_summary(recipe)
+
+
+@router.delete("/{recipe_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_recipe(
+    recipe_id: int,
+    service: WorkflowRecipeServiceDep,
+    group_context: GroupContextDep,
+) -> None:
+    """Remove a recipe from the workspace's library.
+
+    Deleting loses nothing but the reuse candidate — the run it was distilled
+    from is the record of what happened, and it stays. Prefer curating 'bad' or
+    'hidden' to take a recipe out of circulation while keeping it visible;
+    delete is for recipes that should not exist at all.
+
+    Allowed roles: admin / editor — same bar as curation, since both change what
+    the workspace is offered.
+    """
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise ForbiddenError("Not permitted to delete workflow recipes")
+
+    group_ids = group_context.group_ids if group_context else []
+    if not await service.delete(recipe_id, group_ids):
+        raise NotFoundError(f"Workflow recipe {recipe_id} not found")
 
 
 @router.post("/{recipe_id}/reuse", response_model=RecipeSummary)

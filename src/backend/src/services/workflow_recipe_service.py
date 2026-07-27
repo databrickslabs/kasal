@@ -586,6 +586,37 @@ class WorkflowRecipeService:
         await self.session.refresh(recipe)
         return recipe
 
+    async def delete(self, recipe_id: int, group_ids: List[str]) -> bool:
+        """Remove one recipe from the workspace's library.
+
+        A recipe is not a record of what happened — the run history is — so
+        deleting one loses nothing but the reuse candidate itself. Curating it
+        'bad' or 'hidden' takes it out of circulation while keeping the row;
+        this is for when it should not exist at all.
+
+        Returns False when it does not exist in these workspaces, so the caller
+        can 404 rather than report a delete that never happened.
+        """
+        deleted = await self.repository.delete_by_id(recipe_id, group_ids)
+        if deleted:
+            await self.session.commit()
+        return deleted
+
+    async def delete_for_groups(self, group_ids: Optional[List[str]] = None) -> Dict[str, int]:
+        """Drop the recipe library and its trial ledger for these workspaces.
+
+        Called when run history is deleted: recipes are distilled FROM runs and
+        keep pointing at ``source_job_id`` values that no longer exist, and they
+        keep feeding exemplars into crew generation from crews the user believes
+        they erased. Trials go with them for the same reason — they measure runs.
+
+        Does not commit: run deletion owns the transaction, so the recipes and
+        the runs they came from disappear together or not at all.
+        """
+        recipes = await self.repository.delete_by_groups(group_ids)
+        trials = await self.trial_repository.delete_by_groups(group_ids)
+        return {"recipe_count": recipes, "trial_count": trials}
+
     @staticmethod
     def to_summary(recipe: Any, similarity: Optional[float] = None) -> Any:
         """Recipe row -> API summary. One mapping, so the library listing and a

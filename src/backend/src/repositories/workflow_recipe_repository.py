@@ -8,7 +8,7 @@ builds their crews.
 
 from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.workflow_recipe import WorkflowRecipe
@@ -137,6 +137,33 @@ class WorkflowRecipeRepository:
         )
         result = await self.session.execute(stmt)
         return result.scalars().first()
+
+    async def delete_by_id(self, recipe_id: int, group_ids: List[str]) -> bool:
+        """Delete one recipe. Scoped, so a recipe can only be removed by a
+        workspace that can see it. Returns whether a row was removed."""
+        record = await self.get_by_id(recipe_id, group_ids)
+        if record is None:
+            return False
+        await self.session.delete(record)
+        await self.session.flush()
+        return True
+
+    async def delete_by_groups(self, group_ids: Optional[List[str]] = None) -> int:
+        """Delete a workspace's recipes — or every recipe when ``group_ids`` is
+        omitted, matching the unscoped (admin) arm of run deletion.
+
+        An empty LIST is not the same as no argument: it means "these zero
+        workspaces", and deleting everything for it would be the exact
+        cross-tenant wipe the scoping elsewhere in this file exists to prevent.
+        """
+        if group_ids is not None and not group_ids:
+            return 0
+        stmt = delete(WorkflowRecipe)
+        if group_ids is not None:
+            stmt = stmt.where(WorkflowRecipe.group_id.in_(group_ids))
+        result = await self.session.execute(stmt)
+        await self.session.flush()
+        return result.rowcount or 0
 
     async def _find_similar_sqlite(
         self, query_embedding: List[float], group_ids: List[str], limit: int

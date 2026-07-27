@@ -111,7 +111,7 @@
     "noRuns": "No runs available",
     "loadError": "Failed to load run history",
     "deleteError": "Failed to delete runs",
-    "deleteConfirm": "Are you sure you want to delete all runs? This action cannot be undone.",
+    "deleteConfirm": "Are you sure you want to delete all runs? This also deletes the workflow recipes distilled from them. This action cannot be undone.",
     "deleteAllRuns": "Delete All Runs",
     "deleteRunConfirm": "Are you sure you want to delete this run? This action cannot be undone.",
     "deleteRunSuccess": "Run deleted successfully",
@@ -382,4 +382,4 @@
       "message": "Are you sure you want to permanently delete the memory folder for \"{{name}}\"? This action cannot be undone."
     }
   }
-} 
+}

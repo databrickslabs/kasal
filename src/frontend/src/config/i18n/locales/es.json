@@ -57,7 +57,7 @@
     "noRuns": "No hay ejecuciones disponibles",
     "loadError": "Error al cargar el historial de ejecuciones",
     "deleteError": "Error al eliminar las ejecuciones",
-    "deleteConfirm": "¿Está seguro de que desea eliminar todas las ejecuciones? Esta acción no se puede deshacer.",
+    "deleteConfirm": "¿Está seguro de que desea eliminar todas las ejecuciones? Esto también elimina las recetas de flujo de trabajo extraídas de ellas. Esta acción no se puede deshacer.",
     "deleteAllRuns": "Eliminar Todas las Ejecuciones",
     "columns": {
       "jobId": "Nombre de la Ejecución",
@@ -183,4 +183,4 @@
       "jobExecution": "Error en la ejecución del trabajo"
     }
   }
-} 
+}

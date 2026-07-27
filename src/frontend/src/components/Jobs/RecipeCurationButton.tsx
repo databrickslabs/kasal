@@ -19,7 +19,14 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import {
+  Button,
   CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogContentText,
+  DialogTitle,
+  Divider,
   IconButton,
   ListItemIcon,
   ListItemText,
@@ -34,6 +41,7 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import BlockIcon from '@mui/icons-material/Block';
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
 import ClearIcon from '@mui/icons-material/Clear';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 
 import {
   RecipeCuration,
@@ -60,6 +68,7 @@ export const RecipeCurationButton: React.FC<Props> = ({ jobId }) => {
   const [entry, setEntry] = useState<RecipeJobEntry | null>(null);
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [saving, setSaving] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const refresh = useCallback(() => {
     let cancelled = false;
@@ -90,6 +99,21 @@ export const RecipeCurationButton: React.FC<Props> = ({ jobId }) => {
     } catch {
       // Curation is advisory; a failed write leaves the previous mark in place
       // and the chip re-reads it on the next load.
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteRecipe = async () => {
+    if (!entry) return;
+    setSaving(true);
+    try {
+      await WorkflowRecipeService.deleteRecipe(entry.recipe_id);
+      invalidateRecipeIndex();
+      setConfirmDelete(false);
+    } catch {
+      // Leave the dialog open on failure: the recipe is still there, and
+      // closing would report a deletion that did not happen.
     } finally {
       setSaving(false);
     }
@@ -181,7 +205,42 @@ export const RecipeCurationButton: React.FC<Props> = ({ jobId }) => {
             <ListItemText primary="Clear mark" />
           </MenuItem>
         )}
+        <Divider />
+        <MenuItem
+          onClick={() => {
+            setAnchorEl(null);
+            setConfirmDelete(true);
+          }}
+        >
+          <ListItemIcon>
+            <DeleteOutlineIcon fontSize="small" color="error" />
+          </ListItemIcon>
+          <ListItemText
+            primary="Delete recipe"
+            secondary="Removes it from the library; the run stays"
+          />
+        </MenuItem>
       </Menu>
+
+      <Dialog open={confirmDelete} onClose={() => setConfirmDelete(false)}>
+        <DialogTitle>Delete this recipe?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            &ldquo;{entry.intent_text}&rdquo; leaves the reuse library and stops being
+            offered when generating similar crews. The run it was mined from is not
+            affected. This cannot be undone — to stop being offered a recipe without
+            losing it, mark it &ldquo;Not good&rdquo; or &ldquo;Hide&rdquo; instead.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmDelete(false)} disabled={saving}>
+            Cancel
+          </Button>
+          <Button onClick={deleteRecipe} color="error" disabled={saving}>
+            {saving ? 'Deleting…' : 'Delete'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </>
   );
 };

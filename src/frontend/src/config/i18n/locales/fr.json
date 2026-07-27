@@ -57,7 +57,7 @@
     "noRuns": "Aucune exécution disponible",
     "loadError": "Échec du chargement de l'historique des exécutions",
     "deleteError": "Échec de la suppression des exécutions",
-    "deleteConfirm": "Êtes-vous sûr de vouloir supprimer toutes les exécutions ? Cette action ne peut pas être annulée.",
+    "deleteConfirm": "Êtes-vous sûr de vouloir supprimer toutes les exécutions ? Cela supprime également les recettes de workflow qui en sont issues. Cette action ne peut pas être annulée.",
     "deleteAllRuns": "Supprimer tout l'historique",
     "columns": {
       "jobId": "Nom de l'exécution",
@@ -183,4 +183,4 @@
       "jobExecution": "Échec de l'exécution de la tâche"
     }
   }
-} 
+}

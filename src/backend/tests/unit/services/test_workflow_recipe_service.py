@@ -564,3 +564,129 @@ class TestExemplars:
             await WorkflowRecipeService(session=None).exemplars_for_prompt("x", [])
             == ""
         )
+
+
+class TestDeletion:
+    """Recipes are distilled FROM runs, so they must not outlive them: a recipe
+    left behind keeps pointing at a source_job_id that no longer exists and
+    keeps feeding exemplars from crews the user believes they erased."""
+
+    @staticmethod
+    async def _factory():
+        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+        from src.models.workflow_recipe import WorkflowRecipe
+        from src.models.workflow_recipe_trial import WorkflowRecipeTrial
+
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        async with engine.begin() as conn:
+            for model in (WorkflowRecipe, WorkflowRecipeTrial):
+                await conn.run_sync(model.__table__.create)
+        return async_sessionmaker(engine, expire_on_commit=False)
+
+    @staticmethod
+    def _recipe(group_id, intent="load companies", job_id="job-1"):
+        from src.models.workflow_recipe import WorkflowRecipe
+
+        return WorkflowRecipe(
+            group_id=group_id,
+            intent_text=intent,
+            intent_hash=intent_hash(intent),
+            agents_yaml={"a": {"role": "Analyst"}},
+            tasks_yaml={"t": {"description": intent}},
+            source_job_id=job_id,
+            mined_job_ids=[job_id],
+        )
+
+    @staticmethod
+    def _trial(group_id):
+        from src.models.workflow_recipe_trial import ARM_EXEMPLAR, WorkflowRecipeTrial
+
+        return WorkflowRecipeTrial(
+            group_id=group_id, arm=ARM_EXEMPLAR, prompt_hash="h", prompt_text="p"
+        )
+
+    @pytest.mark.asyncio
+    async def test_delete_removes_one_recipe(self):
+        factory = await self._factory()
+        async with factory() as session:
+            session.add(self._recipe("g1"))
+            await session.commit()
+
+        async with factory() as session:
+            service = WorkflowRecipeService(session)
+            recipe_id = (await WorkflowRecipeRepository(session).list_by_group(["g1"]))[0].id
+            assert await service.delete(recipe_id, ["g1"]) is True
+
+        async with factory() as session:
+            assert await WorkflowRecipeRepository(session).list_by_group(["g1"]) == []
+
+    @pytest.mark.asyncio
+    async def test_delete_refuses_a_recipe_from_another_workspace(self):
+        factory = await self._factory()
+        async with factory() as session:
+            session.add(self._recipe("g1"))
+            await session.commit()
+
+        async with factory() as session:
+            recipe_id = (await WorkflowRecipeRepository(session).list_by_group(["g1"]))[0].id
+            # Reported as "not found" rather than deleted — the caller 404s.
+            assert await WorkflowRecipeService(session).delete(recipe_id, ["g2"]) is False
+
+        async with factory() as session:
+            assert len(await WorkflowRecipeRepository(session).list_by_group(["g1"])) == 1
+
+    @pytest.mark.asyncio
+    async def test_delete_for_groups_clears_only_those_workspaces(self):
+        factory = await self._factory()
+        async with factory() as session:
+            session.add(self._recipe("g1"))
+            session.add(self._recipe("g2", intent="summarise news", job_id="job-2"))
+            session.add(self._trial("g1"))
+            session.add(self._trial("g2"))
+            await session.commit()
+
+        async with factory() as session:
+            counts = await WorkflowRecipeService(session).delete_for_groups(["g1"])
+            await session.commit()
+        assert counts == {"recipe_count": 1, "trial_count": 1}
+
+        async with factory() as session:
+            repo = WorkflowRecipeRepository(session)
+            assert await repo.list_by_group(["g1"]) == []
+            assert len(await repo.list_by_group(["g2"])) == 1
+
+    @pytest.mark.asyncio
+    async def test_no_groups_is_not_an_invitation_to_delete_everything(self):
+        """An empty list means "these zero workspaces". Treating it as unscoped
+        would turn a group-filtered delete into a cross-tenant wipe."""
+        factory = await self._factory()
+        async with factory() as session:
+            session.add(self._recipe("g1"))
+            await session.commit()
+
+        async with factory() as session:
+            counts = await WorkflowRecipeService(session).delete_for_groups([])
+            await session.commit()
+        assert counts == {"recipe_count": 0, "trial_count": 0}
+
+        async with factory() as session:
+            assert len(await WorkflowRecipeRepository(session).list_by_group(["g1"])) == 1
+
+    @pytest.mark.asyncio
+    async def test_omitting_groups_clears_every_workspace(self):
+        """The admin arm of run deletion passes no groups at all."""
+        factory = await self._factory()
+        async with factory() as session:
+            session.add(self._recipe("g1"))
+            session.add(self._recipe("g2", intent="summarise news", job_id="job-2"))
+            await session.commit()
+
+        async with factory() as session:
+            counts = await WorkflowRecipeService(session).delete_for_groups()
+            await session.commit()
+        assert counts["recipe_count"] == 2
+
+        async with factory() as session:
+            repo = WorkflowRecipeRepository(session)
+            assert await repo.list_by_group(["g1", "g2"]) == []

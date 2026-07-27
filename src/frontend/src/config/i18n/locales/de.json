@@ -55,7 +55,7 @@
     "noRuns": "Keine Ausführungen verfügbar",
     "loadError": "Fehler beim Laden des Ausführungsverlaufs",
     "deleteError": "Fehler beim Löschen der Ausführungen",
-    "deleteConfirm": "Sind Sie sicher, dass Sie alle Ausführungen löschen möchten? Diese Aktion kann nicht rückgängig gemacht werden.",
+    "deleteConfirm": "Sind Sie sicher, dass Sie alle Ausführungen löschen möchten? Dabei werden auch die daraus abgeleiteten Workflow-Rezepte gelöscht. Diese Aktion kann nicht rückgängig gemacht werden.",
     "deleteAllRuns": "Alle Ausführungen löschen",
     "columns": {
       "jobId": "Ausführungsname",
@@ -182,4 +182,4 @@
       "jobExecution": "Ausführung des Jobs fehlgeschlagen"
     }
   }
-} 
+}

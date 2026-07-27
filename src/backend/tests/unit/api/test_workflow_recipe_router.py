@@ -18,10 +18,11 @@ import pytest
 
 from src.api.workflow_recipe_router import (
     curate_recipe,
+    delete_recipe,
     recipe_effectiveness,
     recipes_by_job,
 )
-from src.core.exceptions import ForbiddenError
+from src.core.exceptions import ForbiddenError, NotFoundError
 
 
 def _ctx(role="admin"):
@@ -81,3 +82,28 @@ class TestCurationPermissions:
         request = SimpleNamespace(curation="good")
         with pytest.raises(ForbiddenError):
             await curate_recipe(1, request, AsyncMock(), _ctx("operator"))
+
+
+class TestDeletePermissions:
+    @pytest.mark.asyncio
+    async def test_editor_can_delete(self):
+        service = AsyncMock()
+        service.delete.return_value = True
+
+        assert await delete_recipe(7, service, _ctx("editor")) is None
+        service.delete.assert_awaited_once_with(7, ["g1"])
+
+    @pytest.mark.asyncio
+    async def test_operator_cannot_delete(self):
+        """Same bar as curation: removing a recipe changes what the whole
+        workspace is offered."""
+        with pytest.raises(ForbiddenError):
+            await delete_recipe(7, AsyncMock(), _ctx("operator"))
+
+    @pytest.mark.asyncio
+    async def test_unknown_recipe_is_a_404_not_a_silent_success(self):
+        service = AsyncMock()
+        service.delete.return_value = False
+
+        with pytest.raises(NotFoundError):
+            await delete_recipe(7, service, _ctx("admin"))

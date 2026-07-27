@@ -64,6 +64,17 @@ export class WorkflowRecipeService {
     await API.patch(`/workflow-recipes/${recipeId}/curation`, { curation });
   }
 
+  /**
+   * Remove a recipe from the library.
+   *
+   * Curating 'bad' or 'hidden' is the reversible way to stop being offered a
+   * crew; this is for one that should not exist at all. The run it was mined
+   * from is untouched — a recipe is a reuse candidate, not a record.
+   */
+  static async deleteRecipe(recipeId: number): Promise<void> {
+    await API.delete(`/workflow-recipes/${recipeId}`);
+  }
+
   /** Whether reuse is measurably helping, per arm. */
   static async getEffectiveness(days = 30): Promise<RecipeEffectiveness> {
     const response = await API.get<RecipeEffectiveness>(

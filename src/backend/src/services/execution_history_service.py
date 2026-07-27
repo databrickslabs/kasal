@@ -357,10 +357,22 @@ class ExecutionHistoryService:
             # Import services here to avoid circular imports
             from src.services.execution_trace_service import ExecutionTraceService
             from src.services.execution_logs_service import ExecutionLogsService
+            from src.services.workflow_recipe_service import WorkflowRecipeService
 
             # Create service instances
             trace_service = ExecutionTraceService(self.session)
             logs_service = ExecutionLogsService(self.session)
+            recipe_service = WorkflowRecipeService(self.session)
+
+            # Recipes are distilled FROM these runs: they keep pointing at
+            # source_job_ids that are about to stop existing, and keep feeding
+            # exemplars into crew generation from crews the user believes they
+            # erased. Their trial ledger measures the same runs. Both go with
+            # the history. Done BEFORE the no-executions early return below, so
+            # a library left behind by an earlier delete can still be cleared.
+            recipe_counts = await recipe_service.delete_for_groups(
+                group_ids if group_ids else None
+            )
 
             # Get job_ids for the group first (needed to delete related data)
             if group_ids and len(group_ids) > 0:
@@ -373,9 +385,15 @@ class ExecutionHistoryService:
                 job_ids = [row[0] for row in result.fetchall()]
 
                 if not job_ids:
+                    # The request session commits on the way out, so the recipe
+                    # deletion above still lands.
                     return DeleteResponse(
                         success=True,
-                        message="No executions found for the specified groups."
+                        message=(
+                            "No executions found for the specified groups. "
+                            f"Deleted {recipe_counts['recipe_count']} recipes and "
+                            f"{recipe_counts['trial_count']} recipe trials."
+                        )
                     )
 
                 # Delete traces for these job_ids
@@ -426,6 +444,7 @@ class ExecutionHistoryService:
                 success=True,
                 message=f"Deleted {result['run_count']} executions, {result['task_status_count']} task statuses, "
                         f"{result['error_trace_count']} error traces, {log_count} logs, {trace_count} traces, "
+                        f"{recipe_counts['recipe_count']} recipes, {recipe_counts['trial_count']} recipe trials, "
                         f"and {execution_count_before + crewai_execution_count_before} in-memory executions."
             )
 

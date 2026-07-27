@@ -52,7 +52,7 @@
     "noRuns": "Çalıştırma bulunamadı",
     "loadError": "Çalıştırma geçmişi yüklenemedi",
     "deleteError": "Çalıştırmalar silinemedi",
-    "deleteConfirm": "Tüm çalıştırmaları silmek istediğinizden emin misiniz? Bu işlem geri alınamaz.",
+    "deleteConfirm": "Tüm çalıştırmaları silmek istediğinizden emin misiniz? Bu işlem, onlardan çıkarılan iş akışı tariflerini de siler. Bu işlem geri alınamaz.",
     "deleteAllRuns": "Tüm Çalıştırmaları Sil",
     "columns": {
       "jobId": "Çalıştırma Adı",
@@ -174,4 +174,4 @@
       "jobExecution": "İş yürütme başarısız oldu"
     }
   }
-} 
+}

@@ -52,7 +52,7 @@
     "noRuns": "没有运行记录",
     "loadError": "加载运行历史失败",
     "deleteError": "删除运行记录失败",
-    "deleteConfirm": "确定要删除所有运行记录吗？此操作无法撤消。",
+    "deleteConfirm": "确定要删除所有运行记录吗？这也会删除由其提炼出的工作流配方。此操作无法撤消。",
     "deleteAllRuns": "删除所有运行记录",
     "columns": {
       "jobId": "运行名称",
@@ -174,4 +174,4 @@
       "jobExecution": "作业执行失败"
     }
   }
-} 
+}

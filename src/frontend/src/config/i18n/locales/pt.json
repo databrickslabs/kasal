@@ -52,7 +52,7 @@
     "noRuns": "Nenhuma execução disponível",
     "loadError": "Falha ao carregar histórico de execuções",
     "deleteError": "Falha ao excluir execuções",
-    "deleteConfirm": "Tem certeza que deseja excluir todas as execuções? Esta ação não pode ser desfeita.",
+    "deleteConfirm": "Tem certeza que deseja excluir todas as execuções? Isso também exclui as receitas de workflow extraídas delas. Esta ação não pode ser desfeita.",
     "deleteAllRuns": "Excluir Todas as Execuções",
     "columns": {
       "jobId": "Nome da Execução",
