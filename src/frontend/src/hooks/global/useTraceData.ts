@@ -79,15 +79,15 @@ export function processTraces(rawTraces: Trace[]): ProcessedTraces {
   );
 
   const sorted = [...filteredTraces].sort((a, b) =>
-    new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    parseTraceTime(a.created_at).getTime() - parseTraceTime(b.created_at).getTime()
   );
 
   if (sorted.length === 0) {
     return { agents: [], globalEvents: { start: [], end: [] }, crewSections: [], timelineItems: [] };
   }
 
-  const globalStart = new Date(sorted[0].created_at);
-  const globalEnd = new Date(sorted[sorted.length - 1].created_at);
+  const globalStart = parseTraceTime(sorted[0].created_at);
+  const globalEnd = parseTraceTime(sorted[sorted.length - 1].created_at);
   const totalDuration = globalEnd.getTime() - globalStart.getTime();
 
   // Flow-level rows only. Crew starts/completions are NOT global — they belong to
@@ -149,10 +149,10 @@ export function processTraces(rawTraces: Trace[]): ProcessedTraces {
       sid = spanToParent.get(sid);
     }
     if (crewStarts.length === 0) return undefined;
-    const at = new Date(trace.created_at).getTime();
+    const at = parseTraceTime(trace.created_at).getTime();
     let fallback: number | undefined;
     crewStarts.forEach((c, i) => {
-      if (new Date(c.created_at).getTime() <= at) fallback = i;
+      if (parseTraceTime(c.created_at).getTime() <= at) fallback = i;
     });
     return fallback ?? 0;
   };
@@ -323,8 +323,8 @@ export function processTraces(rawTraces: Trace[]): ProcessedTraces {
   agentMap.forEach((agentTraces, agentName) => {
     if (agentTraces.length === 0) return;
 
-    const agentStart = new Date(agentTraces[0].created_at);
-    const agentEnd = new Date(agentTraces[agentTraces.length - 1].created_at);
+    const agentStart = parseTraceTime(agentTraces[0].created_at);
+    const agentEnd = parseTraceTime(agentTraces[agentTraces.length - 1].created_at);
 
     const taskMap = new Map<string, Trace[]>();
     const taskIdToUniqueKey = new Map<string, string>();
@@ -373,8 +373,8 @@ export function processTraces(rawTraces: Trace[]): ProcessedTraces {
         const trimmedCtx = ctx?.trim();
         displayName = trimmedCtx || agentName;
       }
-      const taskStart = new Date(taskTraces[0].created_at);
-      const taskEnd = new Date(taskTraces[taskTraces.length - 1].created_at);
+      const taskStart = parseTraceTime(taskTraces[0].created_at);
+      const taskEnd = parseTraceTime(taskTraces[taskTraces.length - 1].created_at);
 
       // Exhaustive wall-time accounting: build the VISIBLE rows first, then
       // give each row the slice from its own timestamp to the NEXT visible
@@ -384,7 +384,7 @@ export function processTraces(rawTraces: Trace[]): ProcessedTraces {
       // swallowed invisibly. Intrinsic op times (memory query/save, MCP call)
       // are carried separately as detail — never as the column value.
       const visibleEvents = taskTraces.map((trace) => {
-        const timestamp = new Date(trace.created_at);
+        const timestamp = parseTraceTime(trace.created_at);
         const processed = processTraceEvent(trace);
         if (!processed) return null;
 
@@ -550,6 +550,32 @@ const formatTimeDelta = (start: Date, timestamp: Date): string => {
 };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Already carries a zone: trailing Z, or ±HH:MM after the time part. */
+const HAS_TIMEZONE_RE = /(?:Z|[+-]\d{2}:?\d{2})$/;
+
+/**
+ * One clock for every trace row, whichever transport delivered it.
+ *
+ * The timeline merges two sources that disagree about timezones. Rows read from
+ * the database carry NAIVE UTC ("2026-07-27T23:16:27.868") — and JavaScript
+ * reads a date-time without an offset as LOCAL time. Rows delivered as live SSE
+ * frames carry the engine's `datetime.now(timezone.utc)`, which serializes WITH
+ * "+00:00" and is therefore read correctly.
+ *
+ * So the same event arrives twice, hours apart: at UTC+2 a run showed a
+ * 120-minute span, a 119.8-minute gap between adjacent rows, and an order that
+ * put "Task Completed" above the memory read that preceded it — the whole
+ * timeline sorted into two clusters two hours apart.
+ *
+ * Treating a zoneless timestamp as UTC is correct for every producer here: the
+ * database column is UTC, and the engine stamps UTC.
+ */
+const parseTraceTime = (value: string | undefined | null): Date => {
+  if (!value) return new Date(NaN);
+  const iso = value.includes('T') ? value : value.replace(' ', 'T');
+  return new Date(HAS_TIMEZONE_RE.test(iso) ? iso : `${iso}Z`);
+};
 
 const truncateTaskName = (name: string, maxLength = 80): string => {
   if (name.length <= maxLength) return name;

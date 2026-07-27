@@ -394,3 +394,41 @@ describe('processTraces — task descriptions are never truncated', () => {
     expect(task.taskId).toBe('T1');
   });
 });
+
+describe('processTraces — one clock for both transports', () => {
+  /**
+   * The timeline merges rows from the database (naive UTC, "…T23:16:27.868")
+   * with rows delivered as live SSE frames (the engine stamps UTC and
+   * serializes "+00:00"). JavaScript reads a zoneless date-time as LOCAL, so at
+   * UTC+2 the same event landed twice, two hours apart: a 31-second run
+   * reported a 120-minute span, adjacent rows showed a 119.8-minute gap, and
+   * the order put "Task Completed" above the memory read that preceded it.
+   */
+  it('reads a zoneless timestamp as UTC, matching the offset-bearing one', () => {
+    const result = processTraces([
+      makeTrace({ event_type: 'response_run', event_context: 'q',
+                  created_at: '2026-07-27T23:16:27.000' }),
+      makeTrace({ event_type: 'response_run', event_context: 'q',
+                  created_at: '2026-07-27T23:16:28.000+00:00' }),
+    ]);
+
+    expect(result.globalStart?.getTime()).toBe(Date.UTC(2026, 6, 27, 23, 16, 27));
+    // One second apart — not one second plus a timezone offset.
+    expect(result.totalDuration).toBe(1000);
+  });
+
+  it('keeps the two transports in one order', () => {
+    const result = processTraces([
+      // Delivered live, with an offset — the LATER event.
+      makeTrace({ event_source: 'W', event_type: 'task_completed', task_id: 'T1',
+                  event_context: 'Do it', output: { content: 'done' },
+                  created_at: '2026-07-27T23:16:30.000+00:00' }),
+      // Read back from the database, zoneless — the EARLIER event.
+      makeTrace({ event_source: 'W', event_type: 'llm_call', task_id: 'T1',
+                  event_context: 'Do it', created_at: '2026-07-27T23:16:29.000' }),
+    ]);
+
+    const types = result.agents[0].tasks[0].events.map(e => e.type);
+    expect(types.indexOf('llm')).toBeLessThan(types.indexOf('task_complete'));
+  });
+});
