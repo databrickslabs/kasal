@@ -251,10 +251,10 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
     }
   }, [runs.length, onExecutionCountChange]);
 
-  // Recipes are produced by a background sweep MINUTES after a run finishes, so
-  // a row is on screen long before its recipe exists. Re-read the job→recipe
+  // A row is on screen before its recipe is mined, so re-read the job→recipe
   // index as the list changes (self-throttled by a TTL) — otherwise the Reusable
-  // control never appears for a just-finished run until a full page reload.
+  // control never appears for a just-finished run until a full page reload. The
+  // cache also re-reads on job completion, which is when mining actually runs.
   useEffect(() => {
     refreshRecipeIndexIfStale();
   }, [runs]);

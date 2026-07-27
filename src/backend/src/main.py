@@ -213,24 +213,26 @@ async def lifespan(app: FastAPI):
         system_logger.info("[ZombieCleanup] Periodic zombie cleanup task started (every 2 min)")
 
     # Workflow recipes: distil completed crew runs into reusable recipes.
-    # Runs in the PARENT only — the crew path writes its terminal status from
-    # inside the spawned subprocess, so a hook on that write would execute in the
-    # child interpreter where it reaches nothing. Sweeping here is idempotent,
-    # cannot fail a run, and back-fills existing history on the first pass.
+    #
+    # Mining is EVENT-DRIVEN — process_crew_executor triggers it the moment a
+    # crew subprocess is joined (see services/workflow_recipe_mining.py). It used
+    # to be a 5-minute polling loop, which meant every run waited minutes before
+    # it could be curated.
+    #
+    # This one startup pass is the part polling did that an event cannot: it
+    # back-fills history that finished while the server was down, or that
+    # predates the feature.
     if db_initialized:
-        async def _workflow_recipe_loop():
-            import asyncio as _asyncio
-            from src.services.workflow_recipe_service import WorkflowRecipeService
-            while True:
-                await _asyncio.sleep(300)
-                try:
-                    n = await WorkflowRecipeService.sweep()
-                    if n:
-                        system_logger.info(f"[WorkflowRecipes] Mined {n} recipe(s)")
-                except Exception as _re:
-                    system_logger.error(f"[WorkflowRecipes] Error: {_re}")
-        import asyncio as _asyncio; _asyncio.create_task(_workflow_recipe_loop())
-        system_logger.info("[WorkflowRecipes] Periodic recipe mining started (every 5 min)")
+        async def _workflow_recipe_backfill():
+            from src.services.workflow_recipe_mining import mine_now
+            try:
+                n = await mine_now()
+                if n:
+                    system_logger.info(f"[WorkflowRecipes] Back-filled {n} recipe(s)")
+            except Exception as _re:
+                system_logger.error(f"[WorkflowRecipes] Back-fill error: {_re}")
+        import asyncio as _asyncio; _asyncio.create_task(_workflow_recipe_backfill())
+        system_logger.info("[WorkflowRecipes] Mining on run completion; back-filling history once")
 
     # Run database seeders after DB initialization
     if db_initialized:

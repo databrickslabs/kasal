@@ -46,8 +46,8 @@ Two details in that table carry more weight than they look:
 ```
 completed crew run
    │
-   ├─ mine     (every 5 min, parent process)   → distil into a recipe, dedupe by intent
-   ├─ embed    (same sweep, separate step)     → make it retrievable
+   ├─ mine     (on completion, parent process) → distil into a recipe, dedupe by intent
+   ├─ embed    (same pass, separate step)      → make it retrievable
    │
    │  ... a human marks it good ...
    │
@@ -55,9 +55,11 @@ completed crew run
         └─ inject                              → few-shot exemplars in the generation prompt
 ```
 
-**Mining** runs as a periodic parent-side sweep rather than a hook on the status write. The crew path writes its terminal status from *inside* a spawned subprocess, so a hook there would execute in the child interpreter and reach nothing. A parent-side sweep sidesteps that entirely: it is idempotent, cannot fail a run, is decoupled from the status write, and back-fills existing history on its first pass.
+**Mining** is triggered in the parent the moment a crew subprocess is joined. It cannot hook the status *write*, which happens inside the spawned subprocess and would reach nothing from there — but the parent awaits `process.join()` and then reads the exit code, by which point the child's status row and traces are committed. That join is the trigger. Mining is fire-and-forget and idempotent, so it cannot delay or fail the run, and concurrent completions coalesce into at most two passes. A single pass at startup back-fills history that finished while the server was down.
 
-**Embedding** is a separate step from mining on purpose. An embedder outage then degrades to "captured but not yet retrievable" instead of losing the recipe — the structure is stored on the sweep, and the vector is filled in whenever the embedder returns.
+This was a 5-minute polling loop until it became clear what that cost: every run waited minutes before its recipe existed, which is minutes before anyone could curate it — indistinguishable from the feature not working.
+
+**Embedding** is a separate step from mining on purpose. An embedder outage then degrades to "captured but not yet retrievable" instead of losing the recipe — the structure is stored when the run completes, and the vector is filled in on a later pass, whenever the embedder returns.
 
 **Retrieval** matches the user's prompt against recipe intents. Note the asymmetry it matches across: a recipe's `intent_text` is built from the *generated* run name and task descriptions, while the query is the user's own phrasing. They describe the same job in different registers, so scores run lower than a prose-to-prose comparison would, and the similarity floor is calibrated for that.
 

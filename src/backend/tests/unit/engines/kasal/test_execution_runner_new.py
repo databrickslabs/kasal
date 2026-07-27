@@ -121,6 +121,67 @@ class TestRunCrewInProcess:
         assert call_args[0][1] == ExecutionStatus.COMPLETED.value
 
     @pytest.mark.asyncio
+    async def test_recipe_mining_is_triggered_after_the_status_is_written(self):
+        """Mining reads runs whose status is COMPLETED, so triggering it before
+        that write (e.g. when the subprocess is joined) makes it skip the very
+        run that triggered it — leaving the newest run permanently unmined."""
+        order = []
+
+        async def _update(*args, **kwargs):
+            order.append("status")
+            return True
+
+        with patch("src.services.execution_status_service.ExecutionStatusService") as mock_svc, \
+             patch("src.engines.kasal.paths.crew.execution_runner.process_crew_executor") as mock_pce, \
+             patch("src.engines.kasal.security.scanner_pipeline.security_scanner") as mock_ss, \
+             patch("src.services.workflow_recipe_mining.schedule_mining_after_run") as mock_mine, \
+             patch("src.engines.kasal.paths.crew.execution_runner.update_execution_status_with_retry",
+                   side_effect=_update):
+
+            mock_svc.update_status = AsyncMock()
+            mock_pce.run_crew_isolated = AsyncMock(return_value={
+                "status": "COMPLETED", "result": "Process result",
+            })
+            mock_ss.scan = MagicMock()
+            mock_mine.side_effect = lambda execution_id: order.append("mine")
+
+            await run_crew_in_process(
+                execution_id="proc-exec-mined",
+                config={"inputs": {}, "group_id": "g1"},
+                running_jobs={},
+                group_context=_make_group_context(),
+            )
+
+        mock_mine.assert_called_once_with("proc-exec-mined")
+        assert order == ["status", "mine"], "mining must follow the status write"
+
+    @pytest.mark.asyncio
+    async def test_a_failed_run_is_not_mined(self):
+        """Only COMPLETED crews are reusable; mining a failure would offer it."""
+        with patch("src.services.execution_status_service.ExecutionStatusService") as mock_svc, \
+             patch("src.engines.kasal.paths.crew.execution_runner.process_crew_executor") as mock_pce, \
+             patch("src.engines.kasal.security.scanner_pipeline.security_scanner") as mock_ss, \
+             patch("src.services.workflow_recipe_mining.schedule_mining_after_run") as mock_mine, \
+             patch("src.engines.kasal.paths.crew.execution_runner.update_execution_status_with_retry",
+                   new_callable=AsyncMock) as mock_update:
+
+            mock_svc.update_status = AsyncMock()
+            mock_update.return_value = True
+            mock_pce.run_crew_isolated = AsyncMock(return_value={
+                "status": "FAILED", "error": "boom",
+            })
+            mock_ss.scan = MagicMock()
+
+            await run_crew_in_process(
+                execution_id="proc-exec-failed",
+                config={"inputs": {}, "group_id": "g1"},
+                running_jobs={},
+                group_context=_make_group_context(),
+            )
+
+        mock_mine.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_stopped_status(self):
         running_jobs = {}
         config = {"group_id": "g1"}

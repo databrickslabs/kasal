@@ -298,6 +298,17 @@ async def run_crew_in_process(
             else:
                 logger.error(f"[run_crew_in_process] Failed to update status for {execution_id} to {final_status}")
 
+            # Distil this crew into a reusable recipe, now that the row it will
+            # be mined FROM says COMPLETED. Triggering any earlier — when the
+            # subprocess is joined, say — races this write: mining only reads
+            # runs whose status is COMPLETED, so it would skip the very run that
+            # triggered it and pick it up only when the NEXT run finished, which
+            # leaves the newest run permanently unmined. Fire-and-forget.
+            if update_success and final_status == ExecutionStatus.COMPLETED.value:
+                from src.services.workflow_recipe_mining import schedule_mining_after_run
+
+                schedule_mining_after_run(execution_id)
+
         except BaseException as cleanup_error:
             # Catch BaseException (not just Exception) so CancelledError is also caught.
             # If the asyncio task is cancelled, the DB write would otherwise be skipped
