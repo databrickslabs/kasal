@@ -113,6 +113,23 @@ def _extract_event_type(span: ReadableSpan) -> str:
     return name.replace(".", "_").lower() if name else "unknown"
 
 
+def _span_started_at(span: ReadableSpan) -> Optional[datetime]:
+    """When the span actually started, as a naive UTC datetime.
+
+    Without this the row falls back to the column default — the moment the
+    exporter's batch reached the DB. Spans are exported as they END, so the
+    timeline then ordered rows by completion and every row of a batch shared a
+    timestamp: durations collapsed to 0 ms and the long-term-memory LLM call
+    (which finishes after the task) pushed "Task Completed" into the middle of
+    its own task.
+    """
+    if not span.start_time:
+        return None
+    return datetime.fromtimestamp(span.start_time / 1_000_000_000, tz=timezone.utc).replace(
+        tzinfo=None
+    )
+
+
 def _extract_event_source(span: ReadableSpan) -> str:
     """Extract event_source (agent role) from span attributes.
 
@@ -397,6 +414,9 @@ class KasalDBSpanExporter(SpanExporter):
             ),
             # OTel-native fields
             "span_name": span.name,
+            # Real span start — see _span_started_at. Ordering, offsets and
+            # durations in the timeline all read this column.
+            "created_at": _span_started_at(span),
             "status_code": (span.status.status_code.name if span.status else "UNSET"),
             "duration_ms": (
                 round((span.end_time - span.start_time) / 1_000_000)
@@ -444,8 +464,16 @@ class KasalDBSpanExporter(SpanExporter):
                             else:
                                 cleaned = {}
 
+                            # created_at is omitted when the span had no start
+                            # time, so the column default still applies.
+                            optional_created_at = (
+                                {"created_at": record["created_at"]}
+                                if record.get("created_at")
+                                else {}
+                            )
                             trace = ExecutionTrace(
                                 job_id=record["job_id"],
+                                **optional_created_at,
                                 event_source=record["event_source"],
                                 event_context=record["event_context"],
                                 event_type=record["event_type"],

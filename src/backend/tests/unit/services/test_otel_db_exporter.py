@@ -9,6 +9,7 @@ Target: 100% code coverage.
 import contextlib
 import json
 import logging
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import (
     AsyncMock,
@@ -958,6 +959,26 @@ class TestSpanToRecord:
         span = _make_readable_span(start_time=None, end_time=None)
         record = exporter._span_to_record(span)
         assert record["duration_ms"] is None
+
+    def test_created_at_is_the_span_start_not_the_write_time(self):
+        """Spans export when they END, so ordering by insert time reordered the
+        timeline. The row carries the span's own start instead."""
+        exporter = self._make_exporter()
+        span = _make_readable_span(
+            start_time=1_700_000_000_000_000_000,
+            end_time=1_700_000_002_000_000_000,
+        )
+
+        record = exporter._span_to_record(span)
+
+        assert record["created_at"] == datetime(2023, 11, 14, 22, 13, 20)
+        assert record["created_at"].tzinfo is None  # column is naive UTC
+
+    def test_created_at_omitted_when_the_span_has_no_start_time(self):
+        """Nothing to record → the column default still applies."""
+        exporter = self._make_exporter()
+        span = _make_readable_span(start_time=None, end_time=None)
+        assert exporter._span_to_record(span)["created_at"] is None
 
     def test_no_start_time_only(self):
         exporter = self._make_exporter()
