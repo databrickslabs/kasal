@@ -8,7 +8,7 @@ import logging
 import asyncio
 import traceback
 from typing import Any, Dict, Optional
-from src.services.process_crew_executor import process_crew_executor
+from src.services.agent_builder.process_executor import process_crew_executor
 
 from src.models.execution_status import ExecutionStatus
 from src.utils.user_context import GroupContext
@@ -34,7 +34,7 @@ async def update_execution_status_with_retry(
     Returns:
         True if successful, False otherwise
     """
-    from src.services.execution_status_service import ExecutionStatusService
+    from src.services.execution.status import ExecutionStatusService
     
     max_retries = 3
     retry_count = 0
@@ -117,7 +117,7 @@ async def run_crew_in_process(
     # Ensure status is RUNNING. API-created records are born RUNNING, so this
     # is a no-op there; scheduler-created records start "pending" and need the
     # transition (only_if_changed skips the redundant write in the former case).
-    from src.services.execution_status_service import ExecutionStatusService
+    from src.services.execution.status import ExecutionStatusService
     await ExecutionStatusService.update_status(
         job_id=execution_id,
         status=ExecutionStatus.RUNNING.value,
@@ -326,7 +326,7 @@ async def run_crew_in_process(
                 try:
                     import concurrent.futures
                     from src.utils.asyncio_utils import execute_db_operation_with_fresh_engine
-                    from src.services.execution_status_service import ExecutionStatusService
+                    from src.services.execution.status import ExecutionStatusService
 
                     async def _recovery():
                         async def _op(session):

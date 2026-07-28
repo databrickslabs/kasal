@@ -25,7 +25,7 @@ class TestUpdateExecutionStatusWithRetry:
     async def test_update_status_success_first_attempt(self):
         """Test successful status update on first attempt."""
         # Patch at the source module since import happens inside the function
-        with patch('src.services.execution_status_service.ExecutionStatusService') as mock_service:
+        with patch('src.services.execution.status.ExecutionStatusService') as mock_service:
             mock_service.update_status = AsyncMock(return_value=True)
 
             result = await update_execution_status_with_retry(
@@ -46,7 +46,7 @@ class TestUpdateExecutionStatusWithRetry:
     async def test_update_status_retries_on_failure(self):
         """Test that status update retries on failure."""
         # Patch at the source module since import happens inside the function
-        with patch('src.services.execution_status_service.ExecutionStatusService') as mock_service:
+        with patch('src.services.execution.status.ExecutionStatusService') as mock_service:
             # Fail twice, succeed on third attempt
             mock_service.update_status = AsyncMock(
                 side_effect=[False, False, True]
@@ -66,7 +66,7 @@ class TestUpdateExecutionStatusWithRetry:
     async def test_update_status_returns_false_after_max_retries(self):
         """Test that False is returned after exhausting all retries."""
         # Patch at the source module since import happens inside the function
-        with patch('src.services.execution_status_service.ExecutionStatusService') as mock_service:
+        with patch('src.services.execution.status.ExecutionStatusService') as mock_service:
             mock_service.update_status = AsyncMock(return_value=False)
 
             result = await update_execution_status_with_retry(
@@ -83,7 +83,7 @@ class TestUpdateExecutionStatusWithRetry:
     async def test_update_status_handles_exceptions(self):
         """Test that exceptions are handled and retried."""
         # Patch at the source module since import happens inside the function
-        with patch('src.services.execution_status_service.ExecutionStatusService') as mock_service:
+        with patch('src.services.execution.status.ExecutionStatusService') as mock_service:
             mock_service.update_status = AsyncMock(
                 side_effect=[Exception("Network error"), Exception("Timeout"), True]
             )
@@ -102,7 +102,7 @@ class TestUpdateExecutionStatusWithRetry:
     async def test_update_status_returns_false_on_persistent_exceptions(self):
         """Test that False is returned when all attempts raise exceptions."""
         # Patch at the source module since import happens inside the function
-        with patch('src.services.execution_status_service.ExecutionStatusService') as mock_service:
+        with patch('src.services.execution.status.ExecutionStatusService') as mock_service:
             mock_service.update_status = AsyncMock(
                 side_effect=Exception("Persistent error")
             )
@@ -120,7 +120,7 @@ class TestUpdateExecutionStatusWithRetry:
     async def test_update_status_exponential_backoff(self):
         """Test that retry delay increases exponentially."""
         # Patch at the source module since import happens inside the function
-        with patch('src.services.execution_status_service.ExecutionStatusService') as mock_service:
+        with patch('src.services.execution.status.ExecutionStatusService') as mock_service:
             mock_service.update_status = AsyncMock(return_value=False)
 
             with patch('asyncio.sleep', new_callable=AsyncMock) as mock_sleep:
@@ -201,7 +201,7 @@ class TestRunFlowInProcess:
             )
 
             # Patch at the source module since import happens inside the function
-            with patch('src.services.execution_status_service.ExecutionStatusService') as mock_service:
+            with patch('src.services.execution.status.ExecutionStatusService') as mock_service:
                 mock_service.get_status = AsyncMock(return_value=MagicMock(status='RUNNING'))
 
                 with patch('src.services.flow_builder.flow_execution_runner.update_execution_status_with_retry') as mock_update:
@@ -229,7 +229,7 @@ class TestRunFlowInProcess:
             )
 
             # Patch at the source module since import happens inside the function
-            with patch('src.services.execution_status_service.ExecutionStatusService') as mock_service:
+            with patch('src.services.execution.status.ExecutionStatusService') as mock_service:
                 # Simulate that execution was stopped
                 mock_service.get_status = AsyncMock(
                     return_value=MagicMock(status='STOPPED')

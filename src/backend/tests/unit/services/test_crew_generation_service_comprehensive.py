@@ -2491,7 +2491,7 @@ class TestProgressiveGeneration:
 
         with self._progressive_patches() as m:
             with patch(
-                "src.services.execution_service.ExecutionService"
+                "src.services.execution.service.ExecutionService"
             ) as mock_exec_cls:
                 mock_exec = Mock()
                 mock_exec.create_execution = AsyncMock(
@@ -2536,7 +2536,7 @@ class TestProgressiveGeneration:
 
         with self._progressive_patches() as m:
             with patch(
-                "src.services.execution_service.ExecutionService"
+                "src.services.execution.service.ExecutionService"
             ) as mock_exec_cls:
                 await self.service.create_crew_progressive(request, None, gen_id)
                 mock_exec_cls.assert_not_called()
@@ -2557,7 +2557,7 @@ class TestProgressiveGeneration:
 
         with self._progressive_patches() as m:
             with patch(
-                "src.services.execution_service.ExecutionService"
+                "src.services.execution.service.ExecutionService"
             ) as mock_exec_cls:
                 mock_exec = Mock()
                 mock_exec.create_execution = AsyncMock(
@@ -2798,7 +2798,7 @@ class TestProgressiveGeneration:
             )
 
             with patch(
-                "src.services.execution_service.ExecutionService"
+                "src.services.execution.service.ExecutionService"
             ) as mock_exec_cls:
                 await self.service.create_crew_progressive(request, None, gen_id)
                 # A taskless crew must never be launched.
@@ -4242,7 +4242,7 @@ class TestChatFastPath:
             return_value={"execution_id": "exec-1", "run_name": "Run A"}
         )
         broadcast = AsyncMock()
-        with patch("src.services.execution_service.ExecutionService", MagicMock(return_value=exec_instance)), \
+        with patch("src.services.execution.service.ExecutionService", MagicMock(return_value=exec_instance)), \
              patch.object(_chat_mod.sse_manager, "broadcast_to_job", broadcast):
             await svc._run_chat_fast_path(req, None, "gen-1", None)
 
@@ -4276,7 +4276,7 @@ class TestChatFastPath:
         exec_instance = MagicMock()
         exec_instance.create_execution = AsyncMock(side_effect=RuntimeError("boom"))
         broadcast = AsyncMock()
-        with patch("src.services.execution_service.ExecutionService", MagicMock(return_value=exec_instance)), \
+        with patch("src.services.execution.service.ExecutionService", MagicMock(return_value=exec_instance)), \
              patch.object(_chat_mod.sse_manager, "broadcast_to_job", broadcast):
             await svc._run_chat_fast_path(req, None, "gen-1", None)
         event = broadcast.await_args.args[1]

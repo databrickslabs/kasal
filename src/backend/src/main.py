@@ -25,7 +25,7 @@ from src.api import api_router
 from src.config.settings import settings
 from src.core.logger import LoggerManager
 from src.db.session import async_session_factory, get_db
-from src.services.execution_cleanup_service import ExecutionCleanupService
+from src.services.execution.cleanup import ExecutionCleanupService
 from src.services.scheduler_service import SchedulerService
 from src.utils.databricks_url_utils import DatabricksURLUtils
 
@@ -393,7 +393,7 @@ async def lifespan(app: FastAPI):
     # Required because subprocess executions can't broadcast SSE directly
     execution_broadcast_started = False
     try:
-        from src.services.execution_broadcast_service import execution_broadcast_service
+        from src.services.execution.broadcast import execution_broadcast_service
 
         execution_broadcast_service.start()
         execution_broadcast_started = True
@@ -436,7 +436,7 @@ async def lifespan(app: FastAPI):
         if "execution_broadcast_started" in locals() and execution_broadcast_started:
             system_logger.info("Stopping execution broadcast service...")
             try:
-                from src.services.execution_broadcast_service import (
+                from src.services.execution.broadcast import (
                     execution_broadcast_service,
                 )
 
@@ -483,8 +483,8 @@ async def lifespan(app: FastAPI):
         # queue semaphores so the resource_tracker does not report leaked
         # semaphore objects at interpreter shutdown.
         try:
-            from src.services.process_crew_executor import process_crew_executor
-            from src.services.process_flow_executor import process_flow_executor
+            from src.services.agent_builder.process_executor import process_crew_executor
+            from src.services.flow_builder.process_executor import process_flow_executor
 
             process_crew_executor.shutdown(wait=True)
             process_flow_executor.shutdown(wait=True)

@@ -226,7 +226,7 @@ def _sync_run_crew(
 
     async def _run() -> str:
         from src.schemas.execution import CrewConfig
-        from src.services.execution_service import ExecutionService
+        from src.services.execution.service import ExecutionService
         from src.utils.user_context import UserContext
 
         if group_context:

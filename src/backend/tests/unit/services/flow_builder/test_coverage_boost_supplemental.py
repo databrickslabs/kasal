@@ -261,7 +261,7 @@ class TestRunFlowExecutionAdditional:
              patch("src.services.flow_builder.flow_runner_service.ApiKeysService") as MockApiSvc, \
              patch("src.services.flow_builder.flow_runner_service._smart_db_session", new=_smart_ctx), \
              patch("src.services.model_config_service.ModelConfigService") as MockModelSvc, \
-             patch("src.services.execution_history_service.ExecutionHistoryService") as MockHist, \
+             patch("src.services.execution.history.ExecutionHistoryService") as MockHist, \
              patch.object(svc, "_emit_error_span", new=AsyncMock()):
 
             flow_svc = MagicMock()

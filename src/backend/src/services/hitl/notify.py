@@ -38,9 +38,9 @@ def notify_input_needed(execution_id: str, payload: Dict[str, Any]) -> None:
         # Subprocess: the parent's relay turns this frame into the same SSE
         # event. The DB row stays the source of truth (pipe drops on full).
         try:
-            from src.services import execution_event_pipe
+            from src.services.execution import event_pipe
 
-            writer = execution_event_pipe._active_writer
+            writer = event_pipe._active_writer
             if writer is not None:
                 writer._put({"kind": "hitl_request", **payload})
         except Exception as pipe_err:  # noqa: BLE001

@@ -225,7 +225,7 @@ class TestRunFlow:
         with patch('src.services.execution.engine_factory.EngineFactory') as mock_factory:
             mock_factory.get_engine = AsyncMock(return_value=mock_engine)
 
-            with patch('src.services.execution_name_service.ExecutionNameService') as mock_name_class:
+            with patch('src.services.execution.naming.ExecutionNameService') as mock_name_class:
                 mock_name_class.create.return_value = mock_name_service
 
                 result = await service.run_flow(

@@ -25,7 +25,7 @@ from src.schemas.execution_history import (
     UpdateExecutionResultRequest,
     UpdateExecutionResultResponse,
 )
-from src.services.execution_history_service import (
+from src.services.execution.history import (
     ExecutionHistoryService,
     get_execution_history_service,
 )

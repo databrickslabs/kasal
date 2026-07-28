@@ -254,7 +254,7 @@ class TestLifespanStartup:
             "src.services.hitl.timeout.stop_hitl_timeout_service": AsyncMock(),
             # trace/execution broadcast services imported lazily
             "src.services.trace.trace_broadcast_service": MagicMock(),
-            "src.services.execution_broadcast_service.execution_broadcast_service": MagicMock(),
+            "src.services.execution.broadcast.execution_broadcast_service": MagicMock(),
             # embedding queue service imported lazily (SQLite path creates a task)
             "src.services.embedding_queue_service.embedding_queue": mock_embedding_queue,
         }
@@ -341,7 +341,7 @@ class TestLifespanStartup:
             # Set start/stop on broadcast service mocks
             for svc_key in (
                 "src.services.trace.trace_broadcast_service",
-                "src.services.execution_broadcast_service.execution_broadcast_service",
+                "src.services.execution.broadcast.execution_broadcast_service",
             ):
                 svc = mocks[svc_key]
                 svc.start = Mock()
@@ -377,7 +377,7 @@ class TestLifespanStartup:
 
             for svc_key in (
                 "src.services.trace.trace_broadcast_service",
-                "src.services.execution_broadcast_service.execution_broadcast_service",
+                "src.services.execution.broadcast.execution_broadcast_service",
             ):
                 svc = mocks[svc_key]
                 svc.start = Mock()
@@ -413,7 +413,7 @@ class TestLifespanStartup:
 
             for svc_key in (
                 "src.services.trace.trace_broadcast_service",
-                "src.services.execution_broadcast_service.execution_broadcast_service",
+                "src.services.execution.broadcast.execution_broadcast_service",
             ):
                 svc = mocks[svc_key]
                 svc.start = Mock()
@@ -479,7 +479,7 @@ class TestLifespanStartup:
 
             for svc_key in (
                 "src.services.trace.trace_broadcast_service",
-                "src.services.execution_broadcast_service.execution_broadcast_service",
+                "src.services.execution.broadcast.execution_broadcast_service",
             ):
                 svc = mocks[svc_key]
                 svc.start = Mock()
@@ -516,7 +516,7 @@ class TestLifespanStartup:
 
             for svc_key in (
                 "src.services.trace.trace_broadcast_service",
-                "src.services.execution_broadcast_service.execution_broadcast_service",
+                "src.services.execution.broadcast.execution_broadcast_service",
             ):
                 svc = mocks[svc_key]
                 svc.start = Mock()
@@ -571,7 +571,7 @@ class TestLifespanStartup:
 
             for svc_key in (
                 "src.services.trace.trace_broadcast_service",
-                "src.services.execution_broadcast_service.execution_broadcast_service",
+                "src.services.execution.broadcast.execution_broadcast_service",
             ):
                 svc = mocks[svc_key]
                 svc.start = Mock()

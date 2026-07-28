@@ -60,7 +60,7 @@ class TestUpdateExecutionStatusWithRetry:
     
     async def test_update_status_success_first_attempt(self):
         """Test successful status update on first attempt."""
-        with patch('src.services.execution_status_service.ExecutionStatusService') as mock_status_service:
+        with patch('src.services.execution.status.ExecutionStatusService') as mock_status_service:
             mock_status_service.update_status = AsyncMock(return_value=True)
 
             result = await update_execution_status_with_retry(
@@ -77,7 +77,7 @@ class TestUpdateExecutionStatusWithRetry:
 
     async def test_update_status_success_after_retries(self):
         """Test successful status update after retries."""
-        with patch('src.services.execution_status_service.ExecutionStatusService') as mock_status_service, \
+        with patch('src.services.execution.status.ExecutionStatusService') as mock_status_service, \
              patch('asyncio.sleep', new_callable=AsyncMock) as mock_sleep:
 
             # Fail twice, then succeed
@@ -100,7 +100,7 @@ class TestUpdateExecutionStatusWithRetry:
         success, leaving runs stuck in RUNNING until the engine's safety net
         force-completed them.
         """
-        with patch('src.services.execution_status_service.ExecutionStatusService') as mock_status_service, \
+        with patch('src.services.execution.status.ExecutionStatusService') as mock_status_service, \
              patch('asyncio.sleep', new_callable=AsyncMock) as mock_sleep:
 
             mock_status_service.update_status = AsyncMock(return_value=False)
@@ -115,7 +115,7 @@ class TestUpdateExecutionStatusWithRetry:
 
     async def test_update_status_false_then_true_succeeds(self):
         """A transient False from update_status recovers on retry."""
-        with patch('src.services.execution_status_service.ExecutionStatusService') as mock_status_service, \
+        with patch('src.services.execution.status.ExecutionStatusService') as mock_status_service, \
              patch('asyncio.sleep', new_callable=AsyncMock):
 
             mock_status_service.update_status = AsyncMock(side_effect=[False, True])
@@ -129,7 +129,7 @@ class TestUpdateExecutionStatusWithRetry:
     
     async def test_update_status_failure_after_max_retries(self):
         """Test status update failure after max retries."""
-        with patch('src.services.execution_status_service.ExecutionStatusService') as mock_status_service, \
+        with patch('src.services.execution.status.ExecutionStatusService') as mock_status_service, \
              patch('asyncio.sleep', new_callable=AsyncMock):
             
             # Always fail
@@ -144,7 +144,7 @@ class TestUpdateExecutionStatusWithRetry:
     
     async def test_update_status_exponential_backoff(self):
         """Test exponential backoff timing in retries."""
-        with patch('src.services.execution_status_service.ExecutionStatusService') as mock_status_service, \
+        with patch('src.services.execution.status.ExecutionStatusService') as mock_status_service, \
              patch('asyncio.sleep', new_callable=AsyncMock) as mock_sleep:
             
             # Fail twice, then succeed
@@ -159,7 +159,7 @@ class TestUpdateExecutionStatusWithRetry:
     
     async def test_update_status_with_none_result(self):
         """Test status update with None result."""
-        with patch('src.services.execution_status_service.ExecutionStatusService') as mock_status_service:
+        with patch('src.services.execution.status.ExecutionStatusService') as mock_status_service:
             mock_status_service.update_status = AsyncMock(return_value=True)
             
             result = await update_execution_status_with_retry(

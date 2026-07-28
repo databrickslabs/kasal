@@ -432,7 +432,7 @@ class TestGetFlowServiceDependency:
     def test_get_flow_service_dependency(self):
         """Test the get_flow_service dependency function directly to achieve 100% coverage."""
         from src.api.flows_router import get_flow_service
-        from src.services.flow_service import FlowService
+        from src.services.flow_builder.flow_service import FlowService
         from unittest.mock import AsyncMock
         
         # Create a mock session

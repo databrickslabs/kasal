@@ -1827,12 +1827,12 @@ class TestBatchProcessorWiring:
 
     def test_crew_executor_uses_batch_processor_for_db_exporter(self):
         import inspect
-        import src.services.process_crew_executor as m
+        import src.services.agent_builder.process_executor as m
         src_text = inspect.getsource(m)
         assert "BatchSpanProcessor(\n                            KasalDBSpanExporter(" in src_text
 
     def test_flow_executor_uses_batch_processor_for_db_exporter(self):
         import inspect
-        import src.services.process_flow_executor as m
+        import src.services.flow_builder.process_executor as m
         src_text = inspect.getsource(m)
         assert "BatchSpanProcessor(\n                            KasalDBSpanExporter(" in src_text

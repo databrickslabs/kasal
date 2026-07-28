@@ -6,7 +6,7 @@ lookup after the swap serves/polls executions that don't exist in the new DB
 (the recurring "Execution <id> not found in database" 404 storm).
 """
 from src.db.session import _SwappableSessionFactory, _local_session_factory
-from src.services.execution_service import ExecutionService
+from src.services.execution.service import ExecutionService
 
 
 def _fresh_factory():

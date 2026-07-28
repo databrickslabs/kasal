@@ -103,7 +103,7 @@ async def update_execution_trace_id(
     if not trace_id:
         return
     try:
-        from src.services.execution_status_service import ExecutionStatusService
+        from src.services.execution.status import ExecutionStatusService
         await ExecutionStatusService.update_mlflow_trace_id(
             job_id=execution_id,
             trace_id=trace_id,

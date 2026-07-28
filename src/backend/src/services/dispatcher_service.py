@@ -51,7 +51,7 @@ from src.services.agent_generation_service import AgentGenerationService
 from src.services.crew_generation_service import CrewGenerationService
 from src.services.crew_service import CrewService
 from src.services.databricks.service import DatabricksService
-from src.services.flow_service import FlowService
+from src.services.flow_builder.flow_service import FlowService
 from src.services.log_service import LLMLogService
 from src.services.mlflow.service import MLflowService
 from src.services.task_generation_service import TaskGenerationService

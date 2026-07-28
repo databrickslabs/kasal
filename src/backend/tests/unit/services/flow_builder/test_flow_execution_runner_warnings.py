@@ -230,7 +230,7 @@ class TestFlowExecutionWarnings:
 
         with patch('src.services.flow_builder.flow_execution_runner.process_flow_executor') as mock_executor, \
              patch('src.services.flow_builder.flow_execution_runner.update_execution_status_with_retry') as mock_update, \
-             patch('src.services.execution_status_service.ExecutionStatusService') as mock_status_svc:
+             patch('src.services.execution.status.ExecutionStatusService') as mock_status_svc:
 
             mock_update.return_value = True
             mock_status_svc.get_status = AsyncMock(return_value=MagicMock(status='RUNNING'))

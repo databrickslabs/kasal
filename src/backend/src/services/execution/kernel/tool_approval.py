@@ -111,7 +111,7 @@ async def _restore_running(execution_id: str) -> None:
     is a missing parent row, so say which it is.
     """
     from src.models.execution_status import ExecutionStatus
-    from src.services.execution_status_service import ExecutionStatusService
+    from src.services.execution.status import ExecutionStatusService
 
     updated = await ExecutionStatusService.update_status(
         job_id=execution_id,

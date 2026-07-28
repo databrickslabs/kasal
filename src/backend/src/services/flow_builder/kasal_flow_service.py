@@ -97,7 +97,7 @@ class KasalFlowService:
         # Generate run_name if not provided
         if not run_name and config:
             try:
-                from src.services.execution_name_service import ExecutionNameService
+                from src.services.execution.naming import ExecutionNameService
                 from src.schemas.execution import ExecutionNameGenerationRequest
 
                 # Extract agents/tasks from nodes for name generation

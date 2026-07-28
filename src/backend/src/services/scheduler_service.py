@@ -16,12 +16,12 @@ from src.schemas.execution import CrewConfig
 from src.schemas.scheduler import SchedulerJobCreate, SchedulerJobUpdate, SchedulerJobResponse
 from src.utils.cron_utils import ensure_utc, calculate_next_run_from_last
 from src.utils.model_config import DEFAULT_ENGINE_MODEL
-from src.services.kasal_execution_service import KasalExecutionService, JobStatus
+from src.services.execution.kasal_service import KasalExecutionService, JobStatus
 from src.db.session import async_session_factory
 from src.models.execution_history import ExecutionHistory as Run
 from src.config.settings import settings
 from src.core.logger import LoggerManager
-from src.services.execution_service import ExecutionService
+from src.services.execution.service import ExecutionService
 from src.schemas.execution import ExecutionNameGenerationRequest
 from src.utils.user_context import GroupContext
 from src.utils.sensitive_data_utils import mask_sensitive_fields

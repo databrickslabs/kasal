@@ -150,7 +150,7 @@ class LightAgentService:
         from datetime import datetime, UTC
         from src.utils.user_context import UserContext
         from src.services.execution.kernel.agent_tools import build_agent_with_tools
-        from src.services.execution_status_service import ExecutionStatusService
+        from src.services.execution.status import ExecutionStatusService
         from src.db.session import request_scoped_session
         from src.services.agent_service import AgentService
         from src.services.execution.logs.queue import enqueue_log

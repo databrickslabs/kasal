@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 
 from src.main import app
 from src.schemas.execution import ExecutionStatus
-from src.services.execution_service import ExecutionService
+from src.services.execution.service import ExecutionService
 
 
 @pytest.fixture
@@ -81,8 +81,8 @@ class TestExecutionWorkflow:
     async def test_crew_execution_end_to_end(self, client, sample_crew_execution_config):
         """Test complete crew execution workflow."""
         # Mock the dependencies
-        with patch("src.services.execution_service.ExecutionStatusService") as mock_status_service, \
-             patch("src.services.execution_service.CrewAIExecutionService") as mock_crew_service:
+        with patch("src.services.execution.service.ExecutionStatusService") as mock_status_service, \
+             patch("src.services.execution.service.CrewAIExecutionService") as mock_crew_service:
             
             # Setup mocks
             mock_status_service.create_execution.return_value = True
@@ -154,8 +154,8 @@ class TestExecutionWorkflow:
         """Test complete flow execution workflow."""
         # Mock flow service and dependencies
         with patch("src.api.executions_router.FlowService") as mock_flow_service, \
-             patch("src.services.execution_service.ExecutionStatusService") as mock_status_service, \
-             patch("src.services.execution_service.CrewAIExecutionService") as mock_crew_service:
+             patch("src.services.execution.service.ExecutionStatusService") as mock_status_service, \
+             patch("src.services.execution.service.CrewAIExecutionService") as mock_crew_service:
             
             # Setup flow service mock
             mock_flow_instance = AsyncMock()
@@ -208,8 +208,8 @@ class TestExecutionWorkflow:
     @pytest.mark.asyncio
     async def test_execution_error_handling(self, client, sample_crew_execution_config):
         """Test execution error handling workflow."""
-        with patch("src.services.execution_service.ExecutionStatusService") as mock_status_service, \
-             patch("src.services.execution_service.CrewAIExecutionService") as mock_crew_service:
+        with patch("src.services.execution.service.ExecutionStatusService") as mock_status_service, \
+             patch("src.services.execution.service.CrewAIExecutionService") as mock_crew_service:
             
             # Setup mocks to simulate error
             mock_status_service.create_execution.return_value = True
@@ -313,7 +313,7 @@ class TestExecutionWorkflow:
         
         mock_response = {"name": "Market Research Analysis"}
         
-        with patch("src.services.execution_name_service.ExecutionNameService") as mock_name_service:
+        with patch("src.services.execution.naming.ExecutionNameService") as mock_name_service:
             mock_instance = AsyncMock()
             mock_instance.generate_execution_name.return_value = mock_response
             mock_name_service.create.return_value = mock_instance
@@ -351,8 +351,8 @@ class TestExecutionWorkflow:
     @pytest.mark.slow
     async def test_concurrent_executions(self, client, sample_crew_execution_config):
         """Test handling of concurrent executions."""
-        with patch("src.services.execution_service.ExecutionStatusService") as mock_status_service, \
-             patch("src.services.execution_service.CrewAIExecutionService") as mock_crew_service:
+        with patch("src.services.execution.service.ExecutionStatusService") as mock_status_service, \
+             patch("src.services.execution.service.CrewAIExecutionService") as mock_crew_service:
             
             # Setup mocks
             mock_status_service.create_execution.return_value = True

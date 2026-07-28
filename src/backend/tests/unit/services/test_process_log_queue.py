@@ -13,8 +13,8 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch, mock_open
 
 import pytest
 
-from src.services.process_crew_executor import ProcessCrewExecutor
-from src.services.process_flow_executor import ProcessFlowExecutor
+from src.services.agent_builder.process_executor import ProcessCrewExecutor
+from src.services.flow_builder.process_executor import ProcessFlowExecutor
 
 
 @pytest.fixture

@@ -527,7 +527,7 @@ class MLflowService:
 
         # Persist evaluation run ID in dedicated database field
         try:
-            from src.services.execution_status_service import ExecutionStatusService
+            from src.services.execution.status import ExecutionStatusService
             evaluation_run_id = info.get("run_id")
             if evaluation_run_id:
                 success = await ExecutionStatusService.update_mlflow_evaluation_run_id(

@@ -73,7 +73,7 @@ services/
   that pass in-process can still break the child's import resolution:
   ```
   python -c "import subprocess,sys; print(subprocess.run([sys.executable,'-c',
-      'import src.services.process_crew_executor; print(1)'],capture_output=True,text=True))"
+      'import src.services.agent_builder.process_executor; print(1)'],capture_output=True,text=True))"
   ```
 - **Lakebase in subprocesses**: the spawned interpreter must re-activate Lakebase
   itself (`db.database_router.activate_lakebase_in_subprocess`); it is not

@@ -191,7 +191,7 @@ class TestGetExecutionStatus:
         mock_status.created_at = datetime.now(UTC)
 
         with patch(
-            "src.services.execution_status_service.ExecutionStatusService.get_status",
+            "src.services.execution.status.ExecutionStatusService.get_status",
             new_callable=AsyncMock,
             return_value=mock_status,
         ):
@@ -203,7 +203,7 @@ class TestGetExecutionStatus:
     @pytest.mark.asyncio
     async def test_returns_unknown_when_not_found(self, service):
         with patch(
-            "src.services.execution_status_service.ExecutionStatusService.get_status",
+            "src.services.execution.status.ExecutionStatusService.get_status",
             new_callable=AsyncMock,
             return_value=None,
         ):
@@ -213,7 +213,7 @@ class TestGetExecutionStatus:
     @pytest.mark.asyncio
     async def test_returns_error_on_exception(self, service):
         with patch(
-            "src.services.execution_status_service.ExecutionStatusService.get_status",
+            "src.services.execution.status.ExecutionStatusService.get_status",
             new_callable=AsyncMock,
             side_effect=Exception("db down"),
         ):
@@ -262,7 +262,7 @@ class TestCancelExecution:
         mock_executor.terminate_execution = AsyncMock(return_value=True)
 
         with patch(
-            "src.services.process_crew_executor.process_crew_executor",
+            "src.services.agent_builder.process_executor.process_crew_executor",
             mock_executor,
         ), patch.object(service, "_update_execution_status", new_callable=AsyncMock):
             result = await service.cancel_execution("exec_p")

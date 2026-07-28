@@ -12,8 +12,8 @@ from src.schemas.execution_history import (
     CrewCheckpointInfo,
 )
 from src.schemas.flow import FlowCreate, FlowResponse, FlowUpdate
-from src.services.execution_history_service import ExecutionHistoryService
-from src.services.flow_service import FlowService
+from src.services.execution.history import ExecutionHistoryService
+from src.services.flow_builder.flow_service import FlowService
 
 router = APIRouter(
     prefix="/flows",

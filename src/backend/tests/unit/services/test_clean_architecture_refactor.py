@@ -25,14 +25,14 @@ class TestGetExecutionStatusDetail:
 
     @pytest.fixture
     def service(self, mock_session):
-        from src.services.execution_service import ExecutionService
+        from src.services.execution.service import ExecutionService
         svc = ExecutionService.__new__(ExecutionService)
         svc.session = mock_session
         return svc
 
     @pytest.mark.asyncio
     async def test_returns_none_when_no_session(self):
-        from src.services.execution_service import ExecutionService
+        from src.services.execution.service import ExecutionService
         svc = ExecutionService.__new__(ExecutionService)
         svc.session = None
         result = await svc.get_execution_status_detail("exec-1")
@@ -183,7 +183,7 @@ class TestGetExecutionGroupsWithCounts:
 
     @pytest.fixture
     def service(self, mock_session):
-        from src.services.execution_history_service import ExecutionHistoryService
+        from src.services.execution.history import ExecutionHistoryService
         svc = ExecutionHistoryService.__new__(ExecutionHistoryService)
         svc.session = mock_session
         svc.history_repo = AsyncMock()

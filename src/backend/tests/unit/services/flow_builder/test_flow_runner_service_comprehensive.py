@@ -472,7 +472,7 @@ class TestRunDynamicFlow:
 
                     with patch('src.services.flow_builder.flow_runner_service.ApiKeysService'):
                         with patch('os.makedirs'):
-                            with patch('src.services.execution_history_service.ExecutionHistoryService'):
+                            with patch('src.services.execution.history.ExecutionHistoryService'):
                                 service = FlowRunnerService(mock_session)
 
                                 config = {

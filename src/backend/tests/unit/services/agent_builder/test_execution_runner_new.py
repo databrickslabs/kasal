@@ -44,7 +44,7 @@ class TestUpdateExecutionStatusWithRetry:
     @pytest.mark.asyncio
     async def test_success_on_first_attempt(self):
         with patch(
-            "src.services.execution_status_service.ExecutionStatusService"
+            "src.services.execution.status.ExecutionStatusService"
         ) as mock_svc:
             mock_svc.update_status = AsyncMock()
             result = await update_execution_status_with_retry(
@@ -56,7 +56,7 @@ class TestUpdateExecutionStatusWithRetry:
     @pytest.mark.asyncio
     async def test_retries_on_failure_then_succeeds(self):
         with patch(
-            "src.services.execution_status_service.ExecutionStatusService"
+            "src.services.execution.status.ExecutionStatusService"
         ) as mock_svc:
             # update_status returns True on success; the wrapper honors the
             # boolean (PERF-008), so a None return would count as failure.
@@ -72,7 +72,7 @@ class TestUpdateExecutionStatusWithRetry:
     @pytest.mark.asyncio
     async def test_exhausts_all_retries(self):
         with patch(
-            "src.services.execution_status_service.ExecutionStatusService"
+            "src.services.execution.status.ExecutionStatusService"
         ) as mock_svc:
             mock_svc.update_status = AsyncMock(side_effect=Exception("persistent"))
             with patch("asyncio.sleep", new_callable=AsyncMock):
@@ -98,7 +98,7 @@ class TestRunCrewInProcess:
         }
         group_ctx = _make_group_context()
 
-        with patch("src.services.execution_status_service.ExecutionStatusService") as mock_svc, \
+        with patch("src.services.execution.status.ExecutionStatusService") as mock_svc, \
              patch("src.services.agent_builder.execution_runner.process_crew_executor") as mock_pce, \
              patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss, \
              patch("src.services.agent_builder.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock) as mock_update:
@@ -131,7 +131,7 @@ class TestRunCrewInProcess:
             order.append("status")
             return True
 
-        with patch("src.services.execution_status_service.ExecutionStatusService") as mock_svc, \
+        with patch("src.services.execution.status.ExecutionStatusService") as mock_svc, \
              patch("src.services.agent_builder.execution_runner.process_crew_executor") as mock_pce, \
              patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss, \
              patch("src.services.workflow_recipe_mining.schedule_mining_after_run") as mock_mine, \
@@ -158,7 +158,7 @@ class TestRunCrewInProcess:
     @pytest.mark.asyncio
     async def test_a_failed_run_is_not_mined(self):
         """Only COMPLETED crews are reusable; mining a failure would offer it."""
-        with patch("src.services.execution_status_service.ExecutionStatusService") as mock_svc, \
+        with patch("src.services.execution.status.ExecutionStatusService") as mock_svc, \
              patch("src.services.agent_builder.execution_runner.process_crew_executor") as mock_pce, \
              patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss, \
              patch("src.services.workflow_recipe_mining.schedule_mining_after_run") as mock_mine, \
@@ -186,7 +186,7 @@ class TestRunCrewInProcess:
         running_jobs = {}
         config = {"group_id": "g1"}
 
-        with patch("src.services.execution_status_service.ExecutionStatusService") as mock_svc, \
+        with patch("src.services.execution.status.ExecutionStatusService") as mock_svc, \
              patch("src.services.agent_builder.execution_runner.process_crew_executor") as mock_pce, \
              patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss, \
              patch("src.services.agent_builder.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock) as mock_update:
@@ -211,7 +211,7 @@ class TestRunCrewInProcess:
         running_jobs = {}
         config = {"group_id": "g1"}
 
-        with patch("src.services.execution_status_service.ExecutionStatusService") as mock_svc, \
+        with patch("src.services.execution.status.ExecutionStatusService") as mock_svc, \
              patch("src.services.agent_builder.execution_runner.process_crew_executor") as mock_pce, \
              patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss, \
              patch("src.services.agent_builder.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock) as mock_update:
@@ -237,7 +237,7 @@ class TestRunCrewInProcess:
         running_jobs = {}
         config = {"group_id": "g1"}
 
-        with patch("src.services.execution_status_service.ExecutionStatusService") as mock_svc, \
+        with patch("src.services.execution.status.ExecutionStatusService") as mock_svc, \
              patch("src.services.agent_builder.execution_runner.process_crew_executor") as mock_pce, \
              patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss, \
              patch("src.services.agent_builder.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock) as mock_update:
@@ -263,7 +263,7 @@ class TestRunCrewInProcess:
         running_jobs = {}
         config = {"group_id": "g1"}
 
-        with patch("src.services.execution_status_service.ExecutionStatusService") as mock_svc, \
+        with patch("src.services.execution.status.ExecutionStatusService") as mock_svc, \
              patch("src.services.agent_builder.execution_runner.process_crew_executor") as mock_pce, \
              patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss, \
              patch("src.services.agent_builder.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock) as mock_update:
@@ -287,7 +287,7 @@ class TestRunCrewInProcess:
         running_jobs = {}
         config = {"group_id": "g1"}
 
-        with patch("src.services.execution_status_service.ExecutionStatusService") as mock_svc, \
+        with patch("src.services.execution.status.ExecutionStatusService") as mock_svc, \
              patch("src.services.agent_builder.execution_runner.process_crew_executor") as mock_pce, \
              patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss, \
              patch("src.services.agent_builder.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock) as mock_update:
@@ -314,7 +314,7 @@ class TestRunCrewInProcess:
         # The source code has a traceback import inside run_crew_in_process that
         # conflicts with the module-level traceback import in some code paths.
         # We test the cancelled path instead which exercises the same cleanup.
-        with patch("src.services.execution_status_service.ExecutionStatusService") as mock_svc, \
+        with patch("src.services.execution.status.ExecutionStatusService") as mock_svc, \
              patch("src.services.agent_builder.execution_runner.process_crew_executor") as mock_pce, \
              patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss, \
              patch("src.services.agent_builder.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock) as mock_update:
@@ -342,7 +342,7 @@ class TestRunCrewInProcess:
         config = {"group_id": "g1"}
         group_ctx = _make_group_context("grp-token")
 
-        with patch("src.services.execution_status_service.ExecutionStatusService") as mock_svc, \
+        with patch("src.services.execution.status.ExecutionStatusService") as mock_svc, \
              patch("src.services.agent_builder.execution_runner.process_crew_executor") as mock_pce, \
              patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss, \
              patch("src.services.agent_builder.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock):
@@ -366,7 +366,7 @@ class TestRunCrewInProcess:
         running_jobs = {"proc-cleanup": {"config": {}}}
         config = {"group_id": "g1"}
 
-        with patch("src.services.execution_status_service.ExecutionStatusService") as mock_svc, \
+        with patch("src.services.execution.status.ExecutionStatusService") as mock_svc, \
              patch("src.services.agent_builder.execution_runner.process_crew_executor") as mock_pce, \
              patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss, \
              patch("src.services.agent_builder.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock):
@@ -388,7 +388,7 @@ class TestRunCrewInProcess:
         running_jobs = {}
         config = {"group_id": "g1"}
 
-        with patch("src.services.execution_status_service.ExecutionStatusService") as mock_svc, \
+        with patch("src.services.execution.status.ExecutionStatusService") as mock_svc, \
              patch("src.services.agent_builder.execution_runner.process_crew_executor") as mock_pce, \
              patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss, \
              patch("src.services.agent_builder.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock) as mock_update:
@@ -422,7 +422,7 @@ class TestRunCrewInProcess:
             }
         }
 
-        with patch("src.services.execution_status_service.ExecutionStatusService") as mock_svc, \
+        with patch("src.services.execution.status.ExecutionStatusService") as mock_svc, \
              patch("src.services.agent_builder.execution_runner.process_crew_executor") as mock_pce, \
              patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss, \
              patch("src.services.agent_builder.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock):
@@ -447,7 +447,7 @@ class TestRunCrewInProcess:
             "inputs": {"query": "test"},
         }
 
-        with patch("src.services.execution_status_service.ExecutionStatusService") as mock_svc, \
+        with patch("src.services.execution.status.ExecutionStatusService") as mock_svc, \
              patch("src.services.agent_builder.execution_runner.process_crew_executor") as mock_pce, \
              patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss, \
              patch("src.services.agent_builder.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock) as mock_update:

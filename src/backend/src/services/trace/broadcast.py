@@ -25,7 +25,7 @@ from src.core.sse_manager import sse_manager, SSEEvent
 from src.db.session import async_session_factory
 from src.models.execution_trace import ExecutionTrace
 from src.models.execution_history import ExecutionHistory
-from src.services.execution_event_pipe import suppresses_poller_broadcast
+from src.services.execution.event_pipe import suppresses_poller_broadcast
 
 logger = logging.getLogger(__name__)
 

@@ -22,7 +22,7 @@ from src.schemas.flow_execution import (
     FlowNodeExecutionUpdate,
     FlowExecutionStatus
 )
-from src.services.flow_execution_service import FlowExecutionService
+from src.services.flow_builder.execution_service import FlowExecutionService
 from src.repositories.flow_repository import FlowRepository
 from src.repositories.task_repository import TaskRepository
 from src.repositories.agent_repository import AgentRepository
@@ -551,7 +551,7 @@ class FlowRunnerService:
                             flow_uuid = result.get("flow_uuid")
                             if flow_uuid:
                                 try:
-                                    from src.services.execution_history_service import ExecutionHistoryService
+                                    from src.services.execution.history import ExecutionHistoryService
                                     history_service = ExecutionHistoryService(post_session)
                                     await history_service.set_checkpoint_active(
                                         execution_id=execution_id,
@@ -609,7 +609,7 @@ class FlowRunnerService:
                         logger.info(f"   pause_exc.flow_uuid: {pause_exc.flow_uuid}")
                         if pause_exc.flow_uuid:
                             try:
-                                from src.services.execution_history_service import ExecutionHistoryService
+                                from src.services.execution.history import ExecutionHistoryService
                                 history_service = ExecutionHistoryService(hitl_session)
                                 await history_service.set_checkpoint_active(
                                     execution_id=execution_id,
@@ -982,7 +982,7 @@ class FlowRunnerService:
                             flow_uuid = result.get("flow_uuid")
                             if flow_uuid:
                                 try:
-                                    from src.services.execution_history_service import ExecutionHistoryService
+                                    from src.services.execution.history import ExecutionHistoryService
                                     history_service = ExecutionHistoryService(post_session)
                                     await history_service.set_checkpoint_active(
                                         execution_id=execution_id,
@@ -1039,7 +1039,7 @@ class FlowRunnerService:
                         logger.info(f"   pause_exc.flow_uuid: {pause_exc.flow_uuid}")
                         if pause_exc.flow_uuid:
                             try:
-                                from src.services.execution_history_service import ExecutionHistoryService
+                                from src.services.execution.history import ExecutionHistoryService
                                 history_service = ExecutionHistoryService(hitl_session)
                                 await history_service.set_checkpoint_active(
                                     execution_id=execution_id,

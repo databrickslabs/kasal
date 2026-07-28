@@ -357,7 +357,7 @@ class TestTriggerEvaluation:
         stack.enter_context(patch("asyncio.create_task", MagicMock()))
         ess_mock = MagicMock()
         ess_mock.update_mlflow_evaluation_run_id = AsyncMock(return_value=True)
-        stack.enter_context(patch("src.services.execution_status_service.ExecutionStatusService.update_mlflow_evaluation_run_id",
+        stack.enter_context(patch("src.services.execution.status.ExecutionStatusService.update_mlflow_evaluation_run_id",
                                    AsyncMock(return_value=True)))
         return stack
 
@@ -417,7 +417,7 @@ class TestTriggerEvaluation:
         svc.exec_repo.get_execution_by_job_id = AsyncMock(return_value=fake_exec)
         with patch.object(svc, "_resolve_judge_model", return_value="gpt-4"):
             with self._trigger_context():
-                with patch("src.services.execution_status_service.ExecutionStatusService.update_mlflow_evaluation_run_id",
+                with patch("src.services.execution.status.ExecutionStatusService.update_mlflow_evaluation_run_id",
                            AsyncMock(side_effect=Exception("persist fail"))):
                     result = await svc.trigger_evaluation("job-5")
         assert isinstance(result, dict)
@@ -534,7 +534,7 @@ class TestInnerFunctionPaths:
                     mock_runner = MagicMock()
                     mock_runner.create_run = MagicMock(return_value={"experiment_id": "e-99", "run_id": None})
                     runner_cls.return_value = mock_runner
-                    with patch("src.services.execution_status_service.ExecutionStatusService.update_mlflow_evaluation_run_id",
+                    with patch("src.services.execution.status.ExecutionStatusService.update_mlflow_evaluation_run_id",
                                AsyncMock(return_value=True)):
                         result = await svc.trigger_evaluation("job-99")
         assert isinstance(result, dict)

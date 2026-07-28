@@ -39,7 +39,7 @@ class ChatFastPathMixin:
         the answer down to just the answer.
         """
         from src.schemas.execution import CrewConfig
-        from src.services.execution_service import ExecutionService
+        from src.services.execution.service import ExecutionService
 
         user_request = request.original_prompt or request.prompt or ""
         attached_tools = list(getattr(request, "tools", None) or [])

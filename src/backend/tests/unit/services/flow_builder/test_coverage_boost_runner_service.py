@@ -634,7 +634,7 @@ class TestRunDynamicFlow:
 
             MockApiSvc.get_provider_api_key = AsyncMock(return_value=None)
 
-            with patch("src.services.execution_history_service.ExecutionHistoryService") as MockHist:
+            with patch("src.services.execution.history.ExecutionHistoryService") as MockHist:
                 hist_instance = MagicMock()
                 hist_instance.set_checkpoint_active = AsyncMock()
                 MockHist.return_value = hist_instance
@@ -727,7 +727,7 @@ class TestRunDynamicFlow:
 
             MockApiSvc.get_provider_api_key = AsyncMock(return_value=None)
 
-            with patch("src.services.execution_history_service.ExecutionHistoryService") as MockHist:
+            with patch("src.services.execution.history.ExecutionHistoryService") as MockHist:
                 hist_instance = MagicMock()
                 hist_instance.set_checkpoint_active = AsyncMock()
                 MockHist.return_value = hist_instance

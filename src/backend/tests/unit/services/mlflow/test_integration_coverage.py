@@ -151,13 +151,13 @@ async def test_update_execution_trace_id_no_trace_id():
 @pytest.mark.asyncio
 async def test_update_execution_trace_id_success():
     """Test update_execution_trace_id with valid trace.
-    The function uses 'from src.services.execution_status_service import ExecutionStatusService'
+    The function uses 'from src.services.execution.status import ExecutionStatusService'
     inside the function body — we patch it at the source module level.
     """
     from src.services.mlflow.integration import update_execution_trace_id
     mock_svc = MagicMock()
     mock_svc.update_mlflow_trace_id = AsyncMock()
-    with patch.dict('sys.modules', {'src.services.execution_status_service': MagicMock(
+    with patch.dict('sys.modules', {'src.services.execution.status': MagicMock(
         ExecutionStatusService=mock_svc
     )}):
         await update_execution_trace_id("exec1", "trace123", "experiment", "g1")
@@ -170,7 +170,7 @@ async def test_update_execution_trace_id_exception():
     from src.services.mlflow.integration import update_execution_trace_id
     mock_svc = MagicMock()
     mock_svc.update_mlflow_trace_id = AsyncMock(side_effect=Exception("db error"))
-    with patch.dict('sys.modules', {'src.services.execution_status_service': MagicMock(
+    with patch.dict('sys.modules', {'src.services.execution.status': MagicMock(
         ExecutionStatusService=mock_svc
     )}):
         # Should not raise

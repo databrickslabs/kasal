@@ -95,7 +95,7 @@ class HumanReviewGuardrail:
         # once decided, the run is live again. Safe unconditionally: the run
         # cannot have reached a terminal state while blocked here.
         from src.models.execution_status import ExecutionStatus
-        from src.services.execution_status_service import ExecutionStatusService
+        from src.services.execution.status import ExecutionStatusService
 
         await ExecutionStatusService.update_status(
             job_id=self.execution_id,

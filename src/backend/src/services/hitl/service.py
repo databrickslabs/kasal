@@ -601,8 +601,8 @@ class HITLService:
         try:
             # Import here to avoid circular imports
             from src.repositories.execution_history_repository import ExecutionHistoryRepository
-            from src.services.kasal_execution_service import KasalExecutionService
-            from src.services.execution_status_service import ExecutionStatusService
+            from src.services.execution.kasal_service import KasalExecutionService
+            from src.services.execution.status import ExecutionStatusService
             from src.utils.user_context import GroupContext
             import asyncio
 
@@ -694,8 +694,8 @@ class HITLService:
         try:
             # Import here to avoid circular imports
             from src.repositories.execution_history_repository import ExecutionHistoryRepository
-            from src.services.kasal_execution_service import KasalExecutionService
-            from src.services.execution_status_service import ExecutionStatusService
+            from src.services.execution.kasal_service import KasalExecutionService
+            from src.services.execution.status import ExecutionStatusService
             from src.utils.user_context import GroupContext
             import asyncio
 

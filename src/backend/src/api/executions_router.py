@@ -32,8 +32,8 @@ from src.schemas.execution import (
     StopExecutionRequest,
     StopExecutionResponse,
 )
-from src.services.execution_service import ExecutionService
-from src.services.flow_service import FlowService
+from src.services.execution.service import ExecutionService
+from src.services.flow_builder.flow_service import FlowService
 
 # Get logger from the centralized logging system
 logger = LoggerManager.get_instance().crew

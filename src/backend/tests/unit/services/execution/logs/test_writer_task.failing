@@ -54,8 +54,8 @@ class TestLogWriterTask:
         # Mock all the imports that the function tries to make
         with patch('src.services.trace_queue.get_trace_queue') as mock_get_queue, \
              patch('src.services.execution_trace_service.ExecutionTraceService') as mock_trace_service, \
-             patch('src.services.execution_status_service.ExecutionStatusService') as mock_status_service, \
-             patch('src.services.execution_history_service.get_execution_history_service') as mock_history_service, \
+             patch('src.services.execution.status.ExecutionStatusService') as mock_status_service, \
+             patch('src.services.execution.history.get_execution_history_service') as mock_history_service, \
              patch('src.engines.crewai.trace_management.logger') as mock_logger:
             
             # Setup mocks
@@ -81,7 +81,7 @@ class TestLogWriterTask:
     async def test_trace_writer_loop_queue_initialization(self):
         """Test trace writer loop queue initialization."""
         with patch('src.services.trace_queue.get_trace_queue') as mock_get_queue, \
-             patch('src.services.execution_history_service.get_execution_history_service') as mock_history_service, \
+             patch('src.services.execution.history.get_execution_history_service') as mock_history_service, \
              patch('src.engines.crewai.trace_management.logger') as mock_logger:
             
             mock_queue = MagicMock()
@@ -108,7 +108,7 @@ class TestLogWriterTask:
         LogWriterTask._shutdown_event.set()
         
         with patch('src.services.trace_queue.get_trace_queue') as mock_get_queue, \
-             patch('src.services.execution_history_service.get_execution_history_service') as mock_history_service, \
+             patch('src.services.execution.history.get_execution_history_service') as mock_history_service, \
              patch('src.engines.crewai.trace_management.logger') as mock_logger:
             
             mock_queue = MagicMock()
@@ -128,7 +128,7 @@ class TestLogWriterTask:
     async def test_trace_writer_loop_batch_processing_setup(self):
         """Test trace writer loop batch processing initialization."""
         with patch('src.services.trace_queue.get_trace_queue') as mock_get_queue, \
-             patch('src.services.execution_history_service.get_execution_history_service') as mock_history_service, \
+             patch('src.services.execution.history.get_execution_history_service') as mock_history_service, \
              patch('src.engines.crewai.trace_management.logger') as mock_logger:
             
             mock_queue = MagicMock()
@@ -164,7 +164,7 @@ class TestLogWriterTask:
     async def test_trace_writer_loop_shutdown_signal_handling(self):
         """Test trace writer loop handles None shutdown signal."""
         with patch('src.services.trace_queue.get_trace_queue') as mock_get_queue, \
-             patch('src.services.execution_history_service.get_execution_history_service') as mock_history_service, \
+             patch('src.services.execution.history.get_execution_history_service') as mock_history_service, \
              patch('src.engines.crewai.trace_management.logger') as mock_logger:
             
             mock_queue = MagicMock()
@@ -202,7 +202,7 @@ class TestLogWriterTask:
     async def test_trace_writer_loop_normal_trace_processing(self):
         """Test trace writer loop processes normal trace data."""
         with patch('src.services.trace_queue.get_trace_queue') as mock_get_queue, \
-             patch('src.services.execution_history_service.get_execution_history_service') as mock_history_service, \
+             patch('src.services.execution.history.get_execution_history_service') as mock_history_service, \
              patch('src.engines.crewai.trace_management.logger') as mock_logger:
             
             mock_queue = MagicMock()
@@ -256,7 +256,7 @@ class TestLogWriterTask:
     async def test_trace_writer_loop_exception_handling(self):
         """Test trace writer loop handles exceptions gracefully."""
         with patch('src.services.trace_queue.get_trace_queue') as mock_get_queue, \
-             patch('src.services.execution_history_service.get_execution_history_service') as mock_history_service, \
+             patch('src.services.execution.history.get_execution_history_service') as mock_history_service, \
              patch('src.engines.crewai.trace_management.logger') as mock_logger:
             
             # Make get_trace_queue raise an exception

@@ -775,7 +775,7 @@ class ProgressiveGenerationMixin:
                 elif getattr(request, "auto_execute", False):
                     try:
                         from src.schemas.execution import CrewConfig
-                        from src.services.execution_service import ExecutionService
+                        from src.services.execution.service import ExecutionService
 
                         crew_config = CrewConfig(
                             **self.build_crew_config_from_generated(

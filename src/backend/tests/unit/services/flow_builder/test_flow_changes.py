@@ -262,7 +262,7 @@ class TestFlowExecutionRunnerResultPropagation:
         result = {"output": "Test output", "metrics": {"duration": 45}}
 
         # ExecutionStatusService is a lazy import inside the function
-        with patch('src.services.execution_status_service.ExecutionStatusService') as mock_service:
+        with patch('src.services.execution.status.ExecutionStatusService') as mock_service:
             mock_service.update_status = AsyncMock(return_value=True)
 
             success = await update_execution_status_with_retry(
@@ -289,7 +289,7 @@ class TestFlowExecutionRunnerResultPropagation:
         status = "RUNNING"
         message = "Flow is running"
 
-        with patch('src.services.execution_status_service.ExecutionStatusService') as mock_service:
+        with patch('src.services.execution.status.ExecutionStatusService') as mock_service:
             mock_service.update_status = AsyncMock(return_value=True)
 
             success = await update_execution_status_with_retry(
@@ -360,7 +360,7 @@ class TestFlowExecutionRunnerResultPropagation:
             mock_update.return_value = True
 
             # Mock the lazy-imported ExecutionStatusService for status check
-            with patch('src.services.execution_status_service.ExecutionStatusService') as mock_status_service:
+            with patch('src.services.execution.status.ExecutionStatusService') as mock_status_service:
                 mock_execution = MagicMock()
                 mock_execution.status = 'RUNNING'
                 mock_status_service.get_status = AsyncMock(return_value=mock_execution)

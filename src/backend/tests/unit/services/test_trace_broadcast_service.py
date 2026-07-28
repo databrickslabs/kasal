@@ -408,7 +408,7 @@ class TestBroadcastNewTracesForJob:
         event types the pipe carries must NOT be re-broadcast (the pipe
         already delivered them, and piped frames have no DB id to dedup on).
         The cursor must still advance."""
-        from src.services import execution_event_pipe as pipe
+        from src.services.execution import event_pipe as pipe
 
         service = TraceBroadcastService()
         service._last_trace_ids["job-123"] = 10
@@ -445,7 +445,7 @@ class TestBroadcastNewTracesForJob:
         """Rows the poller only sees after the relay ended (tail race) are
         still suppressed during the grace window; once it expires, piped
         event types broadcast normally again."""
-        from src.services import execution_event_pipe as pipe
+        from src.services.execution import event_pipe as pipe
 
         service = TraceBroadcastService()
         service._last_trace_ids["job-123"] = 10

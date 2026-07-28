@@ -40,7 +40,7 @@ class Ctx:
 
 def test_get_execution_service_returns_service():
     """get_execution_service creates ExecutionService with session."""
-    from src.services.execution_service import ExecutionService
+    from src.services.execution.service import ExecutionService
 
     fake_session = MagicMock()
     with patch("src.api.executions_router.ExecutionService") as MockSvc:

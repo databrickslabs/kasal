@@ -104,7 +104,7 @@ class KasalEngineService(BaseEngineService):
         
         # Import repository factory functions
         from src.repositories.execution_repository import get_execution_repository
-        from src.services.execution_status_service import ExecutionStatusService
+        from src.services.execution.status import ExecutionStatusService
         
         self._get_execution_repository = lambda session: get_execution_repository(session)
         self._status_service = ExecutionStatusService  # Store reference to service
@@ -320,7 +320,7 @@ class KasalEngineService(BaseEngineService):
                     # update_execution_status_with_retry internally, but that can fail
                     # silently in deployed environments like Databricks Apps).
                     try:
-                        from src.services.execution_status_service import ExecutionStatusService
+                        from src.services.execution.status import ExecutionStatusService
                         from src.utils.asyncio_utils import execute_db_operation_with_fresh_engine
                         from src.repositories.execution_history_repository import ExecutionHistoryRepository
 
@@ -413,7 +413,7 @@ class KasalEngineService(BaseEngineService):
         # Get status from database via service
         try:
             # Use execution status service - service should handle DB access through repositories
-            from src.services.execution_status_service import ExecutionStatusService
+            from src.services.execution.status import ExecutionStatusService
             
             # Service should handle DB sessions internally
             status = await ExecutionStatusService.get_status(execution_id)
@@ -459,7 +459,7 @@ class KasalEngineService(BaseEngineService):
             
             # If process-based execution, terminate the process
             if execution_mode == "process":
-                from src.services.process_crew_executor import process_crew_executor
+                from src.services.agent_builder.process_executor import process_crew_executor
                 terminated = await process_crew_executor.terminate_execution(execution_id)
                 if terminated:
                     logger.info(f"Successfully terminated process for execution {execution_id}")

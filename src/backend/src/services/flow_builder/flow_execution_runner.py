@@ -8,7 +8,7 @@ import asyncio
 import traceback
 from typing import Any, Dict, Optional
 import os
-from src.services.process_flow_executor import process_flow_executor
+from src.services.flow_builder.process_executor import process_flow_executor
 from src.models.execution_status import ExecutionStatus
 from src.utils.user_context import GroupContext
 from src.core.logger import LoggerManager
@@ -48,7 +48,7 @@ async def update_execution_status_with_retry(
     Returns:
         True if update successful, False otherwise
     """
-    from src.services.execution_status_service import ExecutionStatusService
+    from src.services.execution.status import ExecutionStatusService
 
     for attempt in range(max_retries):
         try:
@@ -232,7 +232,7 @@ async def run_flow_in_process(
         else:
             # Before setting FAILED, check if the execution was stopped
             # This prevents overwriting STOPPED status with FAILED
-            from src.services.execution_status_service import ExecutionStatusService
+            from src.services.execution.status import ExecutionStatusService
             execution_record = await ExecutionStatusService.get_status(execution_id)
             current_status = execution_record.status if execution_record and hasattr(execution_record, 'status') else None
             if current_status and current_status.upper() in ['STOPPED', 'STOPPING', 'WAITING_FOR_APPROVAL']:

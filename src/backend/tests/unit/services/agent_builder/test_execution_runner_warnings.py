@@ -35,7 +35,7 @@ class TestCrewExecutionWarnings:
 
         with patch('src.services.agent_builder.execution_runner.process_crew_executor') as mock_executor, \
              patch('src.services.agent_builder.execution_runner.update_execution_status_with_retry', new_callable=AsyncMock) as mock_update, \
-             patch('src.services.execution_status_service.ExecutionStatusService') as mock_status_svc:
+             patch('src.services.execution.status.ExecutionStatusService') as mock_status_svc:
 
             mock_status_svc.update_status = AsyncMock()
             mock_update.return_value = True
@@ -72,7 +72,7 @@ class TestCrewExecutionWarnings:
 
         with patch('src.services.agent_builder.execution_runner.process_crew_executor') as mock_executor, \
              patch('src.services.agent_builder.execution_runner.update_execution_status_with_retry', new_callable=AsyncMock) as mock_update, \
-             patch('src.services.execution_status_service.ExecutionStatusService') as mock_status_svc:
+             patch('src.services.execution.status.ExecutionStatusService') as mock_status_svc:
 
             mock_status_svc.update_status = AsyncMock()
             mock_update.return_value = True
@@ -105,7 +105,7 @@ class TestCrewExecutionWarnings:
 
         with patch('src.services.agent_builder.execution_runner.process_crew_executor') as mock_executor, \
              patch('src.services.agent_builder.execution_runner.update_execution_status_with_retry', new_callable=AsyncMock) as mock_update, \
-             patch('src.services.execution_status_service.ExecutionStatusService') as mock_status_svc:
+             patch('src.services.execution.status.ExecutionStatusService') as mock_status_svc:
 
             mock_status_svc.update_status = AsyncMock()
             mock_update.return_value = True
@@ -133,7 +133,7 @@ class TestCrewExecutionWarnings:
 
         with patch('src.services.agent_builder.execution_runner.process_crew_executor') as mock_executor, \
              patch('src.services.agent_builder.execution_runner.update_execution_status_with_retry', new_callable=AsyncMock) as mock_update, \
-             patch('src.services.execution_status_service.ExecutionStatusService') as mock_status_svc:
+             patch('src.services.execution.status.ExecutionStatusService') as mock_status_svc:
 
             mock_status_svc.update_status = AsyncMock()
             mock_update.return_value = True
@@ -162,7 +162,7 @@ class TestCrewExecutionWarnings:
 
         with patch('src.services.agent_builder.execution_runner.process_crew_executor') as mock_executor, \
              patch('src.services.agent_builder.execution_runner.update_execution_status_with_retry', new_callable=AsyncMock) as mock_update, \
-             patch('src.services.execution_status_service.ExecutionStatusService') as mock_status_svc:
+             patch('src.services.execution.status.ExecutionStatusService') as mock_status_svc:
 
             mock_status_svc.update_status = AsyncMock()
             mock_update.return_value = True
@@ -191,7 +191,7 @@ class TestCrewExecutionWarnings:
 
         with patch('src.services.agent_builder.execution_runner.process_crew_executor') as mock_executor, \
              patch('src.services.agent_builder.execution_runner.update_execution_status_with_retry', new_callable=AsyncMock) as mock_update, \
-             patch('src.services.execution_status_service.ExecutionStatusService') as mock_status_svc:
+             patch('src.services.execution.status.ExecutionStatusService') as mock_status_svc:
 
             mock_status_svc.update_status = AsyncMock()
             mock_update.return_value = True
@@ -219,7 +219,7 @@ class TestCrewExecutionWarnings:
 
         with patch('src.services.agent_builder.execution_runner.process_crew_executor') as mock_executor, \
              patch('src.services.agent_builder.execution_runner.update_execution_status_with_retry', new_callable=AsyncMock) as mock_update, \
-             patch('src.services.execution_status_service.ExecutionStatusService') as mock_status_svc:
+             patch('src.services.execution.status.ExecutionStatusService') as mock_status_svc:
 
             mock_status_svc.update_status = AsyncMock()
             mock_update.return_value = True
