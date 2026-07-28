@@ -223,54 +223,20 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "unit: mark test as unit test")
 
 
-# Test files with broken imports (stale references to renamed/removed source
-# functions).  These are pre-existing issues and must be skipped so the rest of
-# the test suite can run.  When the underlying source files are updated, the
-# corresponding test should be fixed and removed from this set.
-_BROKEN_IMPORT_FILES = {
-    "test_formula.py",
-    "test_gpt5_llm_wrapper.py",
-    "test_base_tool_registry.py",
-    "test_crew_config_builder.py",
-    "test_company_name_not_null_guardrail.py",
-    # "test_memory_backend_factory.py",  # Fixed by crewai.rag stubs in memory/conftest.py
-    # NOTE: this list matches by BASENAME. tests/unit/services/memory/
-    # test_crew_memory_service.py really is broken (it imports a
-    # `generate_crew_id` that no longer exists), but the same entry was also
-    # silently skipping the engine-side suite of the same name — 22 working
-    # tests. That one now runs as test_crew_memory_service_engine.py.
-    "test_crew_memory_service.py",
-    "test_config_adapter.py",
-    # test_powerbi_analysis_tool.py — import errors resolved; re-enabled for
-    # full-suite coverage (was excluded causing ~5.9% coverage in full suite).
-    "test_dspy_config.py",
-    "test_dspy_config_repository.py",
-    "test_agent.py",
-    "test_database_management.py",
-    "test_databricks_config.py",
-    "test_databricks_index_schemas.py",
-    "test_dspy_schemas.py",
-    "test_engine_config.py",
-    "test_execution.py",
-    "test_genie.py",
-    "test_group.py",
-    "test_kpi_conversion.py",
-    "test_powerbi_config.py",
-    "test_schema.py",
-    "test_user.py",
-    "test_crew_executor.py",
-    "test_dspy_optimization_service.py",
-    "test_dspy_settings_service.py",
-    "test_lakebase_permission_service.py",
-    "test_lakebase_schema_service.py",
-    "test_log_service.py",
-    "test_mlflow_evaluation_runner.py",
-    "test_mlflow_scope_error_handler.py",
-    "test_mlflow_tracing_service.py",
-    # Stale outbound-module references under legacy converters directories
-    # (not the services/ subdirectory which has working tests)
-    "test_context.py",
-}
+# Files pytest must not collect.
+#
+# This matches by BASENAME, not path — an entry here silently skips EVERY file
+# with that name anywhere in the tree. That trap cost real coverage twice: one
+# entry was skipping a working 22-test suite that merely shared a name with a
+# broken one, and a new tests/.../test_context.py was never collected because an
+# unrelated entry claimed the name. Add a path-specific guard instead if you can.
+#
+# The list used to hold 32 entries. 24 of them were auto-generated test
+# templates (`pass` bodies, imports of symbols that never existed) — deleted,
+# along with the tests for removed features (dspy_*, gpt5_llm_wrapper,
+# mlflow_scope_error_handler). Six imported fine and now run. Two pointed at
+# files that no longer existed.
+_BROKEN_IMPORT_FILES: set = set()
 
 # Also skip converter test directories that have systemic import problems
 # NOTE: "converters" was previously listed here due to stale import errors.

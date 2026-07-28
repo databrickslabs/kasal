@@ -7,7 +7,10 @@ for Unity Catalog Metrics converter.
 
 import pytest
 from src.converters.base.models import KPI
-from src.converters.outbound.uc_metrics.context import UCBaseKBIContext, UCKBIContextCache
+from src.converters.services.uc_metrics.helpers.uc_metrics_context import (
+    UCBaseKBIContext,
+    UCKBIContextCache,
+)
 
 
 class TestUCBaseKBIContext:

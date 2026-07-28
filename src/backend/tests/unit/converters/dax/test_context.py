@@ -7,7 +7,10 @@ for Power BI DAX converter.
 
 import pytest
 from src.converters.base.models import KPI
-from src.converters.outbound.dax.context import DAXBaseKBIContext, DAXKBIContextCache
+from src.converters.services.powerbi.helpers.dax_context import (
+    DAXBaseKBIContext,
+    DAXKBIContextCache,
+)
 
 
 class TestDAXBaseKBIContext:
