@@ -1,11 +1,28 @@
 from typing import Dict, List, Optional, Any, Union, Type
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, select
+from sqlalchemy import desc, literal_column, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.documentation_embedding import DocumentationEmbedding
 from src.schemas.documentation_embedding import DocumentationEmbeddingCreate
 from src.core.base_repository import BaseRepository
+
+#: Where a similarity search stashes each row's score.
+#:
+#: The search returns ORM instances and both callers already consume that shape,
+#: so the score rides along on the instance rather than changing every signature
+#: to a (row, score) tuple. Transient by nature — never persisted.
+SIMILARITY_ATTR = "_kasal_similarity"
+
+
+def _attach_similarity(row: Any, similarity: Optional[float]) -> None:
+    """Record how close this row was to the query, when it is known."""
+    if similarity is None:
+        return
+    try:
+        setattr(row, SIMILARITY_ATTR, float(similarity))
+    except Exception:  # noqa: BLE001 — a score is never worth failing a search
+        pass
 
 
 class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding]):
@@ -341,7 +358,10 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding]):
 
         # Sort on the similarity only (model instances are not comparable).
         scored.sort(key=lambda pair: pair[0], reverse=True)
-        return [row for _, row in scored[:limit]]
+        top = scored[:limit]
+        for similarity, row in top:
+            _attach_similarity(row, similarity)
+        return [row for _, row in top]
 
     async def list_group_file_paths(self, group_id: str) -> List[str]:
         """Return the distinct stored ``file_path`` values for a group.
@@ -392,6 +412,19 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding]):
         # "operator does not exist: vector <=> text" and the search silently
         # returns nothing (the SQLite path ranks in Python and is unaffected,
         # which is why this only bites on Lakebase/Postgres deployments).
-        query = query.order_by(text("embedding <=> (:embedding)::vector")).limit(limit)
+        # Select the distance alongside the row. Ordering by it was never enough:
+        # the caller could tell which chunk ranked FIRST but not whether any of
+        # them were actually close to the query, so twenty unrelated chunks were
+        # handed to an agent as "relevant results" and it re-queried forever
+        # looking for the answer they did not contain.
+        # literal_column, not text(): a bare TextClause is not a column role, so
+        # add_columns() rejects it — the ORDER BY alone accepted either.
+        distance = literal_column("embedding <=> (:embedding)::vector").label("distance")
+        query = query.add_columns(distance).order_by(distance).limit(limit)
         result = await self.db.execute(query, {"embedding": embedding_str})
-        return result.scalars().all()
+        rows = []
+        for row, dist in result.all():
+            # pgvector's <=> is cosine DISTANCE; similarity is its complement.
+            _attach_similarity(row, 1.0 - float(dist) if dist is not None else None)
+            rows.append(row)
+        return rows

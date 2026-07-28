@@ -52,12 +52,21 @@ def make_sync_session(items=None):
     return session
 
 
-def make_result_mock(items):
+def make_result_mock(items, distances=None):
+    """A result the repository can read either way.
+
+    ``_search_similar_postgres`` selects the cosine distance next to the row, so
+    it reads (row, distance) pairs off ``.all()``; every other query still reads
+    ``.scalars().all()``.
+    """
     result = MagicMock()
     scalars = MagicMock()
     scalars.all.return_value = items
     result.scalars.return_value = scalars
     result.scalar_one_or_none.return_value = items[0] if items else None
+    if distances is None:
+        distances = [0.1] * len(items)
+    result.all.return_value = list(zip(items, distances))
     return result
 
 
@@ -277,10 +286,29 @@ async def test_search_similar_sqlite_empty():
 async def test_search_similar_postgres():
     async_session = make_async_session()
     items = [make_embedding_obj(id=1)]
-    async_session.execute.return_value = make_result_mock(items)
+    async_session.execute.return_value = make_result_mock(items, distances=[0.25])
     repo = DocumentationEmbeddingRepository(db=async_session)
     result = await repo._search_similar_postgres([0.1, 0.2], limit=5)
     assert result == items
+
+
+@pytest.mark.asyncio
+async def test_search_similar_postgres_reports_how_close_each_row_was():
+    """Ordering by distance told the caller which chunk ranked first but not
+    whether ANY of them were close, so twenty unrelated chunks reached an agent
+    as "relevant results" and it re-queried until the run failed."""
+    from src.repositories.documentation_embedding_repository import SIMILARITY_ATTR
+
+    async_session = make_async_session()
+    items = [make_embedding_obj(id=1), make_embedding_obj(id=2)]
+    async_session.execute.return_value = make_result_mock(items, distances=[0.2, 0.9])
+    repo = DocumentationEmbeddingRepository(db=async_session)
+
+    rows = await repo._search_similar_postgres([0.1, 0.2], limit=5)
+
+    # pgvector's <=> is cosine DISTANCE; similarity is its complement.
+    assert getattr(rows[0], SIMILARITY_ATTR) == pytest.approx(0.8)
+    assert getattr(rows[1], SIMILARITY_ATTR) == pytest.approx(0.1)
 
 
 @pytest.mark.asyncio

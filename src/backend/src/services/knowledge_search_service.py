@@ -9,6 +9,8 @@ import logging
 import asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.repositories.documentation_embedding_repository import SIMILARITY_ATTR
+
 logger = logging.getLogger(__name__)
 
 
@@ -221,9 +223,17 @@ class KnowledgeSearchService:
                                     "source": source,
                                     "title": getattr(row, "title", "") or "",
                                     "chunk_index": metadata.get("chunk_index", 0),
-                                    # pgvector orders by distance but does not return a
-                                    # similarity score column; results are already ranked.
-                                    "score": float(metadata.get("score", 0.0) or 0.0),
+                                    # The similarity the search itself computed
+                                    # (SIMILARITY_ATTR), falling back to any score
+                                    # already on the chunk's metadata. This used to
+                                    # be hardcoded to whatever metadata carried —
+                                    # nothing — so every result reported 0.000 and
+                                    # an agent could not tell a match from noise.
+                                    "score": float(
+                                        getattr(row, SIMILARITY_ATTR, None)
+                                        or metadata.get("score", 0.0)
+                                        or 0.0
+                                    ),
                                     "group_id": getattr(row, "group_id", None) or self.group_id,
                                     "execution_id": execution_id,
                                 },

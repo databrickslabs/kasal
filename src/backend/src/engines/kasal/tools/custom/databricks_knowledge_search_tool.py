@@ -11,6 +11,12 @@ import logging
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 
+from src.engines.kasal.tools.custom.knowledge_search_guard import (
+    KnowledgeSearchBudget,
+    filter_by_relevance,
+    no_relevant_results_notice,
+)
+
 # Configure logger
 logger = logging.getLogger(__name__)
 
@@ -56,6 +62,8 @@ class DatabricksKnowledgeSearchTool(BaseTool):
     _user_token: Optional[str] = PrivateAttr(default=None)
     _user_email: Optional[str] = PrivateAttr(default=None)
     _service: Optional[Any] = PrivateAttr(default=None)
+    # What this agent has already searched, and how much searching is left.
+    _budget: Any = PrivateAttr(default=None)
 
     def __init__(
         self,
@@ -98,6 +106,7 @@ class DatabricksKnowledgeSearchTool(BaseTool):
         self._user_email = user_email  # Per-user knowledge isolation
         self._configured_file_paths = file_paths  # Store configured file paths from tool_configs
         self._agent_id = agent_id  # Store agent ID for access control
+        self._budget = KnowledgeSearchBudget()
 
         logger.info(f"Initialized DatabricksKnowledgeSearchTool")
         logger.info(f"  - Configured file_paths: {self._configured_file_paths}")
@@ -175,6 +184,22 @@ class DatabricksKnowledgeSearchTool(BaseTool):
         Returns:
             Formatted search results as a string
         """
+        # Answer a repeated search from what it returned the first time, and stop
+        # answering at all once the budget is spent. Both exist because the index
+        # cannot say "I don't have this": it always returns its top-k, so an agent
+        # hunting for something absent will rephrase until the round limit kills
+        # the run (see knowledge_search_guard).
+        previous = self._budget.previous_answer(query)
+        if previous is not None:
+            logger.info(f"[TOOL DEBUG] Repeat search for '{query}' — returning the first answer")
+            return self._budget.repeat_notice(query, previous)
+        if self._budget.exhausted():
+            logger.warning(
+                f"[TOOL DEBUG] Search budget exhausted after "
+                f"{self._budget.searches_used} searches; refusing '{query}'"
+            )
+            return self._budget.exhausted_notice()
+
         # PRIORITY: If agent provides file_paths, resolve and use those (agent knows what it wants)
         # FALLBACK: If no file_paths provided, use configured paths from tool_configs
         # This allows dynamic file selection while maintaining backwards compatibility
@@ -208,13 +233,25 @@ class DatabricksKnowledgeSearchTool(BaseTool):
 
             if not results:
                 logger.warning("[TOOL DEBUG] No results found, returning empty message")
-                return "No relevant information found in the knowledge base."
+                return self._record(query, no_relevant_results_notice(query, 0.0))
+
+            # An index always returns its top-k, so "20 results" says nothing
+            # about whether any of them answer the question. Drop the distant
+            # ones and, when none survive, say so in terms that end the search
+            # rather than invite another rephrasing.
+            kept, best_score, scored = filter_by_relevance(results)
+            if scored and not kept:
+                logger.info(
+                    f"[TOOL DEBUG] {len(results)} result(s) all below the relevance "
+                    f"floor (best={best_score:.3f}); reporting no match"
+                )
+                return self._record(query, no_relevant_results_notice(query, best_score))
 
             # Format results for the agent
             formatted_output = []
-            formatted_output.append(f"Found {len(results)} relevant results:\n")
+            formatted_output.append(f"Found {len(kept)} relevant results:\n")
 
-            for i, result in enumerate(results, 1):
+            for i, result in enumerate(kept, 1):
                 content = result.get('content', '')
                 metadata = result.get('metadata', {})
                 source = metadata.get('source', 'Unknown')
@@ -225,11 +262,16 @@ class DatabricksKnowledgeSearchTool(BaseTool):
                 formatted_output.append(f"Content: {content}")
                 formatted_output.append("---")
 
-            return "\n".join(formatted_output)
+            return self._record(query, "\n".join(formatted_output))
 
         except Exception as e:
             logger.error(f"Error running knowledge search: {e}", exc_info=True)
             return f"Error searching knowledge base: {str(e)}"
+
+    def _record(self, query: str, answer: str) -> str:
+        """Remember what this search answered, then answer it."""
+        self._budget.record(query, answer)
+        return answer
 
     def _run_async_search(self, query: str, limit: int, file_paths: Optional[List[str]]) -> List[Dict[str, Any]]:
         """

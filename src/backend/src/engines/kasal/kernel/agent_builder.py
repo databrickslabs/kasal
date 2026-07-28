@@ -54,6 +54,22 @@ _ADDITIONAL_AGENT_PARAMS = [
 # Effort used when the reasoning toggle is on but no explicit level was chosen.
 DEFAULT_REASONING_EFFORT = 'low'
 
+#: Seconds one agent may spend inside a single LLM call chain before the engine
+#: stops it (``kasal_engine.llm.completion._execution_budget``). 0 disables it.
+#:
+#: The round cap alone was not enough. An agent searching for something its
+#: knowledge base does not contain rephrases the query every round; with
+#: max_iter=25 and ~5s per search that is two minutes of a run producing
+#: nothing, and the failure it eventually raises ("Tool-calling did not converge
+#: within 25 rounds") describes the symptom rather than the cause. A wall clock
+#: bounds the wasted time regardless of how cheap each round is.
+#:
+#: Generous on purpose: a legitimate research turn with slow tools must not be
+#: cut off. An explicit ``max_execution_time`` on the agent always wins.
+DEFAULT_AGENT_MAX_EXECUTION_TIME = int(
+    os.getenv("KASAL_AGENT_MAX_EXECUTION_TIME", "900") or 0
+)
+
 
 def _apply_reasoning_effort(llm: Any, spec: Dict[str, Any], label: str = "") -> None:
     """Put the resolved reasoning budget on the agent's own LLM, when supported.
@@ -253,6 +269,15 @@ def build_agent_kwargs(
         if spec.get(param) is not None:
             agent_kwargs[param] = spec[param]
             logger.info(f"Setting agent parameter '{param}' to {spec[param]} for agent {label}")
+
+    # Bound the wasted time when an agent cannot converge — see
+    # DEFAULT_AGENT_MAX_EXECUTION_TIME. Only when the spec did not set one.
+    if 'max_execution_time' not in agent_kwargs and DEFAULT_AGENT_MAX_EXECUTION_TIME > 0:
+        agent_kwargs['max_execution_time'] = DEFAULT_AGENT_MAX_EXECUTION_TIME
+        logger.info(
+            f"Applying default max_execution_time="
+            f"{DEFAULT_AGENT_MAX_EXECUTION_TIME}s for agent {label}"
+        )
 
     # NOTE: reasoning is NOT an Agent kwarg. Kasal's reasoning control is the model's
     # native thinking budget and is applied to the agent's LLM in build_agent_llm
