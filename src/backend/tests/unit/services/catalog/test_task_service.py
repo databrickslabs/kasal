@@ -510,15 +510,15 @@ class TestTaskServiceFindByGroup:
             MockTask(id="task-3", group_id="group-456")
         ]
         
-        # Mock the session execute and scalars
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = tasks
-        mock_session.execute.return_value = mock_result
-        
+        # The service delegates to the repository; group scoping lives there.
+        task_service.repository.find_by_group_ids = AsyncMock(return_value=tasks)
+
         result = await task_service.find_by_group(sample_group_context)
-        
+
         assert len(result) == 3
-        mock_session.execute.assert_called_once()
+        task_service.repository.find_by_group_ids.assert_called_once_with(
+            sample_group_context.group_ids
+        )
     
     @pytest.mark.asyncio
     async def test_find_by_group_empty_group_context(self, task_service, sample_group_context):
@@ -537,14 +537,12 @@ class TestTaskServiceFindByGroup:
     @pytest.mark.asyncio
     async def test_find_by_group_no_tasks(self, task_service, mock_session, sample_group_context):
         """Test find by group when no tasks exist for the group."""
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = []
-        mock_session.execute.return_value = mock_result
-        
+        task_service.repository.find_by_group_ids = AsyncMock(return_value=[])
+
         result = await task_service.find_by_group(sample_group_context)
-        
+
         assert result == []
-        mock_session.execute.assert_called_once()
+        task_service.repository.find_by_group_ids.assert_called_once()
 
 
 class TestTaskServiceFactoryMethod:

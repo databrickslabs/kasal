@@ -36,6 +36,13 @@ class UserRepository(BaseRepository[User]):
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
+    async def count_system_admins(self) -> int:
+        """How many users hold system-admin privileges."""
+        result = await self.session.execute(
+            select(func.count(self.model.id)).where(self.model.is_system_admin.is_(True))
+        )
+        return result.scalar() or 0
+
     async def count(self) -> int:
         """Get total count of users"""
         query = select(func.count(self.model.id))

@@ -227,10 +227,7 @@ async def test_handle_first_user_admin_no_admins_existing():
     user = make_user(is_system_admin=False)
     
     # No admins exist, should grant admin
-    mock_result = MagicMock()
-    mock_result.scalar.return_value = 0
-    svc.session = AsyncMock()
-    svc.session.execute = AsyncMock(return_value=mock_result)
+    svc.user_repo.count_system_admins = AsyncMock(return_value=0)
     svc.user_repo.update = AsyncMock()
     
     await svc._handle_first_user_admin_setup(user, is_new_user=False)
@@ -243,10 +240,7 @@ async def test_handle_first_user_admin_existing_admins():
     user = make_user(is_system_admin=False)
     
     # Admins exist - don't grant
-    mock_result = MagicMock()
-    mock_result.scalar.return_value = 2
-    svc.session = AsyncMock()
-    svc.session.execute = AsyncMock(return_value=mock_result)
+    svc.user_repo.count_system_admins = AsyncMock(return_value=2)
     svc.user_repo.update = AsyncMock()
     
     await svc._handle_first_user_admin_setup(user, is_new_user=False)

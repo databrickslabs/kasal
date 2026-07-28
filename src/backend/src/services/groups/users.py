@@ -255,12 +255,7 @@ class UserService:
                     return
 
                 # Check if any system admins exist
-                from sqlalchemy import select, func
-                query = select(func.count(self.user_repo.model.id)).where(
-                    self.user_repo.model.is_system_admin == True
-                )
-                result = await self.session.execute(query)
-                admin_count = result.scalar() or 0
+                admin_count = await self.user_repo.count_system_admins()
 
                 if admin_count == 0:
                     logger.info(f"No system admins exist. Granting system admin privileges to existing user {user.email}")

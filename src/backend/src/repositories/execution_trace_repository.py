@@ -128,6 +128,24 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
             logger.error(f"Database error retrieving traces for run_id {run_id}: {str(e)}")
             raise
     
+    async def get_event_shape_by_job_id(
+        self, job_id: str
+    ) -> List[Tuple[Optional[str], Any, Any]]:
+        """(event_type, output, created_at) for every span of a run.
+
+        A narrow projection on purpose: recipe mining reads what a crew ACTUALLY
+        did, and pulling whole ExecutionTrace rows for that would drag every
+        output blob into memory.
+        """
+        result = await self.session.execute(
+            select(
+                ExecutionTrace.event_type,
+                ExecutionTrace.output,
+                ExecutionTrace.created_at,
+            ).where(ExecutionTrace.job_id == job_id)
+        )
+        return list(result.all())
+
     async def _get_by_job_id(
         self,
         job_id: str,

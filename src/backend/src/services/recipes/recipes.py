@@ -184,6 +184,13 @@ class WorkflowRecipeService:
         self.session = session
         self.repository = WorkflowRecipeRepository(session)
         self.trial_repository = WorkflowRecipeTrialRepository(session)
+        # Cross-domain READS go through the owning repository, never a raw query
+        # on another table (see tests/unit/architecture/).
+        from src.repositories.execution_history_repository import ExecutionHistoryRepository
+        from src.repositories.execution_trace_repository import ExecutionTraceRepository
+
+        self.history_repository = ExecutionHistoryRepository(session)
+        self.trace_repository = ExecutionTraceRepository(session)
 
     # ------------------------------------------------------------------ mining
 
@@ -195,14 +202,9 @@ class WorkflowRecipeService:
         ``source_job_id`` would miss every run that dedup folded in and rewrote
         away, which is exactly how the sweep failed to converge.
         """
-        stmt = (
-            select(ExecutionHistory)
-            .where(ExecutionHistory.status == _MINEABLE_STATUS)
-            .order_by(ExecutionHistory.created_at.desc())
-            .limit(_BATCH)
+        return await self.history_repository.get_recent(
+            limit=_BATCH, status=_MINEABLE_STATUS
         )
-        result = await self.session.execute(stmt)
-        return list(result.scalars().all())
 
     async def _trace_shape(self, job_id: str) -> Dict[str, Any]:
         """Descriptive stats for a run, read from what it ACTUALLY did.
@@ -211,13 +213,7 @@ class WorkflowRecipeService:
         tool that was bound but never called is not part of what made this crew
         work, and shipping it in a recipe would propagate dead configuration.
         """
-        stmt = select(
-            ExecutionTrace.event_type,
-            ExecutionTrace.output,
-            ExecutionTrace.created_at,
-        ).where(ExecutionTrace.job_id == job_id)
-        result = await self.session.execute(stmt)
-        rows = list(result.all())
+        rows = await self.trace_repository.get_event_shape_by_job_id(job_id)
 
         tools: set = set()
         tool_calls = 0
@@ -847,13 +843,7 @@ class WorkflowRecipeService:
         produced a crew which then failed is exactly the outcome the report needs
         to count, and dropping it would leave only successes in both arms.
         """
-        stmt = (
-            select(ExecutionHistory)
-            .order_by(ExecutionHistory.created_at.desc())
-            .limit(limit)
-        )
-        result = await self.session.execute(stmt)
-        return list(result.scalars().all())
+        return await self.history_repository.get_recent(limit=limit)
 
     async def effectiveness(
         self, group_ids: List[str], days: int = 30

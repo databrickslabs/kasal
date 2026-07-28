@@ -308,5 +308,18 @@ class TaskRepository(BaseRepository[Task]):
         await self.session.execute(stmt)
         await self.session.flush()
 
+    async def find_by_group_ids(self, group_ids: List[str]) -> List[Task]:
+        """Tasks visible to any of these groups.
+
+        Group scoping is a repository concern: a caller that builds this query
+        itself is one `.where()` away from leaking another tenant's rows.
+        """
+        if not group_ids:
+            return []
+        stmt = select(self.model).where(self.model.group_id.in_(group_ids))
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+
 # SyncTaskRepository and get_sync_task_repository removed
 # All database operations must be async - use TaskRepository instead 

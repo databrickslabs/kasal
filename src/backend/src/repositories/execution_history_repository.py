@@ -72,6 +72,22 @@ class ExecutionHistoryRepository:
 
         return runs, total_count
     
+    async def get_recent(
+        self, limit: int, status: Optional[str] = None
+    ) -> List[ExecutionHistory]:
+        """Most recent runs, newest first, optionally filtered to one status.
+
+        Recipe mining and the effectiveness report both read runs in bulk; they
+        used to build this query themselves against ExecutionHistory, which is
+        this repository's table.
+        """
+        stmt = select(ExecutionHistory)
+        if status is not None:
+            stmt = stmt.where(ExecutionHistory.status == status)
+        stmt = stmt.order_by(ExecutionHistory.created_at.desc()).limit(limit)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
     async def get_execution_by_id(self, execution_id: int, group_ids: List[str] = None) -> Optional[ExecutionHistory]:
         """
         Get a specific execution by ID with group filtering.

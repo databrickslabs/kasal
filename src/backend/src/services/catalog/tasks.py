@@ -349,9 +349,8 @@ class TaskService(BaseService[Task, TaskCreate]):
             List of tasks for the specified group
         """
         if not group_context.group_ids:
-            # If no group context, return empty list for security
+            # Security short-circuit: no group context must never mean "all rows".
+            # The repository guards this too — belt and braces on a data-leak path.
             return []
-        
-        stmt = select(Task).where(Task.group_id.in_(group_context.group_ids))
-        result = await self.session.execute(stmt)
-        return result.scalars().all() 
+
+        return await self.repository.find_by_group_ids(group_context.group_ids) 
