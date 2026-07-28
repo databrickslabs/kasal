@@ -17,7 +17,7 @@ from pathlib import Path
 def _flow_methods_source() -> str:
     p = (
         Path(__file__).resolve().parents[6]
-        / "src" / "engines" / "kasal" / "paths" / "flow" / "modules" / "flow_methods.py"
+        / "src" / "services" / "flow_builder" / "modules" / "flow_methods.py"
     )
     return p.read_text()
 

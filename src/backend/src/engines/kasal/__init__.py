@@ -32,7 +32,7 @@ def __getattr__(name: str) -> Any:
 
         return KasalEngineService
     if name == "KasalFlowService":
-        from src.engines.kasal.paths.flow.kasal_flow_service import KasalFlowService
+        from src.services.flow_builder.kasal_flow_service import KasalFlowService
 
         return KasalFlowService
     if name in ("BackendFlow", "FlowRunnerService"):

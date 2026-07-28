@@ -8,7 +8,7 @@ import pytest
 from src.utils.model_config import DEFAULT_ENGINE_MODEL
 from unittest.mock import AsyncMock, MagicMock, patch, call
 
-from src.engines.kasal.paths.crew.agent_adapter import (
+from src.services.agent_builder.agent_adapter import (
     create_agent,
     _build_security_preamble,
     _SECURITY_PREAMBLE,
@@ -890,7 +890,7 @@ class TestRedactLlmRepr:
     """api_key must never reach the (user-downloadable) execution logs."""
 
     def test_redacts_api_key_and_keeps_the_rest(self):
-        from src.engines.kasal.paths.crew.agent_adapter import redact_llm_repr
+        from src.services.agent_builder.agent_adapter import redact_llm_repr
 
         class FakeLLM:
             def __repr__(self):
@@ -905,6 +905,6 @@ class TestRedactLlmRepr:
         assert "model='databricks/claude'" in redacted
 
     def test_tolerates_reprs_without_an_api_key(self):
-        from src.engines.kasal.paths.crew.agent_adapter import redact_llm_repr
+        from src.services.agent_builder.agent_adapter import redact_llm_repr
 
         assert redact_llm_repr("plain-model-string") == "'plain-model-string'"

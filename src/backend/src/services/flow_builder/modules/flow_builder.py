@@ -25,16 +25,16 @@ from pydantic import BaseModel
 
 from src.core.logger import LoggerManager
 from src.utils.safe_eval import safe_eval
-from src.engines.kasal.paths.flow.modules.agent_adapter import AgentConfig
-from src.engines.kasal.paths.flow.modules.task_adapter import TaskConfig
+from src.services.flow_builder.modules.agent_adapter import AgentConfig
+from src.services.flow_builder.modules.task_adapter import TaskConfig
 from src.services.execution.kernel.execution_callback import create_execution_callbacks
 
 # Import new modular components
-from src.engines.kasal.paths.flow.modules.flow_config import FlowConfigManager
-from src.engines.kasal.paths.flow.modules.flow_processors import FlowProcessorManager
-from src.engines.kasal.paths.flow.modules.flow_state import FlowStateManager
-from src.engines.kasal.paths.flow.modules.flow_methods import FlowMethodFactory, collect_task_agents, extract_final_answer, get_model_context_limits
-from src.engines.kasal.paths.flow.exceptions import FlowPausedForApprovalException
+from src.services.flow_builder.modules.flow_config import FlowConfigManager
+from src.services.flow_builder.modules.flow_processors import FlowProcessorManager
+from src.services.flow_builder.modules.flow_state import FlowStateManager
+from src.services.flow_builder.modules.flow_methods import FlowMethodFactory, collect_task_agents, extract_final_answer, get_model_context_limits
+from src.services.flow_builder.exceptions import FlowPausedForApprovalException
 
 # Initialize logger - use flow logger for flow execution
 logger = LoggerManager.get_instance().flow
@@ -1448,7 +1448,7 @@ class FlowBuilder:
                 # Lakebase/Postgres in prod) instead of CrewAI's default stray SQLite
                 # file, so checkpoints survive restarts and are queryable by the app.
                 try:
-                    from src.engines.kasal.paths.flow.kasal_flow_persistence import (
+                    from src.services.flow_builder.kasal_flow_persistence import (
                         KasalFlowPersistence,
                     )
                     DynamicFlow = persist(persistence=KasalFlowPersistence())(DynamicFlow)

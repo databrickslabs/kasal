@@ -4,7 +4,7 @@ Extended unit tests for FlowStateManager to improve coverage.
 import pytest
 from unittest.mock import patch, MagicMock
 
-from src.engines.kasal.paths.flow.modules.flow_state import FlowStateManager
+from src.services.flow_builder.modules.flow_state import FlowStateManager
 
 
 class TestFlowStateManagerInitializeState:

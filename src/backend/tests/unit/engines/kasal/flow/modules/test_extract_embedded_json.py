@@ -6,7 +6,7 @@ On the soft output_json path a crew often returns its structured answer inside a
 never read and the flow stopped without routing. This helper extracts the JSON.
 """
 
-from src.engines.kasal.paths.flow.modules.flow_builder import extract_embedded_json
+from src.services.flow_builder.modules.flow_builder import extract_embedded_json
 
 PROSE_WRAPPED = (
     "Based on my comprehensive online research, I have compiled the following:\n\n"

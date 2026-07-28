@@ -16,7 +16,7 @@ Test coverage:
 import pytest
 from unittest.mock import MagicMock, patch, AsyncMock
 
-from src.engines.kasal.paths.crew.agent_adapter import (
+from src.services.agent_builder.agent_adapter import (
     create_agent,
     _build_security_preamble,
     inject_security_preamble,

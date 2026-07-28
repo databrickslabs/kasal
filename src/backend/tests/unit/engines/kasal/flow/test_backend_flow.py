@@ -8,7 +8,7 @@ import json
 from unittest.mock import Mock, patch, AsyncMock, MagicMock, call, PropertyMock
 from datetime import datetime, UTC
 
-from src.engines.kasal.paths.flow.backend_flow import BackendFlow
+from src.services.flow_builder.backend_flow import BackendFlow
 from src.repositories.flow_repository import FlowRepository
 
 
@@ -235,7 +235,7 @@ class TestBackendFlow:
 
         mock_llm = Mock()
 
-        with patch('src.engines.kasal.paths.flow.backend_flow.LLMManager') as mock_llm_manager:
+        with patch('src.services.flow_builder.backend_flow.LLMManager') as mock_llm_manager:
             mock_llm_manager.get_llm = AsyncMock(return_value=mock_llm)
 
             with patch.dict(os.environ, {'DEFAULT_LLM_MODEL': 'test-model'}):
@@ -251,7 +251,7 @@ class TestBackendFlow:
 
         mock_llm = Mock()
 
-        with patch('src.engines.kasal.paths.flow.backend_flow.LLMManager') as mock_llm_manager:
+        with patch('src.services.flow_builder.backend_flow.LLMManager') as mock_llm_manager:
             mock_llm_manager.get_llm = AsyncMock(return_value=mock_llm)
 
             # Remove DEFAULT_LLM_MODEL from environment
@@ -266,7 +266,7 @@ class TestBackendFlow:
         """Test _get_llm method with exception."""
         flow = BackendFlow()
 
-        with patch('src.engines.kasal.paths.flow.backend_flow.LLMManager') as mock_llm_manager:
+        with patch('src.services.flow_builder.backend_flow.LLMManager') as mock_llm_manager:
             mock_llm_manager.get_llm = AsyncMock(side_effect=Exception("LLM error"))
 
             with pytest.raises(Exception, match="LLM error"):
@@ -281,7 +281,7 @@ class TestBackendFlow:
 
         mock_dynamic_flow = Mock()
 
-        with patch('src.engines.kasal.paths.flow.backend_flow.FlowBuilder') as mock_flow_builder:
+        with patch('src.services.flow_builder.backend_flow.FlowBuilder') as mock_flow_builder:
             mock_flow_builder.build_flow = AsyncMock(return_value=mock_dynamic_flow)
 
             with patch.object(flow, '_init_callbacks') as mock_init_callbacks:
@@ -311,7 +311,7 @@ class TestBackendFlow:
         mock_flow_repo.get = AsyncMock(return_value=mock_flow_db)
         mock_dynamic_flow = Mock()
 
-        with patch('src.engines.kasal.paths.flow.backend_flow.FlowBuilder') as mock_flow_builder:
+        with patch('src.services.flow_builder.backend_flow.FlowBuilder') as mock_flow_builder:
             mock_flow_builder.build_flow = AsyncMock(return_value=mock_dynamic_flow)
 
             with patch.object(flow, '_init_callbacks') as mock_init_callbacks:
@@ -334,7 +334,7 @@ class TestBackendFlow:
         flow = BackendFlow()
         flow._flow_data = {"nodes": [{"id": "node1"}]}
 
-        with patch('src.engines.kasal.paths.flow.backend_flow.FlowBuilder') as mock_flow_builder:
+        with patch('src.services.flow_builder.backend_flow.FlowBuilder') as mock_flow_builder:
             mock_flow_builder.build_flow = AsyncMock(side_effect=Exception("Build error"))
 
             with patch.object(flow, '_init_callbacks'):
@@ -348,7 +348,7 @@ class TestBackendFlow:
         flow._config = {"group_context": {"key": "value"}}
 
         # Mock UserContext to prevent import errors
-        with patch('src.engines.kasal.paths.flow.backend_flow.logger'):
+        with patch('src.services.flow_builder.backend_flow.logger'):
             flow._init_callbacks()
 
         # Check that callbacks are set correctly
@@ -362,7 +362,7 @@ class TestBackendFlow:
         flow = BackendFlow(job_id="test-job")
         flow._config = {}
 
-        with patch('src.engines.kasal.paths.flow.backend_flow.logger'):
+        with patch('src.services.flow_builder.backend_flow.logger'):
             flow._init_callbacks()
 
         # Check that callbacks are set correctly

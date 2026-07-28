@@ -8,7 +8,7 @@ it. The trace shows no tool call at all: it did not decline to search, it had no
 reason to think there was anything to search.
 """
 
-from src.engines.kasal.paths.light_agent.attachment_hint import (
+from src.services.chat.attachment_hint import (
     MAX_LISTED,
     attached_file_names,
     build_attachment_hint,

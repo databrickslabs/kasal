@@ -16,7 +16,7 @@ def _no_session_patch():
 
 @pytest.mark.asyncio
 async def test_agent_helper_skips_session_without_mcp_servers():
-    from src.engines.kasal.paths.crew.agent_adapter import create_agent
+    from src.services.agent_builder.agent_adapter import create_agent
 
     mock_llm = MagicMock()
     with patch(
@@ -36,7 +36,7 @@ async def test_agent_helper_skips_session_without_mcp_servers():
 
 @pytest.mark.asyncio
 async def test_task_helper_skips_session_without_mcp_servers():
-    from src.engines.kasal.paths.crew import task_adapter
+    from src.services.agent_builder import task_adapter
 
     mock_agent = MagicMock()
     mock_agent.role = "R"

@@ -604,7 +604,7 @@ def run_flow_in_process(
             # Now run the actual flow execution
             try:
                 from src.db.database_router import get_smart_db_session
-                from src.engines.kasal.paths.flow.flow_runner_service import (
+                from src.services.flow_builder.flow_runner_service import (
                     FlowRunnerService,
                 )
 

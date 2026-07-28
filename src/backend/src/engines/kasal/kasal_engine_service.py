@@ -43,10 +43,10 @@ from src.models.execution_status import ExecutionStatus
 
 # Import helper modules
 from src.services.execution.logs.writer_task import LogWriterTask
-from src.engines.kasal.paths.crew.execution_runner import run_crew_in_process, update_execution_status_with_retry
-from src.engines.kasal.paths.flow.flow_execution_runner import run_flow_in_process
+from src.services.agent_builder.execution_runner import run_crew_in_process, update_execution_status_with_retry
+from src.services.flow_builder.flow_execution_runner import run_flow_in_process
 from src.services.execution.config_adapter import normalize_config, normalize_flow_config
-from src.engines.kasal.paths.crew.crew_preparation import CrewPreparation
+from src.services.agent_builder.crew_preparation import CrewPreparation
 
 # Import CrewAI components
 from kasal_engine.core import Crew
@@ -623,7 +623,7 @@ class KasalEngineService(BaseEngineService):
         Returns:
             ``{"execution_id", "status"[, "error"]}``.
         """
-        from src.engines.kasal.paths.light_agent.light_agent_service import LightAgentService
+        from src.services.chat.service import LightAgentService
         return await LightAgentService().run_light_agent_execution(
             execution_id, config, group_context, session
         )

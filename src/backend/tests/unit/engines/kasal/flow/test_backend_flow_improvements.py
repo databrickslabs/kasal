@@ -12,7 +12,7 @@ import os
 from unittest.mock import AsyncMock, MagicMock, patch, Mock, PropertyMock
 from datetime import datetime
 
-from src.engines.kasal.paths.flow.backend_flow import BackendFlow
+from src.services.flow_builder.backend_flow import BackendFlow
 
 
 # Mock classes

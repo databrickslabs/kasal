@@ -17,7 +17,7 @@ import pytest
 from unittest.mock import MagicMock, patch, AsyncMock
 from typing import List, Any
 
-from src.engines.kasal.paths.crew.agent_adapter import create_agent
+from src.services.agent_builder.agent_adapter import create_agent
 
 
 class TestCreateAgentDateAwareness:

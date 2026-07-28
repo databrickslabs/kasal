@@ -12,30 +12,11 @@ import atexit
 os.environ["DATABASE_TYPE"] = "sqlite"
 os.environ["SQLITE_DB_PATH"] = ":memory:"
 
-# Create a fixture to handle mocking
-@pytest.fixture(scope="module", autouse=True)
-def mock_problematic_modules():
-    """Mock modules that cause issues during testing."""
-    # Store original modules
-    original_crewai_tools = sys.modules.get('kasal_engine.tools')
-    original_asyncpg = sys.modules.get('asyncpg')
-
-    # Mock the modules
-    sys.modules['kasal_engine.tools'] = Mock()
-    sys.modules['asyncpg'] = Mock()
-
-    yield
-
-    # Restore original modules
-    if original_crewai_tools is not None:
-        sys.modules['kasal_engine.tools'] = original_crewai_tools
-    else:
-        sys.modules.pop('kasal_engine.tools', None)
-
-    if original_asyncpg is not None:
-        sys.modules['asyncpg'] = original_asyncpg
-    else:
-        sys.modules.pop('asyncpg', None)
+# NOTE: this module used to stub `kasal_engine.tools` into sys.modules for its
+# whole run. kasal_engine is a real vendored package here, and any src.* module
+# imported for the first time inside that window stayed cached holding a Mock —
+# poisoning every later test file on the same xdist worker. `asyncpg` is a real
+# dependency too. No stubs.
 
 # Import only what we need for testing
 from src.schemas.memory_backend import (

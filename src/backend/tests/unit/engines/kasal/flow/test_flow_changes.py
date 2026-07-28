@@ -62,7 +62,7 @@ class TestFlowMethodsNoPlanner:
         Formerly ``test_planning_llm_explicit_configuration``, which asserted the
         planner LLM was looked up via LLMManager and passed to Crew.
         """
-        from src.engines.kasal.paths.flow.modules.flow_methods import FlowMethodFactory
+        from src.services.flow_builder.modules.flow_methods import FlowMethodFactory
 
         # Mock crew data with explicit planning_llm
         mock_crew_data = MagicMock()
@@ -92,7 +92,7 @@ class TestFlowMethodsNoPlanner:
         mock_planning_llm = MagicMock()
 
         # Crew IS a module-level import; LLMManager is a lazy import inside the closure
-        with patch('src.engines.kasal.paths.flow.modules.flow_methods.Crew') as mock_crew_class, \
+        with patch('src.services.flow_builder.modules.flow_methods.Crew') as mock_crew_class, \
              patch('src.core.llm_manager.LLMManager') as mock_llm_manager:
 
             mock_llm_manager.get_llm = AsyncMock(return_value=mock_planning_llm)
@@ -136,7 +136,7 @@ class TestFlowMethodsNoPlanner:
 
         Formerly ``test_planning_llm_fallback_to_agent``.
         """
-        from src.engines.kasal.paths.flow.modules.flow_methods import FlowMethodFactory
+        from src.services.flow_builder.modules.flow_methods import FlowMethodFactory
 
         # Mock crew data WITHOUT planning_llm
         mock_crew_data = MagicMock()
@@ -164,7 +164,7 @@ class TestFlowMethodsNoPlanner:
         mock_task.expected_output = "Test output"
         mock_task.context = None
 
-        with patch('src.engines.kasal.paths.flow.modules.flow_methods.Crew') as mock_crew_class:
+        with patch('src.services.flow_builder.modules.flow_methods.Crew') as mock_crew_class:
             mock_crew_instance = MagicMock()
             mock_crew_class.return_value = mock_crew_instance
             mock_crew_instance.kickoff_async = AsyncMock(return_value=MagicMock(raw="Test result"))
@@ -197,7 +197,7 @@ class TestFlowMethodsNoPlanner:
 
         Formerly ``test_planning_llm_no_fallback_available``.
         """
-        from src.engines.kasal.paths.flow.modules.flow_methods import FlowMethodFactory
+        from src.services.flow_builder.modules.flow_methods import FlowMethodFactory
 
         # Mock crew data WITHOUT planning_llm
         mock_crew_data = MagicMock()
@@ -222,7 +222,7 @@ class TestFlowMethodsNoPlanner:
         mock_task.expected_output = "Test output"
         mock_task.context = None
 
-        with patch('src.engines.kasal.paths.flow.modules.flow_methods.Crew') as mock_crew_class:
+        with patch('src.services.flow_builder.modules.flow_methods.Crew') as mock_crew_class:
             mock_crew_instance = MagicMock()
             mock_crew_class.return_value = mock_crew_instance
             mock_crew_instance.kickoff_async = AsyncMock(return_value=MagicMock(raw="Test result"))
@@ -254,7 +254,7 @@ class TestFlowExecutionRunnerResultPropagation:
     @pytest.mark.asyncio
     async def test_update_execution_status_with_result(self):
         """Test update_execution_status_with_retry accepts and passes result parameter."""
-        from src.engines.kasal.paths.flow.flow_execution_runner import update_execution_status_with_retry
+        from src.services.flow_builder.flow_execution_runner import update_execution_status_with_retry
 
         execution_id = "test-exec-123"
         status = "COMPLETED"
@@ -283,7 +283,7 @@ class TestFlowExecutionRunnerResultPropagation:
     @pytest.mark.asyncio
     async def test_update_execution_status_without_result(self):
         """Test update_execution_status_with_retry works without result parameter."""
-        from src.engines.kasal.paths.flow.flow_execution_runner import update_execution_status_with_retry
+        from src.services.flow_builder.flow_execution_runner import update_execution_status_with_retry
 
         execution_id = "test-exec-456"
         status = "RUNNING"
@@ -309,7 +309,7 @@ class TestFlowExecutionRunnerResultPropagation:
     @pytest.mark.asyncio
     async def test_run_flow_in_process_propagates_final_result(self):
         """Test run_flow_in_process propagates final_result to status update."""
-        from src.engines.kasal.paths.flow.flow_execution_runner import run_flow_in_process
+        from src.services.flow_builder.flow_execution_runner import run_flow_in_process
 
         execution_id = "test-exec-789"
         config = {"flow_id": "test-flow", "inputs": {}}
@@ -318,8 +318,8 @@ class TestFlowExecutionRunnerResultPropagation:
         mock_result_data = {"final_output": "Flow completed", "stats": {"tasks": 3}}
 
         # process_flow_executor IS at module level
-        with patch('src.engines.kasal.paths.flow.flow_execution_runner.process_flow_executor') as mock_executor, \
-             patch('src.engines.kasal.paths.flow.flow_execution_runner.update_execution_status_with_retry') as mock_update:
+        with patch('src.services.flow_builder.flow_execution_runner.process_flow_executor') as mock_executor, \
+             patch('src.services.flow_builder.flow_execution_runner.update_execution_status_with_retry') as mock_update:
 
             mock_executor.run_flow_isolated = AsyncMock(return_value={
                 'status': 'COMPLETED',
@@ -344,14 +344,14 @@ class TestFlowExecutionRunnerResultPropagation:
     @pytest.mark.asyncio
     async def test_run_flow_in_process_no_result_for_failed(self):
         """Test run_flow_in_process does not pass result for failed executions."""
-        from src.engines.kasal.paths.flow.flow_execution_runner import run_flow_in_process
+        from src.services.flow_builder.flow_execution_runner import run_flow_in_process
 
         execution_id = "test-exec-failed"
         config = {"flow_id": "test-flow", "inputs": {}}
         running_jobs = {}
 
-        with patch('src.engines.kasal.paths.flow.flow_execution_runner.process_flow_executor') as mock_executor, \
-             patch('src.engines.kasal.paths.flow.flow_execution_runner.update_execution_status_with_retry') as mock_update:
+        with patch('src.services.flow_builder.flow_execution_runner.process_flow_executor') as mock_executor, \
+             patch('src.services.flow_builder.flow_execution_runner.update_execution_status_with_retry') as mock_update:
 
             mock_executor.run_flow_isolated = AsyncMock(return_value={
                 'status': 'FAILED',
@@ -386,12 +386,12 @@ class TestFlowRunnerServiceFreshSession:
     @pytest.mark.asyncio
     async def test_dynamic_flow_uses_fresh_session_on_success(self):
         """Test _run_dynamic_flow uses fresh session for post-execution DB updates."""
-        from src.engines.kasal.paths.flow.flow_runner_service import FlowRunnerService
+        from src.services.flow_builder.flow_runner_service import FlowRunnerService
 
         mock_session = MagicMock()
 
         # Patch FlowExecutionService at module level (used in __init__)
-        with patch('src.engines.kasal.paths.flow.flow_runner_service.FlowExecutionService') as mock_fes_class:
+        with patch('src.services.flow_builder.flow_runner_service.FlowExecutionService') as mock_fes_class:
             mock_fes_class.return_value = MagicMock()
             service = FlowRunnerService(mock_session)
 
@@ -419,10 +419,10 @@ class TestFlowRunnerServiceFreshSession:
         mock_factory = make_async_session_factory(mock_initial_session, mock_post_session)
 
         # BackendFlow is re-imported inside method — patch at source module
-        with patch('src.engines.kasal.paths.flow.flow_runner_service._smart_db_session', mock_factory), \
-             patch('src.engines.kasal.paths.flow.flow_runner_service.FlowExecutionService', side_effect=track_fes), \
-             patch('src.engines.kasal.paths.flow.flow_runner_service.ApiKeysService') as mock_api_keys, \
-             patch('src.engines.kasal.paths.flow.backend_flow.BackendFlow') as mock_backend_flow_class:
+        with patch('src.services.flow_builder.flow_runner_service._smart_db_session', mock_factory), \
+             patch('src.services.flow_builder.flow_runner_service.FlowExecutionService', side_effect=track_fes), \
+             patch('src.services.flow_builder.flow_runner_service.ApiKeysService') as mock_api_keys, \
+             patch('src.services.flow_builder.backend_flow.BackendFlow') as mock_backend_flow_class:
 
             mock_api_keys.get_provider_api_key = AsyncMock(return_value=None)
 
@@ -449,11 +449,11 @@ class TestFlowRunnerServiceFreshSession:
     @pytest.mark.asyncio
     async def test_fresh_session_used_for_failed_flow(self):
         """Test fresh session is used even for failed flow executions."""
-        from src.engines.kasal.paths.flow.flow_runner_service import FlowRunnerService
+        from src.services.flow_builder.flow_runner_service import FlowRunnerService
 
         mock_session = MagicMock()
 
-        with patch('src.engines.kasal.paths.flow.flow_runner_service.FlowExecutionService') as mock_fes_class:
+        with patch('src.services.flow_builder.flow_runner_service.FlowExecutionService') as mock_fes_class:
             mock_fes_class.return_value = MagicMock()
             service = FlowRunnerService(mock_session)
 
@@ -478,10 +478,10 @@ class TestFlowRunnerServiceFreshSession:
             session_tracker.append(sess)
             return mock_svc
 
-        with patch('src.engines.kasal.paths.flow.flow_runner_service._smart_db_session', mock_factory), \
-             patch('src.engines.kasal.paths.flow.flow_runner_service.FlowExecutionService', side_effect=track_fes), \
-             patch('src.engines.kasal.paths.flow.flow_runner_service.ApiKeysService') as mock_api_keys, \
-             patch('src.engines.kasal.paths.flow.backend_flow.BackendFlow') as mock_backend_flow_class:
+        with patch('src.services.flow_builder.flow_runner_service._smart_db_session', mock_factory), \
+             patch('src.services.flow_builder.flow_runner_service.FlowExecutionService', side_effect=track_fes), \
+             patch('src.services.flow_builder.flow_runner_service.ApiKeysService') as mock_api_keys, \
+             patch('src.services.flow_builder.backend_flow.BackendFlow') as mock_backend_flow_class:
 
             mock_api_keys.get_provider_api_key = AsyncMock(return_value=None)
 
@@ -503,11 +503,11 @@ class TestFlowRunnerServiceFreshSession:
     @pytest.mark.asyncio
     async def test_fresh_session_prevents_stale_connection_error(self):
         """Test fresh session pattern prevents stale SQLite connection errors."""
-        from src.engines.kasal.paths.flow.flow_runner_service import FlowRunnerService
+        from src.services.flow_builder.flow_runner_service import FlowRunnerService
 
         mock_session = MagicMock()
 
-        with patch('src.engines.kasal.paths.flow.flow_runner_service.FlowExecutionService') as mock_fes_class:
+        with patch('src.services.flow_builder.flow_runner_service.FlowExecutionService') as mock_fes_class:
             mock_fes_class.return_value = MagicMock()
             service = FlowRunnerService(mock_session)
 
@@ -532,10 +532,10 @@ class TestFlowRunnerServiceFreshSession:
             session_tracker.append(sess)
             return mock_svc
 
-        with patch('src.engines.kasal.paths.flow.flow_runner_service._smart_db_session', mock_factory), \
-             patch('src.engines.kasal.paths.flow.flow_runner_service.FlowExecutionService', side_effect=track_fes), \
-             patch('src.engines.kasal.paths.flow.flow_runner_service.ApiKeysService') as mock_api_keys, \
-             patch('src.engines.kasal.paths.flow.backend_flow.BackendFlow') as mock_backend_flow_class:
+        with patch('src.services.flow_builder.flow_runner_service._smart_db_session', mock_factory), \
+             patch('src.services.flow_builder.flow_runner_service.FlowExecutionService', side_effect=track_fes), \
+             patch('src.services.flow_builder.flow_runner_service.ApiKeysService') as mock_api_keys, \
+             patch('src.services.flow_builder.backend_flow.BackendFlow') as mock_backend_flow_class:
 
             mock_api_keys.get_provider_api_key = AsyncMock(return_value=None)
 
@@ -567,15 +567,15 @@ class TestEmitErrorSpan:
 
     def _make_service(self):
         """Create a FlowRunnerService with mocked dependencies."""
-        from src.engines.kasal.paths.flow.flow_runner_service import FlowRunnerService
-        with patch('src.engines.kasal.paths.flow.flow_runner_service.FlowExecutionService') as mock_fes:
+        from src.services.flow_builder.flow_runner_service import FlowRunnerService
+        with patch('src.services.flow_builder.flow_runner_service.FlowExecutionService') as mock_fes:
             mock_fes.return_value = MagicMock()
             return FlowRunnerService(MagicMock())
 
     @pytest.mark.asyncio
     async def test_emit_error_span_basic(self):
         """Test _emit_error_span creates an OTel span with correct attributes."""
-        from src.engines.kasal.paths.flow.flow_runner_service import FlowRunnerService
+        from src.services.flow_builder.flow_runner_service import FlowRunnerService
 
         service = self._make_service()
 
@@ -599,7 +599,7 @@ class TestEmitErrorSpan:
     @pytest.mark.asyncio
     async def test_emit_error_span_with_group_email(self):
         """Test _emit_error_span sets group_email attribute when provided."""
-        from src.engines.kasal.paths.flow.flow_runner_service import FlowRunnerService
+        from src.services.flow_builder.flow_runner_service import FlowRunnerService
 
         service = self._make_service()
 
@@ -624,7 +624,7 @@ class TestEmitErrorSpan:
     @pytest.mark.asyncio
     async def test_emit_error_span_exception_handling(self):
         """Test _emit_error_span catches and logs exceptions without raising."""
-        from src.engines.kasal.paths.flow.flow_runner_service import FlowRunnerService
+        from src.services.flow_builder.flow_runner_service import FlowRunnerService
 
         service = self._make_service()
 
@@ -637,7 +637,7 @@ class TestEmitErrorSpan:
     @pytest.mark.asyncio
     async def test_emit_error_span_no_group_context(self):
         """Test _emit_error_span without group_id or group_email."""
-        from src.engines.kasal.paths.flow.flow_runner_service import FlowRunnerService
+        from src.services.flow_builder.flow_runner_service import FlowRunnerService
 
         service = self._make_service()
 

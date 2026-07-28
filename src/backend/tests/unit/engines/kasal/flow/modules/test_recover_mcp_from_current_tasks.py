@@ -6,7 +6,7 @@ MCP server the user added. This helper recovers MCP_SERVERS from the crew's
 CURRENT task so the flow gets the same tools the crew does.
 """
 
-from src.engines.kasal.paths.flow.modules.flow_processors import (
+from src.services.flow_builder.modules.flow_processors import (
     recover_mcp_from_current_tasks,
 )
 

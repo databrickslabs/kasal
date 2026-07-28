@@ -10,7 +10,7 @@ from src.core.exceptions import BadRequestError, NotFoundError
 from pydantic import BaseModel
 
 from src.core.dependencies import GroupContextDep, get_db
-from src.engines.kasal.paths.flow.kasal_flow_service import KasalFlowService
+from src.services.flow_builder.kasal_flow_service import KasalFlowService
 
 router = APIRouter(
     prefix="/flow-executions",

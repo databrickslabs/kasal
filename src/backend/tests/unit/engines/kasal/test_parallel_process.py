@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from kasal_engine.core import Process
 from src.services.execution.config_adapter import adapt_config
 from src.services.execution.config.crew_config_builder import CrewConfigBuilder
-from src.engines.kasal.paths.crew.crew_preparation import CrewPreparation
+from src.services.agent_builder.crew_preparation import CrewPreparation
 from src.schemas.execution import CrewConfig
 
 
@@ -89,7 +89,7 @@ async def _async_flags(config):
         return task
 
     with patch(
-        "src.engines.kasal.paths.crew.task_adapter.create_task", side_effect=_capture
+        "src.services.agent_builder.task_adapter.create_task", side_effect=_capture
     ):
         await _prep(config)._create_tasks()
     return seen

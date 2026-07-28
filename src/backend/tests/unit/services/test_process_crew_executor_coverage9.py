@@ -68,7 +68,7 @@ def _crew_execution_context(crew, mlflow_result=None, mcp_warnings=None, otel_br
         return kickoff_fn()
 
     patches = [
-        patch("src.engines.kasal.paths.crew.crew_preparation.CrewPreparation",
+        patch("src.services.agent_builder.crew_preparation.CrewPreparation",
               return_value=mock_crew_prep),
         patch("src.services.execution.logs.writer_task.LogWriterTask", mock_trace_manager),
         patch("src.services.execution.kernel.execution_callback.create_execution_callbacks",
@@ -261,7 +261,7 @@ class TestRunCrewInProcessWithMockCrew:
         mock_event_bus.flush = MagicMock(return_value=False)  # Timeout
 
         patches = [
-            patch("src.engines.kasal.paths.crew.crew_preparation.CrewPreparation",
+            patch("src.services.agent_builder.crew_preparation.CrewPreparation",
                   return_value=MagicMock(prepare=AsyncMock(return_value=True), crew=mock_crew)),
             patch("src.services.execution.logs.writer_task.LogWriterTask",
                   MagicMock(ensure_writer_started=AsyncMock())),

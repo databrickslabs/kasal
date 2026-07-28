@@ -10,7 +10,7 @@ from kasal_engine.core import Process
 
 from src.core.logger import LoggerManager
 from src.core.llm_manager import LLMManager
-from src.engines.kasal.paths.crew.agent_adapter import create_agent
+from src.services.agent_builder.agent_adapter import create_agent
 
 logger = LoggerManager.get_instance().crew
 

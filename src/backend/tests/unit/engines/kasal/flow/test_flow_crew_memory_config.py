@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.engines.kasal.paths.flow.modules.flow_methods import configure_flow_crew_memory
+from src.services.flow_builder.modules.flow_methods import configure_flow_crew_memory
 
 
 def _agent(role="Researcher", model="databricks-gpt-5"):

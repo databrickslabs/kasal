@@ -1,6 +1,6 @@
 """
 Unit tests for the engine-level light-agent ("chat" mode) runner:
-``src.engines.kasal.paths.light_agent.light_agent_service.run_light_agent``.
+``src.services.chat.service.run_light_agent``.
 
 This is the CrewAI-specific counterpart of ``run_crew_in_process`` for the
 single-agent chat path. The service layer
@@ -19,7 +19,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.engines.kasal.paths.light_agent.light_agent_service import run_light_agent
+from src.services.chat.service import run_light_agent
 from src.models.execution_status import ExecutionStatus
 from src.schemas.execution import CrewConfig
 from src.utils.user_context import GroupContext
@@ -1269,7 +1269,7 @@ async def test_memory_events_for_other_run_memory_are_ignored():
 # conversation's turns group into one MLflow session.
 
 from contextlib import contextmanager  # noqa: E402
-from src.engines.kasal.paths.light_agent.light_agent_service import (  # noqa: E402
+from src.services.chat.service import (  # noqa: E402
     LightAgentService,
 )
 

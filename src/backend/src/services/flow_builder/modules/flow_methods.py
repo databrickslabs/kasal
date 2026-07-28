@@ -1897,7 +1897,7 @@ class FlowMethodFactory:
         @listen(previous_method_name)
         async def hitl_gate_method(self, previous_output=None):
             """HITL gate method - pauses flow for human approval."""
-            from src.engines.kasal.paths.flow.exceptions import (
+            from src.services.flow_builder.exceptions import (
                 FlowPausedForApprovalException,
             )
             from src.db.session import request_scoped_session

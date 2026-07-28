@@ -8,143 +8,34 @@ Covers:
 
 import os
 import sys
-import types
 import importlib
-import importlib.util
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 
-# ---------------------------------------------------------------------------
-# Load our target modules directly from file, bypassing the __init__.py chain.
-#
-# IMPORTANT: We install temporary stubs in sys.modules so the source files
-# can resolve their imports, then IMMEDIATELY clean up all stubs so we don't
-# pollute the import cache for other test modules.  The extracted Python
-# objects (_resolve_tool_override, TaskConfig, AgentConfig) survive because
-# they're held by reference — they don't need the stubs to stay in sys.modules.
-# ---------------------------------------------------------------------------
-_BACKEND_SRC = os.path.join(
-    os.path.dirname(__file__), os.pardir, os.pardir, os.pardir,
-    os.pardir, os.pardir, os.pardir, "src"
+from src.services.flow_builder.modules.task_adapter import (
+    _resolve_tool_override,
+    TaskConfig,
 )
-_BACKEND_SRC = os.path.normpath(_BACKEND_SRC)
+from src.services.flow_builder.modules.agent_adapter import AgentConfig
 
-
-def _load_modules_isolated():
-    """Load task_config and agent_config in an isolated sys.modules context.
-
-    Returns (_resolve_tool_override, TaskConfig, AgentConfig).
-    """
-    stubs_needed = [
-        "src", "src.core", "src.core.logger",
-        "src.utils", "src.utils.user_context",
-        "src.engines", "src.engines.kasal",
-        "src.services.tools", "src.services.tools.tool_factory",
-        "src.engines.kasal.paths.flow", "src.engines.kasal.paths.flow.modules",
-        "src.services.guardrails",
-        "src.services.guardrails", "src.services.guardrails.guardrail_factory",
-        "src.services.guardrails.wrapper",
-        "src.db", "src.db.session",
-        "src.services", "src.services.api_keys_service",
-        "src.services.mcp_service",
-        "src.models", "src.models.agent",
-        "src.core.llm_manager",
-        "src.services.tools.mcp_integration",
-        "crewai", "crewai.flow", "kasal_engine.flow",
-        "crewai.tasks", "kasal_engine.core",
-    ]
-    loaded_modules = [
-        "src.engines.kasal.paths.flow.modules.task_adapter",
-        "src.engines.kasal.paths.flow.modules.agent_adapter",
-    ]
-
-    # 1. Snapshot existing entries
-    saved = {k: sys.modules[k] for k in stubs_needed + loaded_modules if k in sys.modules}
-
-    # 2. Install stubs (only for modules not already loaded)
-    added = []
-    for name in stubs_needed:
-        if name not in sys.modules:
-            mod = types.ModuleType(name)
-            mod.__path__ = []
-            sys.modules[name] = mod
-            added.append(name)
-
-    # 3. Wire up expected attributes on stubs.
-    #    IMPORTANT: For modules that already existed in sys.modules (i.e. the
-    #    real module was already imported by another test file), we save the
-    #    original attribute value so we can restore it later — otherwise we'd
-    #    permanently mutate the real module object.
-    _attr_backups = []  # list of (module_obj, attr_name, old_value_or_sentinel)
-    _SENTINEL = object()
-
-    def _set_attr(module_key, attr_name, value):
-        mod = sys.modules[module_key]
-        old = getattr(mod, attr_name, _SENTINEL)
-        _attr_backups.append((mod, attr_name, old))
-        setattr(mod, attr_name, value)
-
-    logger_mgr = MagicMock()
-    logger_mgr.get_instance.return_value = MagicMock(flow=MagicMock())
-    _set_attr("src.core.logger", "LoggerManager", logger_mgr)
-    _set_attr("src.utils.user_context", "GroupContext", type("GroupContext", (), {}))
-    _set_attr("crewai", "Task", MagicMock)
-    _set_attr("crewai", "Agent", MagicMock)
-    _set_attr("crewai", "LLM", MagicMock)
-    _set_attr("src.services.tools.tool_factory", "ToolFactory", MagicMock)
-    _set_attr("src.db.session", "request_scoped_session", MagicMock)
-    _set_attr("src.services.api_keys_service", "ApiKeysService", MagicMock)
-
-    # 4. Load actual source files
-    def _load(module_name, filepath):
-        spec = importlib.util.spec_from_file_location(module_name, filepath)
-        mod = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = mod
-        spec.loader.exec_module(mod)
-        return mod
-
-    task_mod = _load(
-        "src.engines.kasal.paths.flow.modules.task_adapter",
-        os.path.join(_BACKEND_SRC, "engines", "kasal", "paths", "flow", "modules", "task_adapter.py"),
-    )
-    agent_mod = _load(
-        "src.engines.kasal.paths.flow.modules.agent_adapter",
-        os.path.join(_BACKEND_SRC, "engines", "kasal", "paths", "flow", "modules", "agent_adapter.py"),
-    )
-
-    # 5. Extract the symbols we need
-    resolve_fn = task_mod._resolve_tool_override
-    task_cls = task_mod.TaskConfig
-    agent_cls = agent_mod.AgentConfig
-
-    # 6. Restore mutated attributes on pre-existing (real) modules FIRST,
-    #    before touching sys.modules entries.
-    for mod_obj, attr_name, old_val in reversed(_attr_backups):
-        if old_val is _SENTINEL:
-            # Attribute didn't exist before — remove it
-            try:
-                delattr(mod_obj, attr_name)
-            except AttributeError:
-                pass
-        else:
-            setattr(mod_obj, attr_name, old_val)
-
-    # 7. Restore sys.modules — remove every stub we added
-    for name in added + loaded_modules:
-        if name in saved:
-            sys.modules[name] = saved[name]
-        else:
-            sys.modules.pop(name, None)
-
-    # Also restore any pre-existing modules we may have overwritten
-    for name, orig in saved.items():
-        sys.modules[name] = orig
-
-    return resolve_fn, task_cls, agent_cls
-
-
-_resolve_tool_override, TaskConfig, AgentConfig = _load_modules_isolated()
+# This file used to load those two modules through ~100 lines of sys.modules
+# surgery: stub out `src.*` and `crewai.*`, exec the source files by path, then
+# put everything back. That was written when `crewai` was an absent third-party
+# dependency. It has been obsolete since the engine was vendored as
+# `kasal_engine`, and it was actively harmful:
+#
+#   * it stubbed `kasal_engine.*`, which is REAL here, so
+#     `from kasal_engine.core import Task` only resolved when some earlier test
+#     had already imported it — this file errored when run alone;
+#   * it hand-built filesystem paths ("engines/kasal/paths/flow/modules/..."),
+#     so moving the source broke the loader;
+#   * and when the loader raised, the restore step never ran, leaving a dummy
+#     GroupContext bolted onto the real src.utils.user_context for the rest of
+#     the xdist worker's life. That is what "GroupContext() takes no arguments"
+#     was, 34 failures away in an unrelated suite.
+#
+# A plain import does the job.
 
 
 # ---------------------------------------------------------------------------

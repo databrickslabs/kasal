@@ -12,7 +12,7 @@ class TestExtractFinalAnswer:
 
     def test_extract_final_answer_empty_results(self):
         """Test extract_final_answer with empty results."""
-        from src.engines.kasal.paths.flow.modules.flow_methods import extract_final_answer
+        from src.services.flow_builder.modules.flow_methods import extract_final_answer
 
         result = extract_final_answer(None)
         assert result == ""
@@ -22,7 +22,7 @@ class TestExtractFinalAnswer:
 
     def test_extract_final_answer_with_final_answer_marker(self):
         """Test extract_final_answer extracts text after Final Answer marker."""
-        from src.engines.kasal.paths.flow.modules.flow_methods import extract_final_answer
+        from src.services.flow_builder.modules.flow_methods import extract_final_answer
 
         results = ["Thinking process here... Final Answer: This is the answer"]
         result = extract_final_answer(results)
@@ -30,7 +30,7 @@ class TestExtractFinalAnswer:
 
     def test_extract_final_answer_without_colon(self):
         """Test extract_final_answer handles Final Answer without colon."""
-        from src.engines.kasal.paths.flow.modules.flow_methods import extract_final_answer
+        from src.services.flow_builder.modules.flow_methods import extract_final_answer
 
         results = ["Thinking process here... Final Answer\nThis is the answer"]
         result = extract_final_answer(results)
@@ -38,7 +38,7 @@ class TestExtractFinalAnswer:
 
     def test_extract_final_answer_with_dict_content(self):
         """Test extract_final_answer with dict containing content key."""
-        from src.engines.kasal.paths.flow.modules.flow_methods import extract_final_answer
+        from src.services.flow_builder.modules.flow_methods import extract_final_answer
 
         results = [{'content': 'Final Answer: The answer is 42'}]
         result = extract_final_answer(results)
@@ -46,7 +46,7 @@ class TestExtractFinalAnswer:
 
     def test_extract_final_answer_with_list_of_dicts(self):
         """Test extract_final_answer with list of dicts."""
-        from src.engines.kasal.paths.flow.modules.flow_methods import extract_final_answer
+        from src.services.flow_builder.modules.flow_methods import extract_final_answer
 
         results = [[
             {'content': 'First Final Answer: Answer 1'},
@@ -58,7 +58,7 @@ class TestExtractFinalAnswer:
 
     def test_extract_final_answer_with_crew_output(self):
         """Test extract_final_answer with CrewOutput-like object."""
-        from src.engines.kasal.paths.flow.modules.flow_methods import extract_final_answer
+        from src.services.flow_builder.modules.flow_methods import extract_final_answer
 
         mock_output = MagicMock()
         mock_output.raw = "Final Answer: Crew output answer"
@@ -69,7 +69,7 @@ class TestExtractFinalAnswer:
 
     def test_extract_final_answer_with_string(self):
         """Test extract_final_answer with plain string."""
-        from src.engines.kasal.paths.flow.modules.flow_methods import extract_final_answer
+        from src.services.flow_builder.modules.flow_methods import extract_final_answer
 
         results = ["Final Answer: Simple string answer"]
         result = extract_final_answer(results)
@@ -77,7 +77,7 @@ class TestExtractFinalAnswer:
 
     def test_extract_final_answer_no_marker(self):
         """Test extract_final_answer returns full content when no marker."""
-        from src.engines.kasal.paths.flow.modules.flow_methods import extract_final_answer
+        from src.services.flow_builder.modules.flow_methods import extract_final_answer
 
         results = ["This is the full output without any marker"]
         result = extract_final_answer(results)
@@ -85,7 +85,7 @@ class TestExtractFinalAnswer:
 
     def test_extract_final_answer_with_list_strings(self):
         """Test extract_final_answer with list of strings in nested list."""
-        from src.engines.kasal.paths.flow.modules.flow_methods import extract_final_answer
+        from src.services.flow_builder.modules.flow_methods import extract_final_answer
 
         results = [['First item', 'Second item']]
         result = extract_final_answer(results)
@@ -99,7 +99,7 @@ class TestGetModelContextLimits:
     @pytest.mark.asyncio
     async def test_get_model_context_limits_defaults(self):
         """Test get_model_context_limits returns defaults when no agent."""
-        from src.engines.kasal.paths.flow.modules.flow_methods import get_model_context_limits
+        from src.services.flow_builder.modules.flow_methods import get_model_context_limits
 
         context_window, max_output = await get_model_context_limits(None, None)
         assert context_window == 128000
@@ -108,7 +108,7 @@ class TestGetModelContextLimits:
     @pytest.mark.asyncio
     async def test_get_model_context_limits_string_llm(self):
         """Test get_model_context_limits with string LLM."""
-        from src.engines.kasal.paths.flow.modules.flow_methods import get_model_context_limits
+        from src.services.flow_builder.modules.flow_methods import get_model_context_limits
 
         mock_agent = MagicMock()
         mock_agent.llm = "gpt-4"
@@ -137,7 +137,7 @@ class TestGetModelContextLimits:
     @pytest.mark.asyncio
     async def test_get_model_context_limits_llm_object(self):
         """Test get_model_context_limits with LLM object."""
-        from src.engines.kasal.paths.flow.modules.flow_methods import get_model_context_limits
+        from src.services.flow_builder.modules.flow_methods import get_model_context_limits
 
         mock_llm = MagicMock()
         mock_llm.model = "gpt-4"
@@ -165,7 +165,7 @@ class TestGetModelContextLimits:
     @pytest.mark.asyncio
     async def test_get_model_context_limits_no_model_name(self):
         """Test get_model_context_limits returns defaults when no model name."""
-        from src.engines.kasal.paths.flow.modules.flow_methods import get_model_context_limits
+        from src.services.flow_builder.modules.flow_methods import get_model_context_limits
 
         mock_agent = MagicMock()
         mock_agent.llm = None
@@ -177,7 +177,7 @@ class TestGetModelContextLimits:
     @pytest.mark.asyncio
     async def test_get_model_context_limits_no_group_id(self):
         """Test get_model_context_limits returns defaults when no group_id."""
-        from src.engines.kasal.paths.flow.modules.flow_methods import get_model_context_limits
+        from src.services.flow_builder.modules.flow_methods import get_model_context_limits
 
         mock_agent = MagicMock()
         mock_agent.llm = "gpt-4"
@@ -193,7 +193,7 @@ class TestGetModelContextLimits:
     @pytest.mark.asyncio
     async def test_get_model_context_limits_exception(self):
         """Test get_model_context_limits handles exceptions gracefully."""
-        from src.engines.kasal.paths.flow.modules.flow_methods import get_model_context_limits
+        from src.services.flow_builder.modules.flow_methods import get_model_context_limits
 
         mock_agent = MagicMock()
         mock_agent.llm = "gpt-4"
@@ -212,7 +212,7 @@ class TestGetModelContextLimits:
     @pytest.mark.asyncio
     async def test_get_model_context_limits_with_group_ids_list(self):
         """Test get_model_context_limits uses group_ids list when primary_group_id is None."""
-        from src.engines.kasal.paths.flow.modules.flow_methods import get_model_context_limits
+        from src.services.flow_builder.modules.flow_methods import get_model_context_limits
 
         mock_agent = MagicMock()
         mock_agent.llm = "gpt-4"
@@ -274,7 +274,7 @@ class TestFlowMethodFactory:
 
     def test_create_starting_point_crew_method(self, mock_task, mock_callbacks, mock_group_context):
         """Test create_starting_point_crew_method creates a valid method."""
-        from src.engines.kasal.paths.flow.modules.flow_methods import FlowMethodFactory
+        from src.services.flow_builder.modules.flow_methods import FlowMethodFactory
 
         mock_create_callbacks = MagicMock(return_value=(MagicMock(), MagicMock()))
 
@@ -293,7 +293,7 @@ class TestFlowMethodFactory:
 
     def test_create_starting_point_crew_method_with_crew_data(self, mock_task, mock_callbacks, mock_group_context):
         """Test create_starting_point_crew_method with crew_data configuration."""
-        from src.engines.kasal.paths.flow.modules.flow_methods import FlowMethodFactory
+        from src.services.flow_builder.modules.flow_methods import FlowMethodFactory
 
         mock_create_callbacks = MagicMock(return_value=(MagicMock(), MagicMock()))
 
@@ -318,7 +318,7 @@ class TestFlowMethodFactory:
 
     def test_create_listener_method(self, mock_task, mock_callbacks, mock_group_context):
         """Test create_listener_method creates a valid method."""
-        from src.engines.kasal.paths.flow.modules.flow_methods import FlowMethodFactory
+        from src.services.flow_builder.modules.flow_methods import FlowMethodFactory
 
         mock_create_callbacks = MagicMock(return_value=(MagicMock(), MagicMock()))
 
@@ -339,7 +339,7 @@ class TestFlowMethodFactory:
 
     def test_create_listener_method_with_crew_data(self, mock_task, mock_callbacks, mock_group_context):
         """Test create_listener_method with crew_data configuration."""
-        from src.engines.kasal.paths.flow.modules.flow_methods import FlowMethodFactory
+        from src.services.flow_builder.modules.flow_methods import FlowMethodFactory
 
         mock_create_callbacks = MagicMock(return_value=(MagicMock(), MagicMock()))
 
@@ -366,7 +366,7 @@ class TestFlowMethodFactory:
 
     def test_create_skipped_crew_method_starting_point(self):
         """Test create_skipped_crew_method for starting point."""
-        from src.engines.kasal.paths.flow.modules.flow_methods import FlowMethodFactory
+        from src.services.flow_builder.modules.flow_methods import FlowMethodFactory
 
         method = FlowMethodFactory.create_skipped_crew_method(
             method_name='starting_point_0',
@@ -382,7 +382,7 @@ class TestFlowMethodFactory:
 
     def test_create_skipped_crew_method_listener(self):
         """Test create_skipped_crew_method for listener."""
-        from src.engines.kasal.paths.flow.modules.flow_methods import FlowMethodFactory
+        from src.services.flow_builder.modules.flow_methods import FlowMethodFactory
 
         method = FlowMethodFactory.create_skipped_crew_method(
             method_name='listener_0',
@@ -400,7 +400,7 @@ class TestFlowMethodFactory:
 
     def test_create_skipped_crew_method_without_checkpoint(self):
         """Test create_skipped_crew_method without checkpoint output."""
-        from src.engines.kasal.paths.flow.modules.flow_methods import FlowMethodFactory
+        from src.services.flow_builder.modules.flow_methods import FlowMethodFactory
 
         method = FlowMethodFactory.create_skipped_crew_method(
             method_name='starting_point_0',
@@ -420,7 +420,7 @@ class TestSkippedMethodExecution:
     @pytest.mark.asyncio
     async def test_skipped_starting_method_with_checkpoint(self):
         """Test skipped starting method returns checkpoint output."""
-        from src.engines.kasal.paths.flow.modules.flow_methods import FlowMethodFactory
+        from src.services.flow_builder.modules.flow_methods import FlowMethodFactory
 
         method = FlowMethodFactory.create_skipped_crew_method(
             method_name='starting_point_0',
@@ -444,7 +444,7 @@ class TestSkippedMethodExecution:
     @pytest.mark.asyncio
     async def test_skipped_listener_method_with_checkpoint(self):
         """Test skipped listener method returns checkpoint output."""
-        from src.engines.kasal.paths.flow.modules.flow_methods import FlowMethodFactory
+        from src.services.flow_builder.modules.flow_methods import FlowMethodFactory
 
         method = FlowMethodFactory.create_skipped_crew_method(
             method_name='listener_0',
@@ -469,7 +469,7 @@ class TestSkippedMethodExecution:
     @pytest.mark.asyncio
     async def test_skipped_method_uses_state_fallback(self):
         """Test skipped method falls back to state when no checkpoint."""
-        from src.engines.kasal.paths.flow.modules.flow_methods import FlowMethodFactory
+        from src.services.flow_builder.modules.flow_methods import FlowMethodFactory
 
         method = FlowMethodFactory.create_skipped_crew_method(
             method_name='starting_point_0',
@@ -497,7 +497,7 @@ class TestCrewMethodExecution:
     @pytest.mark.asyncio
     async def test_starting_point_method_execution(self):
         """Test starting point method executes crew correctly."""
-        from src.engines.kasal.paths.flow.modules.flow_methods import FlowMethodFactory
+        from src.services.flow_builder.modules.flow_methods import FlowMethodFactory
 
         mock_agent = MagicMock()
         mock_agent.role = "Test Agent"
@@ -527,7 +527,7 @@ class TestCrewMethodExecution:
         mock_flow.state = {}
 
         # Mock Crew to avoid actual execution
-        with patch('src.engines.kasal.paths.flow.modules.flow_methods.Crew') as mock_crew_class:
+        with patch('src.services.flow_builder.modules.flow_methods.Crew') as mock_crew_class:
             mock_crew = MagicMock()
             mock_result = MagicMock()
             mock_result.raw = "Crew execution result"
@@ -543,7 +543,7 @@ class TestCrewMethodExecution:
     @pytest.mark.asyncio
     async def test_listener_method_execution(self):
         """Test listener method executes crew correctly."""
-        from src.engines.kasal.paths.flow.modules.flow_methods import FlowMethodFactory
+        from src.services.flow_builder.modules.flow_methods import FlowMethodFactory
 
         mock_agent = MagicMock()
         mock_agent.role = "Test Agent"
@@ -574,9 +574,9 @@ class TestCrewMethodExecution:
         mock_flow.state = {}
 
         # Mock dependencies
-        with patch('src.engines.kasal.paths.flow.modules.flow_methods.Crew') as mock_crew_class, \
-             patch('src.engines.kasal.paths.flow.modules.flow_methods.Task') as mock_task_class, \
-             patch('src.engines.kasal.paths.flow.modules.flow_methods.get_model_context_limits') as mock_limits:
+        with patch('src.services.flow_builder.modules.flow_methods.Crew') as mock_crew_class, \
+             patch('src.services.flow_builder.modules.flow_methods.Task') as mock_task_class, \
+             patch('src.services.flow_builder.modules.flow_methods.get_model_context_limits') as mock_limits:
             mock_crew = MagicMock()
             mock_result = MagicMock()
             mock_result.raw = "Listener execution result"
@@ -595,7 +595,7 @@ class TestCrewMethodExecution:
     async def test_starting_point_method_timeout(self):
         """Test starting point method handles timeout correctly."""
         import asyncio
-        from src.engines.kasal.paths.flow.modules.flow_methods import FlowMethodFactory
+        from src.services.flow_builder.modules.flow_methods import FlowMethodFactory
 
         mock_agent = MagicMock()
         mock_agent.role = "Test Agent"
@@ -620,7 +620,7 @@ class TestCrewMethodExecution:
         mock_flow = MagicMock()
         mock_flow.state = {}
 
-        with patch('src.engines.kasal.paths.flow.modules.flow_methods.Crew') as mock_crew_class, \
+        with patch('src.services.flow_builder.modules.flow_methods.Crew') as mock_crew_class, \
              patch('asyncio.wait_for') as mock_wait_for:
             mock_crew = MagicMock()
             mock_crew_class.return_value = mock_crew
@@ -634,7 +634,7 @@ class TestCrewMethodExecution:
     @pytest.mark.asyncio
     async def test_starting_point_method_execution_error(self):
         """Test starting point method handles execution errors."""
-        from src.engines.kasal.paths.flow.modules.flow_methods import FlowMethodFactory
+        from src.services.flow_builder.modules.flow_methods import FlowMethodFactory
 
         mock_agent = MagicMock()
         mock_agent.role = "Test Agent"
@@ -659,7 +659,7 @@ class TestCrewMethodExecution:
         mock_flow = MagicMock()
         mock_flow.state = {}
 
-        with patch('src.engines.kasal.paths.flow.modules.flow_methods.Crew') as mock_crew_class:
+        with patch('src.services.flow_builder.modules.flow_methods.Crew') as mock_crew_class:
             mock_crew = MagicMock()
             mock_crew.kickoff_async = AsyncMock(side_effect=Exception("Execution error"))
             mock_crew_class.return_value = mock_crew

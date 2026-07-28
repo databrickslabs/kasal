@@ -11,7 +11,7 @@ import pytest
 # ``kasal_engine.events`` in sys.modules: once that stub is up, a fresh import
 # of a module that pulls ``kasal_engine.events.types`` fails, and mock falls
 # back to attribute traversal ("module 'src' has no attribute 'engines'").
-import src.engines.kasal.paths.flow.flow_runner_service  # noqa: F401
+import src.services.flow_builder.flow_runner_service  # noqa: F401
 
 class FakeProcess:
     def __init__(self, exitcode=0, alive=False, pid=99999):
@@ -926,7 +926,7 @@ class TestRunFlowInProcessDeep:
         all_patches.append(patch("src.utils.user_context.UserContext", mock_uc))
         all_patches.append(patch("src.db.session.safe_async_session", return_value=mock_session_cm))
         all_patches.append(patch("src.db.session.async_session_factory", return_value=mock_session_cm))
-        all_patches.append(patch("src.engines.kasal.paths.flow.flow_runner_service.FlowRunnerService", return_value=mock_frs))
+        all_patches.append(patch("src.services.flow_builder.flow_runner_service.FlowRunnerService", return_value=mock_frs))
         all_patches.append(patch("src.services.databricks_service.DatabricksService", mock_ds_cls))
         all_patches.append(patch("src.services.otel_tracing.mlflow_setup.execute_with_mlflow_trace_async", mock_exec_mlflow))
         all_patches.append(patch("src.services.otel_tracing.mlflow_setup.post_execution_mlflow_cleanup", mock_post_cleanup))
@@ -1741,7 +1741,7 @@ class TestDeepAsyncBranches:
         all_patches.append(patch("src.utils.user_context.UserContext", mock_uc))
         all_patches.append(patch("src.db.session.safe_async_session", return_value=mock_session_cm))
         all_patches.append(patch("src.db.session.async_session_factory", return_value=mock_session_cm))
-        all_patches.append(patch("src.engines.kasal.paths.flow.flow_runner_service.FlowRunnerService", return_value=mock_frs))
+        all_patches.append(patch("src.services.flow_builder.flow_runner_service.FlowRunnerService", return_value=mock_frs))
         all_patches.append(patch("src.services.databricks_service.DatabricksService", mock_ds_cls))
         all_patches.append(patch("src.services.otel_tracing.mlflow_setup.configure_mlflow_in_subprocess", mock_configure_mlflow))
         all_patches.append(patch("src.services.otel_tracing.mlflow_setup.execute_with_mlflow_trace_async", mock_exec_mlflow))
@@ -1882,7 +1882,7 @@ class TestDeepAsyncBranches:
         all_patches.append(patch("src.utils.user_context.UserContext", mock_uc))
         all_patches.append(patch("src.db.session.safe_async_session", return_value=mock_session_cm))
         all_patches.append(patch("src.db.session.async_session_factory", return_value=mock_session_cm))
-        all_patches.append(patch("src.engines.kasal.paths.flow.flow_runner_service.FlowRunnerService", return_value=mock_frs))
+        all_patches.append(patch("src.services.flow_builder.flow_runner_service.FlowRunnerService", return_value=mock_frs))
         all_patches.append(patch("src.services.databricks_service.DatabricksService", mock_ds_cls))
         all_patches.append(patch("src.services.otel_tracing.mlflow_setup.configure_mlflow_in_subprocess", mock_configure_mlflow))
         all_patches.append(patch("src.services.otel_tracing.mlflow_setup.execute_with_mlflow_trace_async", mock_exec_mlflow))
@@ -1951,7 +1951,7 @@ class TestDeepAsyncBranches:
         all_patches.append(patch("src.utils.user_context.UserContext", mock_uc))
         all_patches.append(patch("src.db.session.safe_async_session", return_value=mock_session_cm))
         all_patches.append(patch("src.db.session.async_session_factory", return_value=mock_session_cm))
-        all_patches.append(patch("src.engines.kasal.paths.flow.flow_runner_service.FlowRunnerService", return_value=mock_frs))
+        all_patches.append(patch("src.services.flow_builder.flow_runner_service.FlowRunnerService", return_value=mock_frs))
         all_patches.append(patch("src.services.databricks_service.DatabricksService", mock_ds_cls))
         all_patches.append(patch("src.services.otel_tracing.mlflow_setup.execute_with_mlflow_trace_async", mock_exec_mlflow))
         all_patches.append(patch("src.services.otel_tracing.mlflow_setup.post_execution_mlflow_cleanup", mock_post_cleanup))
@@ -2023,7 +2023,7 @@ class TestDeepAsyncBranches:
         all_patches.append(patch("src.utils.user_context.UserContext", mock_uc))
         all_patches.append(patch("src.db.session.safe_async_session", return_value=mock_session_cm))
         all_patches.append(patch("src.db.session.async_session_factory", return_value=mock_session_cm))
-        all_patches.append(patch("src.engines.kasal.paths.flow.flow_runner_service.FlowRunnerService", return_value=mock_frs))
+        all_patches.append(patch("src.services.flow_builder.flow_runner_service.FlowRunnerService", return_value=mock_frs))
         all_patches.append(patch("src.services.databricks_service.DatabricksService", mock_ds_cls))
         all_patches.append(patch("src.services.otel_tracing.mlflow_setup.configure_mlflow_in_subprocess", mock_configure_mlflow))
         all_patches.append(patch("src.services.otel_tracing.mlflow_setup.execute_with_mlflow_trace_async", mock_exec_mlflow))
@@ -2086,7 +2086,7 @@ class TestDeepAsyncBranches:
         all_patches.append(patch("src.utils.user_context.UserContext", mock_uc))
         all_patches.append(patch("src.db.session.safe_async_session", return_value=mock_session_cm))
         all_patches.append(patch("src.db.session.async_session_factory", return_value=mock_session_cm))
-        all_patches.append(patch("src.engines.kasal.paths.flow.flow_runner_service.FlowRunnerService", return_value=mock_frs))
+        all_patches.append(patch("src.services.flow_builder.flow_runner_service.FlowRunnerService", return_value=mock_frs))
         all_patches.append(patch("src.services.databricks_service.DatabricksService", mock_ds_cls))
         all_patches.append(patch("src.services.otel_tracing.mlflow_setup.execute_with_mlflow_trace_async", mock_exec_mlflow))
         all_patches.append(patch("src.services.otel_tracing.mlflow_setup.post_execution_mlflow_cleanup", mock_post_cleanup))
@@ -2188,7 +2188,7 @@ class TestAsyncCleanupException:
         all_patches.append(patch("src.utils.user_context.UserContext", mock_uc))
         all_patches.append(patch("src.db.session.safe_async_session", return_value=mock_session_cm))
         all_patches.append(patch("src.db.session.async_session_factory", return_value=mock_session_cm))
-        all_patches.append(patch("src.engines.kasal.paths.flow.flow_runner_service.FlowRunnerService", return_value=mock_frs))
+        all_patches.append(patch("src.services.flow_builder.flow_runner_service.FlowRunnerService", return_value=mock_frs))
         all_patches.append(patch("src.services.databricks_service.DatabricksService", mock_ds_cls))
         all_patches.append(patch("src.services.otel_tracing.mlflow_setup.execute_with_mlflow_trace_async", mock_exec_mlflow))
         all_patches.append(patch("src.services.otel_tracing.mlflow_setup.post_execution_mlflow_cleanup", mock_post_cleanup))
@@ -2259,7 +2259,7 @@ class TestAsyncCleanupException:
         all_patches.append(patch("src.utils.user_context.UserContext", mock_uc))
         all_patches.append(patch("src.db.session.safe_async_session", return_value=mock_session_cm))
         all_patches.append(patch("src.db.session.async_session_factory", return_value=mock_session_cm))
-        all_patches.append(patch("src.engines.kasal.paths.flow.flow_runner_service.FlowRunnerService", return_value=mock_frs))
+        all_patches.append(patch("src.services.flow_builder.flow_runner_service.FlowRunnerService", return_value=mock_frs))
         all_patches.append(patch("src.services.databricks_service.DatabricksService", mock_ds_cls))
         all_patches.append(patch("src.services.otel_tracing.mlflow_setup.execute_with_mlflow_trace_async", mock_exec_mlflow))
         all_patches.append(patch("src.services.otel_tracing.mlflow_setup.post_execution_mlflow_cleanup", mock_post_cleanup))
@@ -2344,7 +2344,7 @@ class TestStdoutCaptureLoggerFails:
         all_patches.append(patch("src.utils.user_context.UserContext", mock_uc))
         all_patches.append(patch("src.db.session.safe_async_session", return_value=mock_session_cm))
         all_patches.append(patch("src.db.session.async_session_factory", return_value=mock_session_cm))
-        all_patches.append(patch("src.engines.kasal.paths.flow.flow_runner_service.FlowRunnerService", return_value=mock_frs))
+        all_patches.append(patch("src.services.flow_builder.flow_runner_service.FlowRunnerService", return_value=mock_frs))
         all_patches.append(patch("src.services.databricks_service.DatabricksService", mock_ds_cls))
         all_patches.append(patch("src.services.otel_tracing.mlflow_setup.execute_with_mlflow_trace_async", mock_exec_mlflow))
         all_patches.append(patch("src.services.otel_tracing.mlflow_setup.post_execution_mlflow_cleanup", mock_post_cleanup))
@@ -2421,7 +2421,7 @@ class TestOtelLoggerHandlerRouting:
         all_patches.append(patch("src.utils.user_context.UserContext", mock_uc))
         all_patches.append(patch("src.db.session.safe_async_session", return_value=mock_session_cm))
         all_patches.append(patch("src.db.session.async_session_factory", return_value=mock_session_cm))
-        all_patches.append(patch("src.engines.kasal.paths.flow.flow_runner_service.FlowRunnerService", return_value=mock_frs))
+        all_patches.append(patch("src.services.flow_builder.flow_runner_service.FlowRunnerService", return_value=mock_frs))
         all_patches.append(patch("src.services.databricks_service.DatabricksService", mock_ds_cls))
         all_patches.append(patch("src.services.otel_tracing.mlflow_setup.execute_with_mlflow_trace_async", mock_exec_mlflow))
         all_patches.append(patch("src.services.otel_tracing.mlflow_setup.post_execution_mlflow_cleanup", mock_post_cleanup))

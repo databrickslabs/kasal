@@ -10,7 +10,7 @@ import pytest
 # Import the engine modules these tests patch BEFORE any test stubs
 # ``kasal_engine.*`` in sys.modules — see the note in
 # test_process_flow_executor.py for why the order matters.
-import src.engines.kasal.paths.flow.flow_runner_service  # noqa: F401
+import src.services.flow_builder.flow_runner_service  # noqa: F401
 
 def _gc(group_id="tg", token="tt"):
     c = MagicMock()
@@ -121,7 +121,7 @@ def _deep_run_extended(
     all_patches.append(patch("src.utils.user_context.UserContext", mock_uc))
     all_patches.append(patch("src.db.session.safe_async_session", return_value=mock_session_cm))
     all_patches.append(patch("src.db.session.async_session_factory", return_value=mock_session_cm))
-    all_patches.append(patch("src.engines.kasal.paths.flow.flow_runner_service.FlowRunnerService", return_value=mock_frs))
+    all_patches.append(patch("src.services.flow_builder.flow_runner_service.FlowRunnerService", return_value=mock_frs))
     all_patches.append(patch("src.services.databricks_service.DatabricksService", mock_ds_cls))
     all_patches.append(patch("src.services.otel_tracing.mlflow_setup.execute_with_mlflow_trace_async", mock_exec_mlflow))
     all_patches.append(patch("src.services.otel_tracing.mlflow_setup.post_execution_mlflow_cleanup", mock_post_cleanup))

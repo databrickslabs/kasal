@@ -12,8 +12,8 @@ import pytest
 import uuid
 from unittest.mock import MagicMock, AsyncMock, patch, Mock, PropertyMock
 
-from src.engines.kasal.paths.flow.backend_flow import BackendFlow
-from src.engines.kasal.paths.flow.exceptions import FlowPausedForApprovalException
+from src.services.flow_builder.backend_flow import BackendFlow
+from src.services.flow_builder.exceptions import FlowPausedForApprovalException
 
 
 # ---------------------------------------------------------------------------
@@ -187,7 +187,7 @@ class TestFlowMethod:
         }
         bf._repositories = {}
 
-        with patch("src.engines.kasal.paths.flow.backend_flow.FlowBuilder.build_flow", new=AsyncMock(return_value=MagicMock())):
+        with patch("src.services.flow_builder.backend_flow.FlowBuilder.build_flow", new=AsyncMock(return_value=MagicMock())):
             result = await bf.flow()
         assert result is not None
 
@@ -199,7 +199,7 @@ class TestFlowMethod:
         bf._config = {"group_context": group_ctx}
 
         with patch("src.utils.user_context.UserContext.set_group_context") as mock_set_ctx, \
-             patch("src.engines.kasal.paths.flow.backend_flow.FlowBuilder.build_flow", new=AsyncMock(return_value=MagicMock())):
+             patch("src.services.flow_builder.backend_flow.FlowBuilder.build_flow", new=AsyncMock(return_value=MagicMock())):
             await bf.flow()
         # Called at least once (may be called multiple times from flow() and _init_callbacks())
         assert mock_set_ctx.call_count >= 1
@@ -212,7 +212,7 @@ class TestFlowMethod:
         bf._config = {"group_context": MagicMock()}
 
         with patch("src.utils.user_context.UserContext.set_group_context", side_effect=Exception("no mod")), \
-             patch("src.engines.kasal.paths.flow.backend_flow.FlowBuilder.build_flow", new=AsyncMock(return_value=MagicMock())):
+             patch("src.services.flow_builder.backend_flow.FlowBuilder.build_flow", new=AsyncMock(return_value=MagicMock())):
             result = await bf.flow()
         assert result is not None
 
@@ -234,7 +234,7 @@ class TestFlowMethod:
         flow_repo.get = AsyncMock(return_value=flow_data)
         bf._repositories = {"flow": flow_repo}
 
-        with patch("src.engines.kasal.paths.flow.backend_flow.FlowBuilder.build_flow", new=AsyncMock(return_value=MagicMock())):
+        with patch("src.services.flow_builder.backend_flow.FlowBuilder.build_flow", new=AsyncMock(return_value=MagicMock())):
             result = await bf.flow()
         assert result is not None
 
@@ -244,7 +244,7 @@ class TestFlowMethod:
         bf._flow_data = {"id": None, "name": "f", "crew_id": None, "nodes": [], "edges": [], "flow_config": {}}
         bf._config = {}
 
-        with patch("src.engines.kasal.paths.flow.backend_flow.FlowBuilder.build_flow", new=AsyncMock(side_effect=RuntimeError("build fail"))):
+        with patch("src.services.flow_builder.backend_flow.FlowBuilder.build_flow", new=AsyncMock(side_effect=RuntimeError("build fail"))):
             with pytest.raises(ValueError, match="Failed to create flow"):
                 await bf.flow()
 
@@ -259,7 +259,7 @@ class TestFlowMethod:
         }
 
         mock_dynamic_flow = MagicMock()
-        with patch("src.engines.kasal.paths.flow.backend_flow.FlowBuilder.build_flow", new=AsyncMock(return_value=mock_dynamic_flow)):
+        with patch("src.services.flow_builder.backend_flow.FlowBuilder.build_flow", new=AsyncMock(return_value=mock_dynamic_flow)):
             result = await bf.flow()
         assert result is mock_dynamic_flow
 

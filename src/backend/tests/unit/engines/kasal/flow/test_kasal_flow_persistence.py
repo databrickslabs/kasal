@@ -15,8 +15,8 @@ import json
 import pytest
 from pydantic import BaseModel
 
-import src.engines.kasal.paths.flow.kasal_flow_persistence as mod
-from src.engines.kasal.paths.flow.kasal_flow_persistence import KasalFlowPersistence
+import src.services.flow_builder.kasal_flow_persistence as mod
+from src.services.flow_builder.kasal_flow_persistence import KasalFlowPersistence
 
 
 @pytest.fixture

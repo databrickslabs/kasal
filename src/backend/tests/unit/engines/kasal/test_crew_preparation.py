@@ -3,7 +3,7 @@ import unittest.mock
 from unittest.mock import AsyncMock, MagicMock, patch, call
 from typing import Dict, Any, List
 
-from src.engines.kasal.paths.crew.crew_preparation import (
+from src.services.agent_builder.crew_preparation import (
     CrewPreparation, 
     validate_crew_config, 
     handle_crew_error,
@@ -101,7 +101,7 @@ class TestCrewPreparation:
     @pytest.mark.asyncio
     async def test_prepare_success(self, crew_preparation):
         """Test successful crew preparation."""
-        with patch('src.engines.kasal.paths.crew.crew_preparation.validate_crew_config', return_value=True), \
+        with patch('src.services.agent_builder.crew_preparation.validate_crew_config', return_value=True), \
              patch.object(crew_preparation, '_create_agents', return_value=True), \
              patch.object(crew_preparation, '_create_tasks', return_value=True), \
              patch.object(crew_preparation, '_create_crew', return_value=True):
@@ -112,14 +112,14 @@ class TestCrewPreparation:
     @pytest.mark.asyncio
     async def test_prepare_invalid_config(self, crew_preparation):
         """Test preparation with invalid configuration."""
-        with patch('src.engines.kasal.paths.crew.crew_preparation.validate_crew_config', return_value=False):
+        with patch('src.services.agent_builder.crew_preparation.validate_crew_config', return_value=False):
             result = await crew_preparation.prepare()
             assert result is False
     
     @pytest.mark.asyncio
     async def test_prepare_agent_creation_failure(self, crew_preparation):
         """Test preparation when agent creation fails."""
-        with patch('src.engines.kasal.paths.crew.crew_preparation.validate_crew_config', return_value=True), \
+        with patch('src.services.agent_builder.crew_preparation.validate_crew_config', return_value=True), \
              patch.object(crew_preparation, '_create_agents', return_value=False):
             
             result = await crew_preparation.prepare()
@@ -128,7 +128,7 @@ class TestCrewPreparation:
     @pytest.mark.asyncio
     async def test_prepare_task_creation_failure(self, crew_preparation):
         """Test preparation when task creation fails."""
-        with patch('src.engines.kasal.paths.crew.crew_preparation.validate_crew_config', return_value=True), \
+        with patch('src.services.agent_builder.crew_preparation.validate_crew_config', return_value=True), \
              patch.object(crew_preparation, '_create_agents', return_value=True), \
              patch.object(crew_preparation, '_create_tasks', return_value=False):
             
@@ -138,7 +138,7 @@ class TestCrewPreparation:
     @pytest.mark.asyncio
     async def test_prepare_crew_creation_failure(self, crew_preparation):
         """Test preparation when crew creation fails."""
-        with patch('src.engines.kasal.paths.crew.crew_preparation.validate_crew_config', return_value=True), \
+        with patch('src.services.agent_builder.crew_preparation.validate_crew_config', return_value=True), \
              patch.object(crew_preparation, '_create_agents', return_value=True), \
              patch.object(crew_preparation, '_create_tasks', return_value=True), \
              patch.object(crew_preparation, '_create_crew', return_value=False):
@@ -149,8 +149,8 @@ class TestCrewPreparation:
     @pytest.mark.asyncio
     async def test_prepare_exception_handling(self, crew_preparation):
         """Test preparation handles exceptions properly."""
-        with patch('src.engines.kasal.paths.crew.crew_preparation.validate_crew_config', side_effect=Exception("Test error")), \
-             patch('src.engines.kasal.paths.crew.crew_preparation.handle_crew_error') as mock_handle_error:
+        with patch('src.services.agent_builder.crew_preparation.validate_crew_config', side_effect=Exception("Test error")), \
+             patch('src.services.agent_builder.crew_preparation.handle_crew_error') as mock_handle_error:
             
             result = await crew_preparation.prepare()
             assert result is False
@@ -162,7 +162,7 @@ class TestCrewPreparation:
         mock_agent1 = MagicMock()
         mock_agent2 = MagicMock()
         
-        with patch('src.engines.kasal.paths.crew.crew_preparation.create_agent', side_effect=[mock_agent1, mock_agent2]) as mock_create:
+        with patch('src.services.agent_builder.crew_preparation.create_agent', side_effect=[mock_agent1, mock_agent2]) as mock_create:
             result = await crew_preparation._create_agents()
             
             assert result is True
@@ -192,7 +192,7 @@ class TestCrewPreparation:
         mock_agent1 = MagicMock()
         mock_agent2 = MagicMock()
         
-        with patch('src.engines.kasal.paths.crew.crew_preparation.create_agent', side_effect=[mock_agent1, mock_agent2]):
+        with patch('src.services.agent_builder.crew_preparation.create_agent', side_effect=[mock_agent1, mock_agent2]):
             result = await crew_preparation._create_agents()
             
             assert result is True
@@ -202,15 +202,15 @@ class TestCrewPreparation:
     @pytest.mark.asyncio
     async def test_create_agents_creation_failure(self, crew_preparation):
         """Test agent creation when create_agent returns None."""
-        with patch('src.engines.kasal.paths.crew.crew_preparation.create_agent', return_value=None):
+        with patch('src.services.agent_builder.crew_preparation.create_agent', return_value=None):
             result = await crew_preparation._create_agents()
             assert result is False
     
     @pytest.mark.asyncio
     async def test_create_agents_exception_handling(self, crew_preparation):
         """Test agent creation handles exceptions."""
-        with patch('src.engines.kasal.paths.crew.crew_preparation.create_agent', side_effect=Exception("Test error")), \
-             patch('src.engines.kasal.paths.crew.crew_preparation.handle_crew_error') as mock_handle_error:
+        with patch('src.services.agent_builder.crew_preparation.create_agent', side_effect=Exception("Test error")), \
+             patch('src.services.agent_builder.crew_preparation.handle_crew_error') as mock_handle_error:
 
             result = await crew_preparation._create_agents()
             assert result is False
@@ -225,7 +225,7 @@ class TestCrewPreparation:
         crew_preparation.config["crew"]["reasoning_config"] = {
             "reasoning_effort": "low", "max_steps": 3, "max_replans": 0,
         }
-        with patch('src.engines.kasal.paths.crew.crew_preparation.create_agent',
+        with patch('src.services.agent_builder.crew_preparation.create_agent',
                    side_effect=[MagicMock(), MagicMock()]) as mock_create:
             result = await crew_preparation._create_agents()
 
@@ -241,7 +241,7 @@ class TestCrewPreparation:
     async def test_no_reasoning_config_when_crew_has_none(self, crew_preparation):
         """Without a crew-level reasoning_config, none is injected onto agents."""
         crew_preparation.config["crew"]["reasoning"] = False
-        with patch('src.engines.kasal.paths.crew.crew_preparation.create_agent',
+        with patch('src.services.agent_builder.crew_preparation.create_agent',
                    side_effect=[MagicMock(), MagicMock()]) as mock_create:
             await crew_preparation._create_agents()
             for ck in (c.kwargs for c in mock_create.call_args_list):
@@ -258,7 +258,7 @@ class TestCrewPreparation:
         mock_task2 = MagicMock()
         mock_task2.async_execution = True  # Match config (write_task has async=True)
 
-        with patch('src.engines.kasal.paths.crew.task_adapter.create_task', side_effect=[mock_task1, mock_task2]):
+        with patch('src.services.agent_builder.task_adapter.create_task', side_effect=[mock_task1, mock_task2]):
             result = await crew_preparation._create_tasks()
 
             # Only 1 async task, so no completion task added
@@ -279,7 +279,7 @@ class TestCrewPreparation:
         mock_task2.async_execution = True  # Match config (write_task has async=True)
         mock_task2.context = None  # Initialize context
 
-        with patch('src.engines.kasal.paths.crew.task_adapter.create_task', side_effect=[mock_task1, mock_task2]):
+        with patch('src.services.agent_builder.task_adapter.create_task', side_effect=[mock_task1, mock_task2]):
             result = await crew_preparation._create_tasks()
 
             assert result is True
@@ -306,7 +306,7 @@ class TestCrewPreparation:
         
         mock_task = MagicMock()
         
-        with patch('src.engines.kasal.paths.crew.task_adapter.create_task', return_value=mock_task):
+        with patch('src.services.agent_builder.task_adapter.create_task', return_value=mock_task):
             result = await crew_preparation._create_tasks()
             assert result is True
     
@@ -366,7 +366,7 @@ class TestCrewPreparation:
         mock_task2.description = "Second task"
         mock_task2.agent = MagicMock()
 
-        with patch('src.engines.kasal.paths.crew.task_adapter.create_task', side_effect=[mock_task1, mock_task2]) as mock_create:
+        with patch('src.services.agent_builder.task_adapter.create_task', side_effect=[mock_task1, mock_task2]) as mock_create:
             # Patch crewai.Task since the code does 'from crewai import Task as CrewAITask'
             with patch('kasal_engine.core.Task') as mock_task_class:
                 mock_completion_task = MagicMock()
@@ -396,8 +396,8 @@ class TestCrewPreparation:
         """Test task creation handles exceptions."""
         crew_preparation.agents = {"researcher": MagicMock()}
         
-        with patch('src.engines.kasal.paths.crew.crew_preparation.create_task', side_effect=Exception("Test error")), \
-             patch('src.engines.kasal.paths.crew.crew_preparation.handle_crew_error') as mock_handle_error:
+        with patch('src.services.agent_builder.crew_preparation.create_task', side_effect=Exception("Test error")), \
+             patch('src.services.agent_builder.crew_preparation.handle_crew_error') as mock_handle_error:
             
             result = await crew_preparation._create_tasks()
             assert result is False
@@ -433,7 +433,7 @@ class TestCrewPreparation:
         mock_task2.async_execution = False  # Explicitly set to avoid MagicMock truthy behavior
         mock_task2.context = None
 
-        with patch('src.engines.kasal.paths.crew.task_adapter.create_task', side_effect=[mock_task1, mock_task2]):
+        with patch('src.services.agent_builder.task_adapter.create_task', side_effect=[mock_task1, mock_task2]):
             result = await crew_preparation._create_tasks()
 
             assert result is True
@@ -469,7 +469,7 @@ class TestCrewPreparation:
         mock_task2.async_execution = False  # Explicitly set to avoid MagicMock truthy behavior
         mock_task2.context = None
 
-        with patch('src.engines.kasal.paths.crew.task_adapter.create_task', side_effect=[mock_task1, mock_task2]):
+        with patch('src.services.agent_builder.task_adapter.create_task', side_effect=[mock_task1, mock_task2]):
             result = await crew_preparation._create_tasks()
 
             assert result is True
@@ -505,7 +505,7 @@ class TestCrewPreparation:
         mock_task2.async_execution = False
         mock_task2.context = None
 
-        with patch('src.engines.kasal.paths.crew.task_adapter.create_task', side_effect=[mock_task1, mock_task2]):
+        with patch('src.services.agent_builder.task_adapter.create_task', side_effect=[mock_task1, mock_task2]):
             result = await crew_preparation._create_tasks()
 
             assert result is True
@@ -539,8 +539,8 @@ class TestCrewPreparation:
         mock_task2 = MagicMock()
         mock_task2.async_execution = False
 
-        with patch('src.engines.kasal.paths.crew.task_adapter.create_task', side_effect=[mock_task1, mock_task2]), \
-             patch('src.engines.kasal.paths.crew.crew_preparation.logger') as mock_logger:
+        with patch('src.services.agent_builder.task_adapter.create_task', side_effect=[mock_task1, mock_task2]), \
+             patch('src.services.agent_builder.crew_preparation.logger') as mock_logger:
 
             result = await crew_preparation._create_tasks()
 
@@ -597,8 +597,8 @@ class TestCrewPreparation:
         mock_task3.async_execution = False
         mock_task3.context = None
 
-        with patch('src.engines.kasal.paths.crew.task_adapter.create_task', side_effect=[mock_task1, mock_task2, mock_task3]), \
-             patch('src.engines.kasal.paths.crew.crew_preparation.logger') as mock_logger:
+        with patch('src.services.agent_builder.task_adapter.create_task', side_effect=[mock_task1, mock_task2, mock_task3]), \
+             patch('src.services.agent_builder.crew_preparation.logger') as mock_logger:
 
             result = await crew_preparation._create_tasks()
 
@@ -639,8 +639,8 @@ class TestCrewPreparation:
         mock_task2 = MagicMock()
         mock_task2.async_execution = False  # Explicitly set to avoid MagicMock truthy behavior
 
-        with patch('src.engines.kasal.paths.crew.task_adapter.create_task', side_effect=[mock_task1, mock_task2]), \
-             patch('src.engines.kasal.paths.crew.crew_preparation.logger') as mock_logger:
+        with patch('src.services.agent_builder.task_adapter.create_task', side_effect=[mock_task1, mock_task2]), \
+             patch('src.services.agent_builder.crew_preparation.logger') as mock_logger:
 
             result = await crew_preparation._create_tasks()
 
@@ -657,7 +657,7 @@ class TestCrewPreparation:
 
         mock_crew = MagicMock()
 
-        with patch('src.engines.kasal.paths.crew.crew_preparation.Crew', return_value=mock_crew), \
+        with patch('src.services.agent_builder.crew_preparation.Crew', return_value=mock_crew), \
              patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
 
             result = await crew_preparation._create_crew()
@@ -674,7 +674,7 @@ class TestCrewPreparation:
         mock_crew = MagicMock()
         mock_llm = MagicMock()
 
-        with patch('src.engines.kasal.paths.crew.crew_preparation.Crew', return_value=mock_crew), \
+        with patch('src.services.agent_builder.crew_preparation.Crew', return_value=mock_crew), \
              patch('src.core.llm_manager.LLMManager.get_llm', return_value=mock_llm), \
              patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None), \
              patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
@@ -698,7 +698,7 @@ class TestCrewPreparation:
         mock_crew = MagicMock()
         mock_manager_llm = MagicMock()
 
-        with patch('src.engines.kasal.paths.crew.crew_preparation.Crew', return_value=mock_crew) as mock_crew_class, \
+        with patch('src.services.agent_builder.crew_preparation.Crew', return_value=mock_crew) as mock_crew_class, \
              patch('src.core.llm_manager.LLMManager.configure_kasal_llm') as mock_configure_llm, \
              patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None), \
              patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
@@ -728,7 +728,7 @@ class TestCrewPreparation:
 
         mock_crew = MagicMock()
 
-        with patch('src.engines.kasal.paths.crew.crew_preparation.Crew', return_value=mock_crew) as mock_crew_class, \
+        with patch('src.services.agent_builder.crew_preparation.Crew', return_value=mock_crew) as mock_crew_class, \
              patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
 
             result = await crew_preparation._create_crew()
@@ -743,8 +743,8 @@ class TestCrewPreparation:
         crew_preparation.agents = {"agent1": MagicMock()}
         crew_preparation.tasks = [MagicMock()]
 
-        with patch('src.engines.kasal.paths.crew.crew_preparation.Crew', side_effect=Exception("Test error")), \
-             patch('src.engines.kasal.paths.crew.crew_preparation.handle_crew_error') as mock_handle_error, \
+        with patch('src.services.agent_builder.crew_preparation.Crew', side_effect=Exception("Test error")), \
+             patch('src.services.agent_builder.crew_preparation.handle_crew_error') as mock_handle_error, \
              patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
 
             result = await crew_preparation._create_crew()
@@ -760,9 +760,9 @@ class TestCrewPreparation:
 
         mock_crew = MagicMock()
 
-        with patch('src.engines.kasal.paths.crew.crew_preparation.Crew', return_value=mock_crew), \
+        with patch('src.services.agent_builder.crew_preparation.Crew', return_value=mock_crew), \
              patch('src.core.llm_manager.LLMManager.get_llm', side_effect=ImportError("Module not found")), \
-             patch('src.engines.kasal.paths.crew.crew_preparation.logger') as mock_logger, \
+             patch('src.services.agent_builder.crew_preparation.logger') as mock_logger, \
              patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
 
             result = await crew_preparation._create_crew()
@@ -778,9 +778,9 @@ class TestCrewPreparation:
 
         mock_crew = MagicMock()
 
-        with patch('src.engines.kasal.paths.crew.crew_preparation.Crew', return_value=mock_crew), \
+        with patch('src.services.agent_builder.crew_preparation.Crew', return_value=mock_crew), \
              patch('src.core.llm_manager.LLMManager.get_llm', side_effect=Exception("LLM error")), \
-             patch('src.engines.kasal.paths.crew.crew_preparation.logger') as mock_logger, \
+             patch('src.services.agent_builder.crew_preparation.logger') as mock_logger, \
              patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
 
             result = await crew_preparation._create_crew()
@@ -797,10 +797,10 @@ class TestCrewPreparation:
         mock_crew = MagicMock()
         mock_fallback_llm = MagicMock()
         
-        with patch('src.engines.kasal.paths.crew.crew_preparation.Crew', return_value=mock_crew), \
+        with patch('src.services.agent_builder.crew_preparation.Crew', return_value=mock_crew), \
              patch('src.core.llm_manager.LLMManager.get_llm', side_effect=[Exception("LLM error"), mock_fallback_llm]), \
              patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None), \
-             patch('src.engines.kasal.paths.crew.crew_preparation.logger') as mock_logger, \
+             patch('src.services.agent_builder.crew_preparation.logger') as mock_logger, \
              patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
 
             result = await crew_preparation._create_crew()
@@ -818,7 +818,7 @@ class TestCrewPreparation:
         mock_crew = MagicMock()
         mock_default_llm = MagicMock()
         
-        with patch('src.engines.kasal.paths.crew.crew_preparation.Crew', return_value=mock_crew), \
+        with patch('src.services.agent_builder.crew_preparation.Crew', return_value=mock_crew), \
              patch('src.core.llm_manager.LLMManager.get_llm', return_value=mock_default_llm), \
              patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None), \
              patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
@@ -837,7 +837,7 @@ class TestCrewPreparation:
 
         mock_crew = MagicMock()
 
-        with patch('src.engines.kasal.paths.crew.crew_preparation.Crew', return_value=mock_crew), \
+        with patch('src.services.agent_builder.crew_preparation.Crew', return_value=mock_crew), \
              patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None), \
              patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
 
@@ -858,9 +858,9 @@ class TestCrewPreparation:
         
         mock_crew = MagicMock()
         
-        with patch('src.engines.kasal.paths.crew.crew_preparation.Crew', return_value=mock_crew), \
+        with patch('src.services.agent_builder.crew_preparation.Crew', return_value=mock_crew), \
              patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value="test-key"), \
-             patch('src.engines.kasal.paths.crew.crew_preparation.logger') as mock_logger, \
+             patch('src.services.agent_builder.crew_preparation.logger') as mock_logger, \
              patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
 
             result = await crew_preparation._create_crew()
@@ -875,10 +875,10 @@ class TestCrewPreparation:
         
         mock_crew = MagicMock()
         
-        with patch('src.engines.kasal.paths.crew.crew_preparation.Crew', return_value=mock_crew), \
+        with patch('src.services.agent_builder.crew_preparation.Crew', return_value=mock_crew), \
              patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value="test-openai-key"), \
              patch.dict('os.environ', {}, clear=True), \
-             patch('src.engines.kasal.paths.crew.crew_preparation.logger') as mock_logger, \
+             patch('src.services.agent_builder.crew_preparation.logger') as mock_logger, \
              patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
 
             result = await crew_preparation._create_crew()
@@ -894,10 +894,10 @@ class TestCrewPreparation:
         
         mock_crew = MagicMock()
         
-        with patch('src.engines.kasal.paths.crew.crew_preparation.Crew', return_value=mock_crew), \
+        with patch('src.services.agent_builder.crew_preparation.Crew', return_value=mock_crew), \
              patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None), \
              patch.dict('os.environ', {}, clear=True), \
-             patch('src.engines.kasal.paths.crew.crew_preparation.logger') as mock_logger, \
+             patch('src.services.agent_builder.crew_preparation.logger') as mock_logger, \
              patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
 
             result = await crew_preparation._create_crew()
@@ -913,9 +913,9 @@ class TestCrewPreparation:
         
         mock_crew = MagicMock()
         
-        with patch('src.engines.kasal.paths.crew.crew_preparation.Crew', return_value=mock_crew), \
+        with patch('src.services.agent_builder.crew_preparation.Crew', return_value=mock_crew), \
              patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', side_effect=Exception("API error")), \
-             patch('src.engines.kasal.paths.crew.crew_preparation.logger') as mock_logger, \
+             patch('src.services.agent_builder.crew_preparation.logger') as mock_logger, \
              patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
 
             result = await crew_preparation._create_crew()
@@ -932,8 +932,8 @@ class TestCrewPreparation:
 
         mock_processed_output = {"result": "processed"}
 
-        with patch('src.engines.kasal.paths.crew.crew_preparation.process_crew_output', return_value=mock_processed_output), \
-             patch('src.engines.kasal.paths.crew.crew_preparation.is_data_missing', return_value=False):
+        with patch('src.services.agent_builder.crew_preparation.process_crew_output', return_value=mock_processed_output), \
+             patch('src.services.agent_builder.crew_preparation.is_data_missing', return_value=False):
 
             result = await crew_preparation.execute()
 
@@ -957,9 +957,9 @@ class TestCrewPreparation:
 
         mock_processed_output = {"result": "processed"}
 
-        with patch('src.engines.kasal.paths.crew.crew_preparation.process_crew_output', return_value=mock_processed_output), \
-             patch('src.engines.kasal.paths.crew.crew_preparation.is_data_missing', return_value=True), \
-             patch('src.engines.kasal.paths.crew.crew_preparation.logger') as mock_logger:
+        with patch('src.services.agent_builder.crew_preparation.process_crew_output', return_value=mock_processed_output), \
+             patch('src.services.agent_builder.crew_preparation.is_data_missing', return_value=True), \
+             patch('src.services.agent_builder.crew_preparation.logger') as mock_logger:
 
             result = await crew_preparation.execute()
 
@@ -974,7 +974,7 @@ class TestCrewPreparation:
         mock_crew.kickoff_async = AsyncMock(side_effect=Exception("Execution error"))
         crew_preparation.crew = mock_crew
 
-        with patch('src.engines.kasal.paths.crew.crew_preparation.handle_crew_error') as mock_handle_error:
+        with patch('src.services.agent_builder.crew_preparation.handle_crew_error') as mock_handle_error:
             result = await crew_preparation.execute()
 
             assert result == {"error": "Execution error"}
@@ -992,7 +992,7 @@ class TestCrewPreparation:
 
         mock_crew = MagicMock()
 
-        with patch('src.engines.kasal.paths.crew.crew_preparation.Crew', return_value=mock_crew) as mock_crew_class, \
+        with patch('src.services.agent_builder.crew_preparation.Crew', return_value=mock_crew) as mock_crew_class, \
              patch('src.core.llm_manager.LLMManager.get_llm', side_effect=Exception("Model not found")) as mock_get_llm, \
              patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None), \
              patch('src.repositories.databricks_config_repository.DatabricksConfigRepository') as mock_databricks_repo, \
@@ -1028,7 +1028,7 @@ class TestCrewPreparation:
 
         mock_crew = MagicMock()
 
-        with patch('src.engines.kasal.paths.crew.crew_preparation.Crew', return_value=mock_crew) as mock_crew_class, \
+        with patch('src.services.agent_builder.crew_preparation.Crew', return_value=mock_crew) as mock_crew_class, \
              patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None), \
              patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
 
@@ -1056,7 +1056,7 @@ class TestCrewPreparation:
         mock_agent1 = MagicMock()
         mock_agent2 = MagicMock()
 
-        with patch('src.engines.kasal.paths.crew.crew_preparation.create_agent', side_effect=[mock_agent1, mock_agent2]) as mock_create:
+        with patch('src.services.agent_builder.crew_preparation.create_agent', side_effect=[mock_agent1, mock_agent2]) as mock_create:
             result = await crew_preparation._create_agents()
 
             assert result is True
@@ -1089,7 +1089,7 @@ class TestCrewPreparation:
             # Second call (minimal_kwargs) succeeds
             return mock_crew
 
-        with patch('src.engines.kasal.paths.crew.crew_preparation.Crew', side_effect=crew_side_effect) as mock_crew_class, \
+        with patch('src.services.agent_builder.crew_preparation.Crew', side_effect=crew_side_effect) as mock_crew_class, \
              patch('src.services.execution.config.manager_config_builder.LLMManager.configure_kasal_llm',
                    return_value=mock_manager_llm), \
              patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None), \
@@ -1139,7 +1139,7 @@ class TestCrewPreparation:
         async def mock_create_agent_func(**kwargs):
             return mock_manager_agent
 
-        with patch('src.engines.kasal.paths.crew.crew_preparation.Crew', side_effect=crew_side_effect) as mock_crew_class, \
+        with patch('src.services.agent_builder.crew_preparation.Crew', side_effect=crew_side_effect) as mock_crew_class, \
              patch('src.services.execution.config.manager_config_builder.create_agent', side_effect=mock_create_agent_func), \
              patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None), \
              patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
@@ -1221,7 +1221,7 @@ class TestCreateAgentsMCPRequirements:
                 return_value=kasal_uuid,
             ),
             patch(
-                "src.engines.kasal.paths.crew.crew_preparation.create_agent",
+                "src.services.agent_builder.crew_preparation.create_agent",
                 new_callable=AsyncMock,
                 return_value=mock_agent,
             ),
@@ -1320,7 +1320,7 @@ class TestCrewPreparationHelperFunctions:
             "tasks": [{"name": "task1"}]
         }
         
-        with patch('src.engines.kasal.paths.crew.crew_preparation.logger'):
+        with patch('src.services.agent_builder.crew_preparation.logger'):
             result = validate_crew_config(config)
             assert result is True
     
@@ -1328,7 +1328,7 @@ class TestCrewPreparationHelperFunctions:
         """Test config validation with missing agents."""
         config = {"tasks": [{"name": "task1"}]}
         
-        with patch('src.engines.kasal.paths.crew.crew_preparation.logger') as mock_logger:
+        with patch('src.services.agent_builder.crew_preparation.logger') as mock_logger:
             result = validate_crew_config(config)
             assert result is False
             mock_logger.error.assert_called_with("Missing or empty required section: agents")
@@ -1337,7 +1337,7 @@ class TestCrewPreparationHelperFunctions:
         """Test config validation with missing tasks."""
         config = {"agents": [{"name": "agent1"}]}
         
-        with patch('src.engines.kasal.paths.crew.crew_preparation.logger') as mock_logger:
+        with patch('src.services.agent_builder.crew_preparation.logger') as mock_logger:
             result = validate_crew_config(config)
             assert result is False
             mock_logger.error.assert_called_with("Missing or empty required section: tasks")
@@ -1346,7 +1346,7 @@ class TestCrewPreparationHelperFunctions:
         """Test config validation with empty agents list."""
         config = {"agents": [], "tasks": [{"name": "task1"}]}
         
-        with patch('src.engines.kasal.paths.crew.crew_preparation.logger') as mock_logger:
+        with patch('src.services.agent_builder.crew_preparation.logger') as mock_logger:
             result = validate_crew_config(config)
             assert result is False
             mock_logger.error.assert_called_with("Missing or empty required section: agents")
@@ -1355,7 +1355,7 @@ class TestCrewPreparationHelperFunctions:
         """Test config validation with empty tasks list."""
         config = {"agents": [{"name": "agent1"}], "tasks": []}
         
-        with patch('src.engines.kasal.paths.crew.crew_preparation.logger') as mock_logger:
+        with patch('src.services.agent_builder.crew_preparation.logger') as mock_logger:
             result = validate_crew_config(config)
             assert result is False
             mock_logger.error.assert_called_with("Missing or empty required section: tasks")
@@ -1365,7 +1365,7 @@ class TestCrewPreparationHelperFunctions:
         test_exception = ValueError("Test error")
         test_message = "Test operation failed"
         
-        with patch('src.engines.kasal.paths.crew.crew_preparation.logger') as mock_logger:
+        with patch('src.services.agent_builder.crew_preparation.logger') as mock_logger:
             handle_crew_error(test_exception, test_message)
             
             mock_logger.error.assert_called_once_with(
@@ -1407,7 +1407,7 @@ class TestProcessCrewOutput:
         # Mock the entire process_crew_output function to test exception handling
         from unittest.mock import patch
         
-        with patch('src.engines.kasal.paths.crew.crew_preparation.logger') as mock_logger:
+        with patch('src.services.agent_builder.crew_preparation.logger') as mock_logger:
             # Test actual exception handling by calling with a mock that will cause an exception in str()
             class FailingObject:
                 def __str__(self):

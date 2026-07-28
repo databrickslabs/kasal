@@ -25,9 +25,9 @@ from kasal_engine.flow import Flow as CrewAIFlow
 from src.core.llm_manager import LLMManager
 
 # Import the refactored modules
-from src.engines.kasal.paths.flow.modules.flow_builder import FlowBuilder
+from src.services.flow_builder.modules.flow_builder import FlowBuilder
 from src.services.tools.tool_factory import ToolFactory
-from src.engines.kasal.paths.flow.exceptions import FlowPausedForApprovalException
+from src.services.flow_builder.exceptions import FlowPausedForApprovalException
 
 # Initialize logger manager - use flow logger for flow execution
 logger = LoggerManager.get_instance().flow

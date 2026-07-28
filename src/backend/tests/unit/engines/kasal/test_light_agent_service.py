@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.engines.kasal.paths.light_agent.light_agent_service import LightAgentService
+from src.services.chat.service import LightAgentService
 
 
 def _config(session_id="sess-1", workspace_scope=True, model="m"):
@@ -463,7 +463,7 @@ def test_no_match_when_nothing_identifies_the_run():
 # ---------------------------------------------------------------------------
 # _RunTraceWriter — per-run batched trace persistence (perf W1.3)
 # ---------------------------------------------------------------------------
-from src.engines.kasal.paths.light_agent.light_agent_service import _RunTraceWriter
+from src.services.chat.service import _RunTraceWriter
 
 
 def _fake_isolated_session(opens: list):

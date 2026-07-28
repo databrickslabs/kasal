@@ -12,7 +12,7 @@ import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock, AsyncMock, patch, Mock
 
-from src.engines.kasal.paths.flow.modules.task_adapter import TaskConfig, _resolve_tool_override
+from src.services.flow_builder.modules.task_adapter import TaskConfig, _resolve_tool_override
 
 
 # ---------------------------------------------------------------------------
@@ -536,7 +536,7 @@ class TestResolveAgentForTask:
         agent_repo = MagicMock()
         agent_repo.get = AsyncMock(return_value=agent_data)
 
-        with patch("src.engines.kasal.paths.flow.modules.agent_adapter.AgentConfig.configure_agent_and_tools",
+        with patch("src.services.flow_builder.modules.agent_adapter.AgentConfig.configure_agent_and_tools",
                    new=AsyncMock(return_value=mock_agent)):
             result = await TaskConfig._resolve_agent_for_task(
                 task_data, None, {"agent": agent_repo}
@@ -554,7 +554,7 @@ class TestResolveAgentForTask:
         agent_repo.get = AsyncMock(return_value=None)
 
         with patch("src.db.session.request_scoped_session") as MockSession, \
-             patch("src.engines.kasal.paths.flow.modules.agent_adapter.AgentConfig.configure_agent_and_tools",
+             patch("src.services.flow_builder.modules.agent_adapter.AgentConfig.configure_agent_and_tools",
                    new=AsyncMock(return_value=mock_agent)):
             mock_session_ctx = MagicMock()
             mock_session = AsyncMock()
@@ -580,7 +580,7 @@ class TestResolveAgentForTask:
         agent_repo = MagicMock()
         agent_repo.get = AsyncMock(return_value=agent_data)
 
-        with patch("src.engines.kasal.paths.flow.modules.agent_adapter.AgentConfig.configure_agent_and_tools",
+        with patch("src.services.flow_builder.modules.agent_adapter.AgentConfig.configure_agent_and_tools",
                    new=AsyncMock(return_value=None)):
             result = await TaskConfig._resolve_agent_for_task(
                 task_data, None, {"agent": agent_repo}

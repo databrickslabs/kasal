@@ -12,8 +12,8 @@ import os
 from datetime import datetime
 from kasal_engine.core import Agent, Crew, Task, Process
 from src.core.logger import LoggerManager
-from src.engines.kasal.paths.crew.task_adapter import create_task, is_data_missing
-from src.engines.kasal.paths.crew.agent_adapter import create_agent
+from src.services.agent_builder.task_adapter import create_task, is_data_missing
+from src.services.agent_builder.agent_adapter import create_agent
 from src.schemas.memory_backend import MemoryBackendConfig, MemoryBackendType
 from src.services.memory.backend_factory import MemoryBackendFactory
 from src.utils.databricks_url_utils import DatabricksURLUtils
@@ -462,7 +462,7 @@ class CrewPreparation:
             bool: True if all tasks were created successfully
         """
         try:
-            from src.engines.kasal.paths.crew.task_adapter import create_task
+            from src.services.agent_builder.task_adapter import create_task
 
             tasks = self.config.get("tasks", [])
             # Predefined UI Configurator surfaces are now composed POST-execution by

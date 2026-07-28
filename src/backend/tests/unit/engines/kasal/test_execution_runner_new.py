@@ -7,7 +7,7 @@ import asyncio
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch, call
 
-from src.engines.kasal.paths.crew.execution_runner import (
+from src.services.agent_builder.execution_runner import (
     run_crew_in_process,
     update_execution_status_with_retry,
 )
@@ -99,9 +99,9 @@ class TestRunCrewInProcess:
         group_ctx = _make_group_context()
 
         with patch("src.services.execution_status_service.ExecutionStatusService") as mock_svc, \
-             patch("src.engines.kasal.paths.crew.execution_runner.process_crew_executor") as mock_pce, \
+             patch("src.services.agent_builder.execution_runner.process_crew_executor") as mock_pce, \
              patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss, \
-             patch("src.engines.kasal.paths.crew.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock) as mock_update:
+             patch("src.services.agent_builder.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock) as mock_update:
 
             mock_svc.update_status = AsyncMock()
             mock_pce.run_crew_isolated = AsyncMock(return_value={
@@ -132,10 +132,10 @@ class TestRunCrewInProcess:
             return True
 
         with patch("src.services.execution_status_service.ExecutionStatusService") as mock_svc, \
-             patch("src.engines.kasal.paths.crew.execution_runner.process_crew_executor") as mock_pce, \
+             patch("src.services.agent_builder.execution_runner.process_crew_executor") as mock_pce, \
              patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss, \
              patch("src.services.workflow_recipe_mining.schedule_mining_after_run") as mock_mine, \
-             patch("src.engines.kasal.paths.crew.execution_runner.update_execution_status_with_retry",
+             patch("src.services.agent_builder.execution_runner.update_execution_status_with_retry",
                    side_effect=_update):
 
             mock_svc.update_status = AsyncMock()
@@ -159,10 +159,10 @@ class TestRunCrewInProcess:
     async def test_a_failed_run_is_not_mined(self):
         """Only COMPLETED crews are reusable; mining a failure would offer it."""
         with patch("src.services.execution_status_service.ExecutionStatusService") as mock_svc, \
-             patch("src.engines.kasal.paths.crew.execution_runner.process_crew_executor") as mock_pce, \
+             patch("src.services.agent_builder.execution_runner.process_crew_executor") as mock_pce, \
              patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss, \
              patch("src.services.workflow_recipe_mining.schedule_mining_after_run") as mock_mine, \
-             patch("src.engines.kasal.paths.crew.execution_runner.update_execution_status_with_retry",
+             patch("src.services.agent_builder.execution_runner.update_execution_status_with_retry",
                    new_callable=AsyncMock) as mock_update:
 
             mock_svc.update_status = AsyncMock()
@@ -187,9 +187,9 @@ class TestRunCrewInProcess:
         config = {"group_id": "g1"}
 
         with patch("src.services.execution_status_service.ExecutionStatusService") as mock_svc, \
-             patch("src.engines.kasal.paths.crew.execution_runner.process_crew_executor") as mock_pce, \
+             patch("src.services.agent_builder.execution_runner.process_crew_executor") as mock_pce, \
              patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss, \
-             patch("src.engines.kasal.paths.crew.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock) as mock_update:
+             patch("src.services.agent_builder.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock) as mock_update:
 
             mock_svc.update_status = AsyncMock()
             mock_pce.run_crew_isolated = AsyncMock(return_value={
@@ -212,9 +212,9 @@ class TestRunCrewInProcess:
         config = {"group_id": "g1"}
 
         with patch("src.services.execution_status_service.ExecutionStatusService") as mock_svc, \
-             patch("src.engines.kasal.paths.crew.execution_runner.process_crew_executor") as mock_pce, \
+             patch("src.services.agent_builder.execution_runner.process_crew_executor") as mock_pce, \
              patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss, \
-             patch("src.engines.kasal.paths.crew.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock) as mock_update:
+             patch("src.services.agent_builder.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock) as mock_update:
 
             mock_svc.update_status = AsyncMock()
             mock_pce.run_crew_isolated = AsyncMock(return_value={
@@ -238,9 +238,9 @@ class TestRunCrewInProcess:
         config = {"group_id": "g1"}
 
         with patch("src.services.execution_status_service.ExecutionStatusService") as mock_svc, \
-             patch("src.engines.kasal.paths.crew.execution_runner.process_crew_executor") as mock_pce, \
+             patch("src.services.agent_builder.execution_runner.process_crew_executor") as mock_pce, \
              patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss, \
-             patch("src.engines.kasal.paths.crew.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock) as mock_update:
+             patch("src.services.agent_builder.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock) as mock_update:
 
             mock_svc.update_status = AsyncMock()
             mock_pce.run_crew_isolated = AsyncMock(return_value={
@@ -264,9 +264,9 @@ class TestRunCrewInProcess:
         config = {"group_id": "g1"}
 
         with patch("src.services.execution_status_service.ExecutionStatusService") as mock_svc, \
-             patch("src.engines.kasal.paths.crew.execution_runner.process_crew_executor") as mock_pce, \
+             patch("src.services.agent_builder.execution_runner.process_crew_executor") as mock_pce, \
              patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss, \
-             patch("src.engines.kasal.paths.crew.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock) as mock_update:
+             patch("src.services.agent_builder.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock) as mock_update:
 
             mock_svc.update_status = AsyncMock()
             # Return non-dict result
@@ -288,9 +288,9 @@ class TestRunCrewInProcess:
         config = {"group_id": "g1"}
 
         with patch("src.services.execution_status_service.ExecutionStatusService") as mock_svc, \
-             patch("src.engines.kasal.paths.crew.execution_runner.process_crew_executor") as mock_pce, \
+             patch("src.services.agent_builder.execution_runner.process_crew_executor") as mock_pce, \
              patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss, \
-             patch("src.engines.kasal.paths.crew.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock) as mock_update:
+             patch("src.services.agent_builder.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock) as mock_update:
 
             mock_svc.update_status = AsyncMock()
             mock_pce.run_crew_isolated = AsyncMock(side_effect=asyncio.CancelledError())
@@ -315,9 +315,9 @@ class TestRunCrewInProcess:
         # conflicts with the module-level traceback import in some code paths.
         # We test the cancelled path instead which exercises the same cleanup.
         with patch("src.services.execution_status_service.ExecutionStatusService") as mock_svc, \
-             patch("src.engines.kasal.paths.crew.execution_runner.process_crew_executor") as mock_pce, \
+             patch("src.services.agent_builder.execution_runner.process_crew_executor") as mock_pce, \
              patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss, \
-             patch("src.engines.kasal.paths.crew.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock) as mock_update:
+             patch("src.services.agent_builder.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock) as mock_update:
 
             mock_svc.update_status = AsyncMock()
             # Return a dict with FAILED status to exercise the failure path
@@ -343,9 +343,9 @@ class TestRunCrewInProcess:
         group_ctx = _make_group_context("grp-token")
 
         with patch("src.services.execution_status_service.ExecutionStatusService") as mock_svc, \
-             patch("src.engines.kasal.paths.crew.execution_runner.process_crew_executor") as mock_pce, \
+             patch("src.services.agent_builder.execution_runner.process_crew_executor") as mock_pce, \
              patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss, \
-             patch("src.engines.kasal.paths.crew.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock):
+             patch("src.services.agent_builder.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock):
 
             mock_svc.update_status = AsyncMock()
             mock_pce.run_crew_isolated = AsyncMock(return_value={"status": "COMPLETED", "result": "ok"})
@@ -367,9 +367,9 @@ class TestRunCrewInProcess:
         config = {"group_id": "g1"}
 
         with patch("src.services.execution_status_service.ExecutionStatusService") as mock_svc, \
-             patch("src.engines.kasal.paths.crew.execution_runner.process_crew_executor") as mock_pce, \
+             patch("src.services.agent_builder.execution_runner.process_crew_executor") as mock_pce, \
              patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss, \
-             patch("src.engines.kasal.paths.crew.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock):
+             patch("src.services.agent_builder.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock):
 
             mock_svc.update_status = AsyncMock()
             mock_pce.run_crew_isolated = AsyncMock(return_value={"status": "COMPLETED", "result": "ok"})
@@ -389,9 +389,9 @@ class TestRunCrewInProcess:
         config = {"group_id": "g1"}
 
         with patch("src.services.execution_status_service.ExecutionStatusService") as mock_svc, \
-             patch("src.engines.kasal.paths.crew.execution_runner.process_crew_executor") as mock_pce, \
+             patch("src.services.agent_builder.execution_runner.process_crew_executor") as mock_pce, \
              patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss, \
-             patch("src.engines.kasal.paths.crew.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock) as mock_update:
+             patch("src.services.agent_builder.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock) as mock_update:
 
             mock_svc.update_status = AsyncMock()
             mock_pce.run_crew_isolated = AsyncMock(return_value={
@@ -423,9 +423,9 @@ class TestRunCrewInProcess:
         }
 
         with patch("src.services.execution_status_service.ExecutionStatusService") as mock_svc, \
-             patch("src.engines.kasal.paths.crew.execution_runner.process_crew_executor") as mock_pce, \
+             patch("src.services.agent_builder.execution_runner.process_crew_executor") as mock_pce, \
              patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss, \
-             patch("src.engines.kasal.paths.crew.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock):
+             patch("src.services.agent_builder.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock):
 
             mock_svc.update_status = AsyncMock()
             mock_pce.run_crew_isolated = AsyncMock(return_value={"status": "COMPLETED", "result": "ok"})
@@ -448,9 +448,9 @@ class TestRunCrewInProcess:
         }
 
         with patch("src.services.execution_status_service.ExecutionStatusService") as mock_svc, \
-             patch("src.engines.kasal.paths.crew.execution_runner.process_crew_executor") as mock_pce, \
+             patch("src.services.agent_builder.execution_runner.process_crew_executor") as mock_pce, \
              patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss, \
-             patch("src.engines.kasal.paths.crew.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock) as mock_update:
+             patch("src.services.agent_builder.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock) as mock_update:
 
             mock_svc.update_status = AsyncMock()
             mock_pce.run_crew_isolated = AsyncMock(return_value={"status": "COMPLETED", "result": "ok"})

@@ -11,7 +11,7 @@ import uuid
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.engines.kasal.paths.flow.modules.flow_processors import FlowProcessorManager
+from src.services.flow_builder.modules.flow_processors import FlowProcessorManager
 
 
 @pytest.mark.asyncio
@@ -49,8 +49,8 @@ async def test_merges_mcp_from_crew_node_when_db_task_has_none():
         'agent': AsyncMock(get=AsyncMock(return_value=MagicMock(role="Researcher"))),
     }
 
-    with patch('src.engines.kasal.paths.flow.modules.agent_adapter.AgentConfig') as mock_agent_config, \
-         patch('src.engines.kasal.paths.flow.modules.task_adapter.TaskConfig') as mock_task_config:
+    with patch('src.services.flow_builder.modules.agent_adapter.AgentConfig') as mock_agent_config, \
+         patch('src.services.flow_builder.modules.task_adapter.TaskConfig') as mock_task_config:
         agent_obj = MagicMock(role="Researcher")
         mock_agent_config.configure_agent_and_tools = AsyncMock(return_value=agent_obj)
         mock_task_config.configure_task = AsyncMock(return_value=MagicMock(agent=agent_obj))
@@ -97,8 +97,8 @@ async def test_db_task_tool_configs_take_priority_over_node():
         'agent': AsyncMock(get=AsyncMock(return_value=MagicMock(role="Researcher"))),
     }
 
-    with patch('src.engines.kasal.paths.flow.modules.agent_adapter.AgentConfig') as mock_agent_config, \
-         patch('src.engines.kasal.paths.flow.modules.task_adapter.TaskConfig') as mock_task_config:
+    with patch('src.services.flow_builder.modules.agent_adapter.AgentConfig') as mock_agent_config, \
+         patch('src.services.flow_builder.modules.task_adapter.TaskConfig') as mock_task_config:
         agent_obj = MagicMock(role="Researcher")
         mock_agent_config.configure_agent_and_tools = AsyncMock(return_value=agent_obj)
         mock_task_config.configure_task = AsyncMock(return_value=MagicMock(agent=agent_obj))

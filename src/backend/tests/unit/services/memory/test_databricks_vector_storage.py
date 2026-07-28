@@ -14,37 +14,28 @@ os.environ["USE_NULLPOOL"] = "true"
 
 # Mock heavy third-party modules before any src imports
 _crewai_mock = MagicMock()
+# No sys.modules stubbing of kasal_engine.*: it is a real vendored package in
+# this repo (the stubs date from when crewai was an absent third-party dep).
+# Stubbing it shadows working code, and any src.* module imported inside the
+# stub window gets cached holding MagicMocks — which breaks unrelated suites
+# that share the xdist worker.
 _MODULES_TO_MOCK = {
     "crewai": _crewai_mock,
-    "kasal_engine.tools": _crewai_mock.tools,
-    "kasal_engine.events": _crewai_mock.events,
     "crewai.flow": _crewai_mock.flow,
-    "kasal_engine.flow": _crewai_mock.flow.flow,
-    "kasal_engine.flow": _crewai_mock.flow.persistence,
-    "kasal_engine.llm": _crewai_mock.llm,
-    "kasal_engine.memory": _crewai_mock.memory,
     "crewai.memory.storage": _crewai_mock.memory.storage,
     "crewai.memory.storage.rag_storage": _crewai_mock.memory.storage.rag_storage,
     "crewai.project": _crewai_mock.project,
     "crewai.tasks": _crewai_mock.tasks,
-    "kasal_engine.core": _crewai_mock.tasks.llm_guardrail,
-    "kasal_engine.core": _crewai_mock.tasks.task_output,
     "crewai.utilities": _crewai_mock.utilities,
     "crewai.utilities.converter": _crewai_mock.utilities.converter,
     "crewai.utilities.evaluators": _crewai_mock.utilities.evaluators,
     "crewai.utilities.evaluators.task_evaluator": _crewai_mock.utilities.evaluators.task_evaluator,
     "crewai.utilities.exceptions": _crewai_mock.utilities.exceptions,
-    "kasal_engine.llm": _crewai_mock.utilities.internal_instructor,
-    "kasal_engine.utils": _crewai_mock.utilities.paths,
-    "kasal_engine.utils": _crewai_mock.utilities.printer,
     "crewai.knowledge": _crewai_mock.knowledge,
     "crewai.llms": _crewai_mock.llms,
     "crewai.llms.providers": _crewai_mock.llms.providers,
     "crewai.llms.providers.openai": _crewai_mock.llms.providers.openai,
-    "kasal_engine.llm": _crewai_mock.llms.providers.openai.completion,
     "crewai.events.types": _crewai_mock.events.types,
-    "kasal_engine.events": _crewai_mock.events.types.llm_events,
-    "kasal_engine.tools": MagicMock(),
     "asyncpg": MagicMock(),
     "chromadb": MagicMock(),
 }

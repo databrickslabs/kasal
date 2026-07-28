@@ -200,7 +200,7 @@ def configure_subprocess_logging(execution_id: str, process_type: str = "crew"):
         'src.services.execution.kernel.execution_callback',
         'src.services.execution.logs.writer_task',
         'src.services.trace.queue',  # Add trace queue logger
-        'src.engines.kasal.paths.crew.execution_runner',  # Add execution runner logger
+        'src.services.agent_builder.execution_runner',  # Add execution runner logger
         'src.services.knowledge.databricks_service',  # Add knowledge service logger for search debugging
         'src.services.tools.tool_factory',  # Tool factory creation + config injection logs
         'src.services.tools.powerbi_analysis_tool',  # Add PowerBI tool logger
@@ -208,8 +208,8 @@ def configure_subprocess_logging(execution_id: str, process_type: str = "crew"):
         'src.services.tools.powerbi_metadata_reducer_tool',  # Metadata Reducer tool logs
         'src.services.tools.powerbi_semantic_model_fetcher_tool',  # Fetcher tool logs
         'src.services.tools.databricks_jobs_tool',  # Add Databricks jobs tool logger
-        'src.engines.kasal.paths.crew.task_adapter',  # Task tool resolution logs
-        'src.engines.kasal.paths.crew.agent_adapter',  # Agent tool resolution logs
+        'src.services.agent_builder.task_adapter',  # Task tool resolution logs
+        'src.services.agent_builder.agent_adapter',  # Agent tool resolution logs
         'src.services.security.tool_capability_manifest',  # Trifecta detection warnings
         'src.services.security.prompt_injection_detector',  # Injection detection warnings
         'src.utils.telemetry',  # Add telemetry logger for LogfoodTelemetry logging

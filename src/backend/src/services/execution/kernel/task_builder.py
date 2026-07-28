@@ -307,7 +307,7 @@ async def _apply_llm_guardrail(task_args, task_config, agent, config, task_key):
 
 async def _apply_output_pydantic(task_args, task_config, agent, task_key):
     """Resolve output_pydantic to a Pydantic class + converter compatibility."""
-    from src.engines.kasal.paths.crew.task_adapter import get_pydantic_class_from_name
+    from src.services.agent_builder.task_adapter import get_pydantic_class_from_name
 
     output_pydantic_name = task_config["output_pydantic"]
     logger.info(f"Task {task_key} has output_pydantic: {output_pydantic_name}")

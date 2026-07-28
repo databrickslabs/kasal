@@ -21,7 +21,7 @@ from src.repositories.execution_repository import ExecutionRepository
 from src.engines.factory import EngineFactory
 from src.engines.kasal.kasal_engine_service import KasalEngineService
 from src.services.execution_status_service import ExecutionStatusService
-from src.engines.kasal.paths.flow.kasal_flow_service import KasalFlowService
+from src.services.flow_builder.kasal_flow_service import KasalFlowService
 from src.utils.user_context import GroupContext
 from src.db.session import request_scoped_session
 from src.services.agent_service import AgentService

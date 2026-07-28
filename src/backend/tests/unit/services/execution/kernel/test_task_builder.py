@@ -231,7 +231,7 @@ class TestOutputPydantic:
 
         with (
             patch(
-                "src.engines.kasal.paths.crew.task_adapter.get_pydantic_class_from_name",
+                "src.services.agent_builder.task_adapter.get_pydantic_class_from_name",
                 new_callable=AsyncMock,
                 return_value=FakeModel,
             ),
@@ -254,7 +254,7 @@ class TestOutputPydantic:
     @pytest.mark.asyncio
     async def test_unresolvable_output_pydantic_dropped(self):
         with patch(
-            "src.engines.kasal.paths.crew.task_adapter.get_pydantic_class_from_name",
+            "src.services.agent_builder.task_adapter.get_pydantic_class_from_name",
             new_callable=AsyncMock,
             return_value=None,
         ):

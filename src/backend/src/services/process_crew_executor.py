@@ -499,7 +499,7 @@ def run_crew_in_process(
             # Suppress any stdout/stderr from CrewAI
             import warnings
 
-            from src.engines.kasal.paths.crew.crew_preparation import CrewPreparation
+            from src.services.agent_builder.crew_preparation import CrewPreparation
             from src.services.tools.mcp_integration import MCPIntegration
             from src.services.tools.tool_factory import ToolFactory
             from src.services.api_keys_service import ApiKeysService

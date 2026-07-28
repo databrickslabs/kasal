@@ -14,7 +14,7 @@ from fastapi import HTTPException, status
 
 from src.core.logger import LoggerManager
 # SessionLocal removed - use async_session_factory instead
-from src.engines.kasal.paths.flow.flow_runner_service import FlowRunnerService, BackendFlow
+from src.services.flow_builder.flow_runner_service import FlowRunnerService, BackendFlow
 
 # Initialize flow-specific logger
 logger = LoggerManager.get_instance().flow

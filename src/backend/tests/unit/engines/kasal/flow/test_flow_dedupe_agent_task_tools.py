@@ -1,7 +1,7 @@
 """Tests for _dedupe_flow_agent_task_tools — the flow-path agent∩task fix."""
 from types import SimpleNamespace
 
-from src.engines.kasal.paths.flow.modules.flow_methods import (
+from src.services.flow_builder.modules.flow_methods import (
     _dedupe_flow_agent_task_tools,
 )
 

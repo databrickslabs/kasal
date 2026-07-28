@@ -33,8 +33,8 @@ from src.repositories.execution_trace_repository import ExecutionTraceRepository
 from src.core.logger import LoggerManager
 from src.db.database_router import get_smart_db_session
 from src.services.api_keys_service import ApiKeysService
-from src.engines.kasal.paths.flow.backend_flow import BackendFlow
-from src.engines.kasal.paths.flow.exceptions import FlowPausedForApprovalException
+from src.services.flow_builder.backend_flow import BackendFlow
+from src.services.flow_builder.exceptions import FlowPausedForApprovalException
 
 # Initialize flow-specific logger
 logger = LoggerManager.get_instance().flow
@@ -446,7 +446,7 @@ class FlowRunnerService:
                     # Continue with execution, as keys might be available through other means
 
                 # Execute the flow directly using BackendFlow (do NOT call engine_service.run_flow() - that creates another subprocess)
-                from src.engines.kasal.paths.flow.backend_flow import BackendFlow
+                from src.services.flow_builder.backend_flow import BackendFlow
                 from src.repositories.flow_repository import FlowRepository
                 from src.repositories.task_repository import TaskRepository
                 from src.repositories.agent_repository import AgentRepository

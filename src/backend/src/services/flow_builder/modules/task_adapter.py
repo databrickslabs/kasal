@@ -135,7 +135,7 @@ class TaskConfig:
         Returns:
             Agent: The resolved agent for the task
         """
-        from src.engines.kasal.paths.flow.modules.agent_adapter import AgentConfig
+        from src.services.flow_builder.modules.agent_adapter import AgentConfig
         
         # If task has an agent_id, try to get that agent
         if hasattr(task_data, 'agent_id') and task_data.agent_id:

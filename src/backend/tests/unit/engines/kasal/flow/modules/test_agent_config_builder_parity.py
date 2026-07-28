@@ -6,7 +6,7 @@ import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from src.engines.kasal.paths.flow.modules.agent_adapter import AgentConfig
+from src.services.flow_builder.modules.agent_adapter import AgentConfig
 from src.services.execution.kernel.agent_builder import build_agent_kwargs
 
 

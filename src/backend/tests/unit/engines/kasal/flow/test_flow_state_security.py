@@ -8,7 +8,7 @@ import logging
 import pytest
 from unittest.mock import patch, MagicMock
 
-from src.engines.kasal.paths.flow.modules.flow_state import FlowStateManager
+from src.services.flow_builder.modules.flow_state import FlowStateManager
 
 
 INJECTION_PAYLOADS = [
@@ -84,7 +84,7 @@ class TestFlowStateInjectionScan:
     def test_detector_import_failure_does_not_break_parsing(self):
         """If PromptInjectionDetector is unavailable, parsing still works."""
         with patch(
-            "src.engines.kasal.paths.flow.modules.flow_state.PromptInjectionDetector",
+            "src.services.flow_builder.modules.flow_state.PromptInjectionDetector",
             side_effect=ImportError("mocked"),
             create=True,
         ):

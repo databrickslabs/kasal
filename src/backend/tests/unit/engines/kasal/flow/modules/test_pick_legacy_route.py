@@ -6,7 +6,7 @@ emitted the field as a string silently failed to route. pick_legacy_route now
 coerces first.
 """
 
-from src.engines.kasal.paths.flow.modules.flow_builder import pick_legacy_route
+from src.services.flow_builder.modules.flow_builder import pick_legacy_route
 
 
 def test_string_true_routes_like_bool_to_success():

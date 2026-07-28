@@ -12,7 +12,7 @@ import sys
 # Add the backend src directory to the path
 
 # NOTE: process_knowledge_sources removed - using DatabricksKnowledgeSearchTool instead
-# from src.engines.kasal.paths.crew.agent_adapter import create_agent
+# from src.services.agent_builder.agent_adapter import create_agent
 
 '''
 # Tests commented out as knowledge sources have been replaced with tool-based approach
@@ -44,7 +44,7 @@ class TestDatabricksKnowledgeSources:
             }
         }]
         
-        with patch('src.engines.kasal.paths.crew.agent_adapter.logger') as mock_logger:
+        with patch('src.services.agent_builder.agent_adapter.logger') as mock_logger:
             result = process_knowledge_sources(sources)
             
             # Verify DatabricksVolumeKnowledgeSource was created
@@ -103,7 +103,7 @@ class TestDatabricksKnowledgeSources:
             }
         ]
         
-        with patch('src.engines.kasal.paths.crew.agent_adapter.logger') as mock_logger:
+        with patch('src.services.agent_builder.agent_adapter.logger') as mock_logger:
             result = process_knowledge_sources(sources)
             
             # Verify both instances were created
@@ -149,7 +149,7 @@ class TestDatabricksKnowledgeSources:
             {'path': '/another/path/file.docx'}  # Dict with path key
         ]
         
-        with patch('src.engines.kasal.paths.crew.agent_adapter.logger'):
+        with patch('src.services.agent_builder.agent_adapter.logger'):
             result = process_knowledge_sources(sources)
             
             # Verify mixed results
@@ -160,7 +160,7 @@ class TestDatabricksKnowledgeSources:
     
     def test_process_empty_knowledge_sources(self):
         """Test processing empty knowledge sources list."""
-        with patch('src.engines.kasal.paths.crew.agent_adapter.logger') as mock_logger:
+        with patch('src.services.agent_builder.agent_adapter.logger') as mock_logger:
             result = process_knowledge_sources([])
             
             assert result == []
@@ -168,7 +168,7 @@ class TestDatabricksKnowledgeSources:
     
     def test_process_none_knowledge_sources(self):
         """Test processing None knowledge sources."""
-        with patch('src.engines.kasal.paths.crew.agent_adapter.logger') as mock_logger:
+        with patch('src.services.agent_builder.agent_adapter.logger') as mock_logger:
             result = process_knowledge_sources(None)
             
             assert result is None
@@ -193,7 +193,7 @@ class TestDatabricksKnowledgeSources:
             }
         }]
         
-        with patch('src.engines.kasal.paths.crew.agent_adapter.logger'):
+        with patch('src.services.agent_builder.agent_adapter.logger'):
             result = process_knowledge_sources(sources)
             
             # Verify file_paths contains full path even when no filename
@@ -202,7 +202,7 @@ class TestDatabricksKnowledgeSources:
             assert call_args['file_paths'] == ['/Volumes/users/test/knowledge/file.pdf']
             assert result == [mock_instance]
     
-    @patch('src.engines.kasal.paths.crew.agent_adapter.logger')
+    @patch('src.services.agent_builder.agent_adapter.logger')
     def test_handle_invalid_source_type(self, mock_logger):
         """Test handling of invalid source types."""
         sources = [
@@ -223,7 +223,7 @@ class TestCreateAgentWithKnowledgeSources:
     
     @pytest.mark.asyncio
     @patch('src.services.execution.kernel.agent_builder.Agent')
-    @patch('src.engines.kasal.paths.crew.agent_adapter.process_knowledge_sources')
+    @patch('src.services.agent_builder.agent_adapter.process_knowledge_sources')
     @patch('src.core.llm_manager.LLMManager.configure_kasal_llm')
     @patch('src.core.unit_of_work.UnitOfWork')
     async def test_create_agent_with_knowledge_sources(self, mock_uow, mock_configure_llm, mock_process_ks, mock_agent_class):
@@ -263,7 +263,7 @@ class TestCreateAgentWithKnowledgeSources:
         mock_uow_instance.__aexit__ = AsyncMock(return_value=False)
         mock_uow.return_value = mock_uow_instance
         
-        with patch('src.engines.kasal.paths.crew.agent_adapter.logger') as mock_logger:
+        with patch('src.services.agent_builder.agent_adapter.logger') as mock_logger:
             result = await create_agent(
                 agent_key='test_agent',
                 agent_config=agent_config,

@@ -6,7 +6,7 @@ FlowCheckpointError, HITLGateConfigError, and FlowExecutionError classes.
 """
 import pytest
 
-from src.engines.kasal.paths.flow.exceptions import (
+from src.services.flow_builder.exceptions import (
     FlowExecutionError,
     FlowPausedForApprovalException,
     FlowResumeError,

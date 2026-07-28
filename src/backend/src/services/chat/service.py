@@ -897,7 +897,7 @@ class LightAgentService:
                     # it answered "please share or upload the report" holding the
                     # tool that would have read it. Last of the preamble parts,
                     # closest to the user's message.
-                    from src.engines.kasal.paths.light_agent.attachment_hint import (
+                    from src.services.chat.attachment_hint import (
                         build_attachment_hint,
                     )
 
@@ -964,7 +964,7 @@ class LightAgentService:
                 # running per-session summary so the next turn's preamble stays
                 # bounded. Kill-switch: CHAT_COMPACTION=false.
                 try:
-                    from src.engines.kasal.paths.light_agent.context_compaction import (
+                    from src.services.chat.context_compaction import (
                         compaction_enabled,
                         maintain_session_summary,
                     )
@@ -1471,7 +1471,7 @@ class LightAgentService:
             f"({user_count} from you)"
             + (" + earlier-conversation summary" if context_summary else "")
         )
-        from src.engines.kasal.paths.light_agent.context_compaction import (
+        from src.services.chat.context_compaction import (
             SUMMARY_HEADER,
         )
         summary_block = (

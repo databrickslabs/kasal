@@ -230,8 +230,8 @@ class FlowProcessorManager:
                         continue
 
                     # Import necessary classes for building CrewAI objects
-                    from src.engines.kasal.paths.flow.modules.task_adapter import TaskConfig
-                    from src.engines.kasal.paths.flow.modules.agent_adapter import AgentConfig
+                    from src.services.flow_builder.modules.task_adapter import TaskConfig
+                    from src.services.flow_builder.modules.agent_adapter import AgentConfig
 
                     # Build the CrewAI Task object with agent
                     agent_repo = repositories.get('agent') if repositories else None
@@ -619,8 +619,8 @@ class FlowProcessorManager:
                         continue
 
                     # Build CrewAI Task and Agent objects
-                    from src.engines.kasal.paths.flow.modules.task_adapter import TaskConfig
-                    from src.engines.kasal.paths.flow.modules.agent_adapter import AgentConfig
+                    from src.services.flow_builder.modules.task_adapter import TaskConfig
+                    from src.services.flow_builder.modules.agent_adapter import AgentConfig
 
                     agent_repo = repositories.get('agent') if repositories else None
                     agent_data = await agent_repo.get(agent_id) if agent_repo else None
@@ -905,8 +905,8 @@ class FlowProcessorManager:
                             continue
 
                         # Build CrewAI Task and Agent objects
-                        from src.engines.kasal.paths.flow.modules.task_adapter import TaskConfig
-                        from src.engines.kasal.paths.flow.modules.agent_adapter import AgentConfig
+                        from src.services.flow_builder.modules.task_adapter import TaskConfig
+                        from src.services.flow_builder.modules.agent_adapter import AgentConfig
 
                         agent_repo = repositories.get('agent') if repositories else None
                         agent_data = await agent_repo.get(agent_id) if agent_repo else None

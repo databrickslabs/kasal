@@ -6,7 +6,7 @@ Tests the functionality of agent configuration for CrewAI flows.
 import pytest
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
-from src.engines.kasal.paths.flow.modules.agent_adapter import AgentConfig
+from src.services.flow_builder.modules.agent_adapter import AgentConfig
 
 
 @pytest.fixture
@@ -85,7 +85,7 @@ def mock_llm():
 class TestAgentConfig:
     """Test cases for AgentConfig class."""
 
-    @patch('src.engines.kasal.paths.flow.modules.agent_adapter.ToolFactory')
+    @patch('src.services.flow_builder.modules.agent_adapter.ToolFactory')
     @pytest.mark.asyncio
     async def test_configure_agent_and_tools_success(self, mock_tool_factory_class, mock_agent_data, mock_tool_factory, mock_llm):
         """Test successful agent configuration with tools (delegates to the shared
@@ -107,7 +107,7 @@ class TestAgentConfig:
         result = await AgentConfig.configure_agent_and_tools(None)
         assert result is None
 
-    @patch('src.engines.kasal.paths.flow.modules.agent_adapter.ToolFactory')
+    @patch('src.services.flow_builder.modules.agent_adapter.ToolFactory')
     @pytest.mark.asyncio
     async def test_configure_agent_and_tools_tool_factory_error(self, mock_tool_factory_class, mock_agent_data):
         """Test agent configuration when tool factory initialization fails."""
@@ -122,7 +122,7 @@ class TestAgentConfig:
         assert result is not None
         mock_tool_factory.initialize.assert_called_once()
 
-    @patch('src.engines.kasal.paths.flow.modules.agent_adapter.ToolFactory')
+    @patch('src.services.flow_builder.modules.agent_adapter.ToolFactory')
     @pytest.mark.asyncio
     async def test_configure_agent_and_tools_from_flow_nodes(self, mock_tool_factory_class, mock_flow_data, mock_tool_factory):
         """Test agent configuration using tools from flow nodes."""
@@ -143,7 +143,7 @@ class TestAgentConfig:
 
         assert result is not None
 
-    @patch('src.engines.kasal.paths.flow.modules.agent_adapter.ToolFactory')
+    @patch('src.services.flow_builder.modules.agent_adapter.ToolFactory')
     @pytest.mark.asyncio
     async def test_configure_agent_and_tools_exception(self, mock_tool_factory_class, mock_agent_data):
         """Test agent configuration with exception."""
@@ -191,7 +191,7 @@ class TestAgentConfig:
         result = AgentConfig._normalize_tools_list({"tool1": "value"})
         assert result == []
 
-    @patch('src.engines.kasal.paths.flow.modules.agent_adapter.ToolFactory')
+    @patch('src.services.flow_builder.modules.agent_adapter.ToolFactory')
     @pytest.mark.asyncio
     async def test_configure_agent_no_tools_attribute(self, mock_tool_factory_class):
         """Test configuring agent without tools attribute."""
@@ -212,7 +212,7 @@ class TestAgentConfig:
 
         assert result is not None
 
-    @patch('src.engines.kasal.paths.flow.modules.agent_adapter.ToolFactory')
+    @patch('src.services.flow_builder.modules.agent_adapter.ToolFactory')
     @pytest.mark.asyncio
     async def test_configure_agent_none_tools_attribute(self, mock_tool_factory_class):
         """Test configuring agent with None tools attribute."""
@@ -233,7 +233,7 @@ class TestAgentConfig:
 
         assert result is not None
 
-    @patch('src.engines.kasal.paths.flow.modules.agent_adapter.ToolFactory')
+    @patch('src.services.flow_builder.modules.agent_adapter.ToolFactory')
     @pytest.mark.asyncio
     async def test_configure_agent_flow_with_no_nodes_attr(self, mock_tool_factory_class):
         """Test configuring agent with flow data that has no nodes attribute."""
@@ -261,8 +261,8 @@ class TestAgentConfig:
 class TestAgentConfigIntegration:
     """Integration tests for AgentConfig."""
 
-    @patch('src.engines.kasal.paths.flow.modules.agent_adapter.LoggerManager')
-    @patch('src.engines.kasal.paths.flow.modules.agent_adapter.ToolFactory')
+    @patch('src.services.flow_builder.modules.agent_adapter.LoggerManager')
+    @patch('src.services.flow_builder.modules.agent_adapter.ToolFactory')
     @pytest.mark.asyncio
     async def test_full_agent_configuration_flow(self, mock_tool_factory_class, mock_logger_manager):
         """Test the complete agent configuration flow (delegates to shared build_agent)."""
@@ -300,8 +300,8 @@ class TestAgentConfigIntegration:
         mock_tool_factory.initialize.assert_called_once()
         mock_build.assert_called_once()
 
-    @patch('src.engines.kasal.paths.flow.modules.agent_adapter.LoggerManager')
-    @patch('src.engines.kasal.paths.flow.modules.agent_adapter.ToolFactory')
+    @patch('src.services.flow_builder.modules.agent_adapter.LoggerManager')
+    @patch('src.services.flow_builder.modules.agent_adapter.ToolFactory')
     @pytest.mark.asyncio
     async def test_full_agent_configuration_with_date_awareness(self, mock_tool_factory_class, mock_logger_manager):
         """Date awareness params flow through the spec into the shared build_agent."""

@@ -99,7 +99,7 @@ def _run_with_prepare_false(crew_config):
         )
         stack.enter_context(
             patch(
-                "src.engines.kasal.paths.crew.crew_preparation.CrewPreparation",
+                "src.services.agent_builder.crew_preparation.CrewPreparation",
                 mock_crew_preparation_cls,
             )
         )
