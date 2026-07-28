@@ -9,10 +9,8 @@ import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import insert
 
 from src.core.logger import LoggerManager
-from src.models.documentation_embedding import DocumentationEmbedding
 
 logger = LoggerManager.get_instance().system
 
@@ -106,12 +104,15 @@ class EmbeddingQueueService:
     async def _batch_insert(self, batch: List[Dict[str, Any]]):
         """Perform batch insert of embeddings."""
         from src.db.session import async_session_factory
+        from src.repositories.documentation_embedding_repository import (
+            DocumentationEmbeddingRepository,
+        )
 
         try:
             async with async_session_factory() as session:
                 # Use bulk insert for efficiency
-                stmt = insert(DocumentationEmbedding).values(batch)
-                await session.execute(stmt)
+                repository = DocumentationEmbeddingRepository(session)
+                await repository.bulk_insert_raw(batch)
                 await session.commit()
                 logger.info(f"Batch inserted {len(batch)} embeddings")
         except Exception as e:
@@ -123,12 +124,15 @@ class EmbeddingQueueService:
     async def _insert_with_retry(self, item: Dict[str, Any], max_retries: int = 3):
         """Insert a single embedding with retry logic."""
         from src.db.session import async_session_factory
+        from src.repositories.documentation_embedding_repository import (
+            DocumentationEmbeddingRepository,
+        )
 
         for attempt in range(max_retries):
             try:
                 async with async_session_factory() as session:
-                    embedding = DocumentationEmbedding(**item)
-                    session.add(embedding)
+                    repository = DocumentationEmbeddingRepository(session)
+                    await repository.insert_raw(item)
                     await session.commit()
                     logger.debug(f"Inserted embedding after {attempt + 1} attempts")
                     return

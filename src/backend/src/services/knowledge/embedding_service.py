@@ -240,8 +240,10 @@ class KnowledgeEmbeddingService:
         """
         if KNOWLEDGE_TTL_DAYS <= 0:
             return 0
-        from sqlalchemy import delete
         from src.models.documentation_embedding import KnowledgeEmbedding
+        from src.repositories.documentation_embedding_repository import (
+            DocumentationEmbeddingRepository,
+        )
         from src.services.knowledge.embedding_session import knowledge_embedding_session
 
         cutoff = datetime.utcnow() - timedelta(days=KNOWLEDGE_TTL_DAYS)
@@ -253,13 +255,11 @@ class KnowledgeEmbeddingService:
                 # one tenant's request must never run DML on another's rows
                 # (defense in depth — expired rows are filtered from search
                 # regardless, and each group sweeps its own on upload).
+                repository = DocumentationEmbeddingRepository(
+                    store_session, model=KnowledgeEmbedding
+                )
                 try:
-                    result = await store_session.execute(
-                        delete(KnowledgeEmbedding).where(
-                            KnowledgeEmbedding.group_id == self.group_id,
-                            KnowledgeEmbedding.created_at < cutoff,
-                        )
-                    )
+                    purged = await repository.delete_expired(self.group_id, cutoff)
                 except Exception:
                     # CRITICAL: on the app-DB path store_session IS self.session
                     # — the SAME session the subsequent embed insert reuses. A
@@ -275,7 +275,6 @@ class KnowledgeEmbeddingService:
                     raise
                 if not is_lakebase:
                     await store_session.commit()
-                purged = int(getattr(result, "rowcount", 0) or 0)
                 if purged:
                     logger.info(
                         f"[EMBEDDING] TTL purge removed {purged} knowledge chunks "

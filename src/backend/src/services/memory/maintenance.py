@@ -94,12 +94,11 @@ def consolidate_memory(memory: Any, scope: str | None = None) -> dict[str, int]:
             seen[key] = record
 
     storage = getattr(memory, "storage", None)
-    delete = getattr(storage, "delete", None)
-    if not callable(delete):
+    if not callable(getattr(storage, "delete", None)):
         return stats
     for record in duplicates:
         try:
-            if delete(str(record.id)):
+            if storage.delete(str(record.id)):
                 stats["deleted"] += 1
         except Exception as exc:  # noqa: BLE001
             logger.debug(
@@ -170,8 +169,7 @@ def merge_similar_memories(memory: Any, scope: str | None = None) -> dict[str, i
         return stats
 
     storage = getattr(memory, "storage", None)
-    delete = getattr(storage, "delete", None)
-    if not callable(delete):
+    if not callable(getattr(storage, "delete", None)):
         return stats
 
     consumed: set[int] = set()
@@ -202,7 +200,7 @@ def merge_similar_memories(memory: Any, scope: str | None = None) -> dict[str, i
                 metadata={"merged_from": len(members)},
             )
             for record in members:
-                delete(str(record.id))
+                storage.delete(str(record.id))
         except Exception as exc:  # noqa: BLE001 — skip the cluster, keep going
             logger.debug("Memory merge cluster failed: %s", exc)
             continue

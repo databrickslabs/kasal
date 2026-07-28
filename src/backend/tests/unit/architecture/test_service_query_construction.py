@@ -51,13 +51,9 @@ _BASELINE = {
     "services/flow_builder/execution_service.py",
     "services/flow_builder/flow_execution_runner.py",
     "services/flow_builder/flow_service.py",
-    "services/flow_builder/modules/task_adapter.py",
     "services/flow_builder/process_executor.py",
     "services/flow_builder/runtime/persistence.py",
-    "services/knowledge/embedding_queue.py",
-    "services/knowledge/embedding_service.py",
     "services/knowledge/embedding_session.py",
-    "services/memory/maintenance.py",
     "services/tools/databricks_dashboard_creator_tool.py",
     "services/tools/metric_view_validator_tool.py",
     "services/trace/broadcast.py",
@@ -66,11 +62,27 @@ _BASELINE = {
 _SERVICES = pathlib.Path(__file__).resolve().parents[3] / "src" / "services"
 
 
+def _sqlalchemy_names(tree: ast.AST) -> set[str]:
+    """Names this module imported FROM sqlalchemy.
+
+    Without this, any local called `delete` or `select` reads as a query. That is
+    not hypothetical: services/memory/maintenance.py did
+    `delete = getattr(storage, "delete", None)` against a pluggable memory
+    backend, and the check flagged a file with no database access in it at all.
+    """
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("sqlalchemy"):
+            names.update(alias.asname or alias.name for alias in node.names)
+    return names
+
+
 def _builds_queries(path: pathlib.Path) -> bool:
     try:
         tree = ast.parse(path.read_text())
     except SyntaxError:
         return False  # export templates hold {{TOKEN}} placeholders
+    builders = _QUERY_BUILDERS & _sqlalchemy_names(tree)
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
@@ -79,7 +91,7 @@ def _builds_queries(path: pathlib.Path) -> bool:
             owner = (getattr(fn.value, "id", "") or getattr(fn.value, "attr", "")).lower()
             if "session" in owner or "conn" in owner:
                 return True
-        if isinstance(fn, ast.Name) and fn.id in _QUERY_BUILDERS:
+        if isinstance(fn, ast.Name) and fn.id in builders:
             return True
     return False
 

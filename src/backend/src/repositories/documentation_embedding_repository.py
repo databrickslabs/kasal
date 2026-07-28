@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Dict, List, Optional, Any, Union, Type
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, literal_column, select
@@ -186,6 +187,54 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding]):
                 synchronize_session=False
             )
             return deleted or 0
+
+    async def delete_expired(self, group_id: str, cutoff: datetime) -> int:
+        """Delete rows for ``group_id`` older than ``cutoff``; returns rows deleted.
+
+        Backs the knowledge TTL purge. Scoped to a single group even though the
+        table is shared across tenants — one group's purge must never delete
+        another group's rows (defense in depth alongside search's own TTL/
+        group filtering). Does not commit; the caller controls the transaction
+        because the session may be an app session or a Lakebase session with
+        different commit semantics.
+        """
+        from sqlalchemy import delete as sa_delete
+
+        result = await self.db.execute(
+            sa_delete(self._model).where(
+                self._model.group_id == group_id,
+                self._model.created_at < cutoff,
+            )
+        )
+        return int(getattr(result, "rowcount", 0) or 0)
+
+    async def bulk_insert_raw(self, rows: List[Dict[str, Any]]) -> None:
+        """Bulk-insert plain-dict embedding rows via a single INSERT statement.
+
+        Used by the background embedding queue, which batches raw dicts (not
+        ``DocumentationEmbeddingCreate``) to avoid building one ORM instance per
+        row before a potentially large batch insert. Does not commit — the
+        caller owns the transaction (the queue opens its own short-lived
+        session per flush).
+        """
+        from sqlalchemy import insert as sa_insert
+
+        if not rows:
+            return
+        await self.db.execute(sa_insert(self._model).values(rows))
+
+    async def insert_raw(self, row: Dict[str, Any]) -> DocumentationEmbedding:
+        """Insert one plain-dict embedding row and return the new instance.
+
+        Used by the embedding queue's per-item retry path after a batch insert
+        fails. Builds the model straight from the dict (rather than going
+        through ``create()``/``DocumentationEmbeddingCreate``) so the row's own
+        ``created_at`` (set when it was queued) is preserved instead of falling
+        back to the column's server default. Does not commit.
+        """
+        db_embedding = self._model(**row)
+        self.db.add(db_embedding)
+        return db_embedding
 
     async def search_similar(
         self,

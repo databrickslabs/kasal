@@ -16,14 +16,13 @@ from src.services.knowledge.embedding_queue import EmbeddingQueueService
 # ---------------------------------------------------------------------------
 # Patch path constants
 # ---------------------------------------------------------------------------
-# _batch_insert and _insert_with_retry import async_session_factory locally
-# via ``from src.db.session import async_session_factory``, so patching must
-# target the *source* module, not the service module namespace.
+# _batch_insert and _insert_with_retry import async_session_factory and
+# DocumentationEmbeddingRepository locally (inside the method), so patching
+# must target the *source* module, not the service module namespace.
 _SESSION_FACTORY = "src.db.session.async_session_factory"
-# insert and DocumentationEmbedding are imported at module top-level, so they
-# live in the service module namespace after import.
-_INSERT = "src.services.knowledge.embedding_queue.insert"
-_DOC_EMBEDDING = "src.services.knowledge.embedding_queue.DocumentationEmbedding"
+_DOC_EMBEDDING_REPO = (
+    "src.repositories.documentation_embedding_repository.DocumentationEmbeddingRepository"
+)
 _LOGGER = "src.services.knowledge.embedding_queue.logger"
 
 
@@ -263,7 +262,7 @@ class TestEmbeddingQueueServiceBatchInsert:
 
     @pytest.mark.asyncio
     async def test_batch_insert_performs_bulk_insert(self):
-        """_batch_insert() should execute a bulk insert statement and commit."""
+        """_batch_insert() should bulk-insert via the repository and commit."""
         svc = _make_service()
         batch = [
             {"source": "s1", "title": "t1", "content": "c1", "embedding": [0.1], "doc_metadata": {}, "created_at": datetime.utcnow()},
@@ -272,18 +271,15 @@ class TestEmbeddingQueueServiceBatchInsert:
 
         mock_session = AsyncMock()
         mock_session_ctx = _mock_async_session_ctx(mock_session)
+        mock_repo = MagicMock()
+        mock_repo.bulk_insert_raw = AsyncMock()
 
         with patch(_SESSION_FACTORY, return_value=mock_session_ctx), \
-             patch(_INSERT) as mock_insert, \
-             patch(_DOC_EMBEDDING) as mock_model:
-            mock_stmt = MagicMock()
-            mock_insert.return_value.values.return_value = mock_stmt
-
+             patch(_DOC_EMBEDDING_REPO, return_value=mock_repo) as mock_repo_cls:
             await svc._batch_insert(batch)
 
-            mock_insert.assert_called_once_with(mock_model)
-            mock_insert.return_value.values.assert_called_once_with(batch)
-            mock_session.execute.assert_awaited_once_with(mock_stmt)
+            mock_repo_cls.assert_called_once_with(mock_session)
+            mock_repo.bulk_insert_raw.assert_awaited_once_with(batch)
             mock_session.commit.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -298,14 +294,12 @@ class TestEmbeddingQueueServiceBatchInsert:
         ]
 
         mock_session = AsyncMock()
-        mock_session.execute.side_effect = Exception("Bulk insert failed")
         mock_session_ctx = _mock_async_session_ctx(mock_session)
+        mock_repo = MagicMock()
+        mock_repo.bulk_insert_raw = AsyncMock(side_effect=Exception("Bulk insert failed"))
 
         with patch(_SESSION_FACTORY, return_value=mock_session_ctx), \
-             patch(_INSERT) as mock_insert, \
-             patch(_DOC_EMBEDDING):
-            mock_insert.return_value.values.return_value = MagicMock()
-
+             patch(_DOC_EMBEDDING_REPO, return_value=mock_repo):
             await svc._batch_insert(batch)
 
             assert svc._insert_with_retry.await_count == 2
@@ -328,16 +322,15 @@ class TestEmbeddingQueueServiceInsertWithRetry:
 
         mock_session = AsyncMock()
         mock_session_ctx = _mock_async_session_ctx(mock_session)
+        mock_repo = MagicMock()
+        mock_repo.insert_raw = AsyncMock()
 
         with patch(_SESSION_FACTORY, return_value=mock_session_ctx), \
-             patch(_DOC_EMBEDDING) as mock_model:
-            mock_embedding_instance = MagicMock()
-            mock_model.return_value = mock_embedding_instance
-
+             patch(_DOC_EMBEDDING_REPO, return_value=mock_repo) as mock_repo_cls:
             await svc._insert_with_retry(item)
 
-            mock_model.assert_called_once_with(**item)
-            mock_session.add.assert_called_once_with(mock_embedding_instance)
+            mock_repo_cls.assert_called_once_with(mock_session)
+            mock_repo.insert_raw.assert_awaited_once_with(item)
             mock_session.commit.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -360,11 +353,12 @@ class TestEmbeddingQueueServiceInsertWithRetry:
                 return _mock_async_session_ctx(mock_session_fail)
             return _mock_async_session_ctx(mock_session_success)
 
-        with patch(_SESSION_FACTORY, side_effect=session_factory_side_effect), \
-             patch(_DOC_EMBEDDING) as mock_model, \
-             patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
-            mock_model.return_value = MagicMock()
+        mock_repo = MagicMock()
+        mock_repo.insert_raw = AsyncMock()
 
+        with patch(_SESSION_FACTORY, side_effect=session_factory_side_effect), \
+             patch(_DOC_EMBEDDING_REPO, return_value=mock_repo), \
+             patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
             await svc._insert_with_retry(item, max_retries=3)
 
             # Exponential backoff: 2^0=1s, 2^1=2s
@@ -384,17 +378,17 @@ class TestEmbeddingQueueServiceInsertWithRetry:
         mock_session = AsyncMock()
         mock_session.commit.side_effect = Exception("Persistent DB error")
         mock_session_ctx = _mock_async_session_ctx(mock_session)
+        mock_repo = MagicMock()
+        mock_repo.insert_raw = AsyncMock()
 
         with patch(_SESSION_FACTORY, return_value=mock_session_ctx), \
-             patch(_DOC_EMBEDDING) as mock_model, \
+             patch(_DOC_EMBEDDING_REPO, return_value=mock_repo) as mock_repo_cls, \
              patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep, \
              patch(_LOGGER) as mock_logger:
-            mock_model.return_value = MagicMock()
-
             await svc._insert_with_retry(item, max_retries=3)
 
             # 3 attempts total
-            assert mock_model.call_count == 3
+            assert mock_repo_cls.call_count == 3
             # 2 sleeps (between attempts 1->2 and 2->3)
             assert mock_sleep.await_count == 2
             # Final error logged

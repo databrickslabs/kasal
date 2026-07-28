@@ -553,14 +553,15 @@ class TestResolveAgentForTask:
         agent_repo = MagicMock()
         agent_repo.get = AsyncMock(return_value=None)
 
+        fallback_repo = MagicMock()
+        fallback_repo.get = AsyncMock(return_value=MagicMock())
+
         with patch("src.db.session.request_scoped_session") as MockSession, \
+             patch("src.repositories.agent_repository.AgentRepository", return_value=fallback_repo), \
              patch("src.services.flow_builder.modules.agent_adapter.AgentConfig.configure_agent_and_tools",
                    new=AsyncMock(return_value=mock_agent)):
             mock_session_ctx = MagicMock()
             mock_session = AsyncMock()
-            mock_result = MagicMock()
-            mock_result.scalar_one_or_none = MagicMock(return_value=MagicMock())
-            mock_session.execute = AsyncMock(return_value=mock_result)
             mock_session_ctx.__aenter__ = AsyncMock(return_value=mock_session)
             mock_session_ctx.__aexit__ = AsyncMock(return_value=False)
             MockSession.return_value = mock_session_ctx
@@ -570,6 +571,7 @@ class TestResolveAgentForTask:
             )
 
         assert result is mock_agent
+        fallback_repo.get.assert_awaited_once_with(agent_id)
 
     @pytest.mark.asyncio
     async def test_agent_configure_fails_returns_none(self):
@@ -596,12 +598,13 @@ class TestResolveAgentForTask:
         agent_repo = MagicMock()
         agent_repo.get = AsyncMock(return_value=None)
 
-        with patch("src.db.session.request_scoped_session") as MockSession:
+        fallback_repo = MagicMock()
+        fallback_repo.get = AsyncMock(return_value=None)
+
+        with patch("src.db.session.request_scoped_session") as MockSession, \
+             patch("src.repositories.agent_repository.AgentRepository", return_value=fallback_repo):
             mock_session_ctx = MagicMock()
             mock_session = AsyncMock()
-            mock_result = MagicMock()
-            mock_result.scalar_one_or_none = MagicMock(return_value=None)
-            mock_session.execute = AsyncMock(return_value=mock_result)
             mock_session_ctx.__aenter__ = AsyncMock(return_value=mock_session)
             mock_session_ctx.__aexit__ = AsyncMock(return_value=False)
             MockSession.return_value = mock_session_ctx
@@ -611,6 +614,7 @@ class TestResolveAgentForTask:
             )
 
         assert result is None
+        fallback_repo.get.assert_awaited_once_with(agent_id)
 
     @pytest.mark.asyncio
     async def test_agent_db_error_continues_to_none(self):
