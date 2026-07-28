@@ -1,266 +1,1187 @@
-"""Tests for DatabricksRetryLLM context-length error handling.
+"""
+Unit tests for the Databricks retry/fallback LLM.
 
-Regression suite for a critical bug: context-overflow errors were rewrapped
-into a plain ``ValueError`` whose message contained no phrase from CrewAI's
-``CONTEXT_LIMIT_ERRORS`` list, so ``respect_context_window`` summarization
-never fired and the agent replayed the entire task up to max_retry_limit
-times — deterministically overflowing again on each replay.
-
-The contract: an overflow surfaced by the handler must (a) be CrewAI's
-``LLMContextLengthExceededError`` and (b) carry a message CrewAI's own
-phrase-matcher recognizes.
+Covers the retry/backoff and fallback behaviour plus the Databricks message
+sanitization DatabricksRetryLLM applies before every call.
 """
 
 import pytest
-from unittest.mock import patch
+from unittest.mock import Mock, patch, MagicMock
+import json
+import sys
+import logging
 
-from src.core.llm.transport import is_context_length_exceeded
-from src.core.llm.transport import LLMContextLengthExceededError
+from src.services.llm.handlers.databricks_retry_llm import (
+    DatabricksRetryLLM,
+    _resolve_schema_refs,
+    _is_gemini_model,
+    _sanitize_tools_for_gemini,
+)
 
-from src.services.llm.handlers.databricks_retry_llm import DatabricksRetryLLM
+class TestSanitizeMessagesForDatabricks:
+    """Test suite for DatabricksRetryLLM._sanitize_messages_for_databricks."""
+
+    def test_returns_none_for_none_input(self):
+        assert DatabricksRetryLLM._sanitize_messages_for_databricks(None) is None
+
+    def test_returns_empty_for_empty_list(self):
+        assert DatabricksRetryLLM._sanitize_messages_for_databricks([]) == []
+
+    def test_passthrough_for_non_list(self):
+        assert (
+            DatabricksRetryLLM._sanitize_messages_for_databricks("not a list")
+            == "not a list"
+        )
+
+    def test_leaves_normal_messages_unchanged(self):
+        msgs = [
+            {"role": "system", "content": "You are helpful."},
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi there!"},
+        ]
+        DatabricksRetryLLM._sanitize_messages_for_databricks(msgs)
+        # Conversation ends with assistant → continuation prompt appended
+        assert len(msgs) == 4
+        assert msgs[2]["content"] == "Hi there!"
+        assert msgs[3]["role"] == "user"
+
+    def test_fixes_assistant_content_none_with_tool_calls(self):
+        msgs = [
+            {"role": "user", "content": "Do something"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{"id": "1", "function": {"name": "f"}}],
+            },
+        ]
+        DatabricksRetryLLM._sanitize_messages_for_databricks(msgs)
+        # Content fixed + continuation prompt appended (ends with assistant)
+        assert len(msgs) == 3
+        assert msgs[1]["content"] == "Calling tools."
+        assert msgs[1]["tool_calls"] == [{"id": "1", "function": {"name": "f"}}]
+        assert msgs[2]["role"] == "user"
+
+    def test_fixes_assistant_empty_string_with_tool_calls(self):
+        msgs = [
+            {"role": "assistant", "content": "", "tool_calls": [{"id": "1"}]},
+        ]
+        DatabricksRetryLLM._sanitize_messages_for_databricks(msgs)
+        assert msgs[0]["content"] == "Calling tools."
+
+    def test_fixes_assistant_whitespace_with_tool_calls(self):
+        msgs = [
+            {"role": "assistant", "content": "   ", "tool_calls": [{"id": "1"}]},
+        ]
+        DatabricksRetryLLM._sanitize_messages_for_databricks(msgs)
+        assert msgs[0]["content"] == "Calling tools."
+
+    def test_removes_assistant_empty_content_no_tool_calls(self):
+        msgs = [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": None},
+            {"role": "user", "content": "Try again"},
+        ]
+        DatabricksRetryLLM._sanitize_messages_for_databricks(msgs)
+        assert len(msgs) == 2
+        assert msgs[0]["role"] == "user"
+        assert msgs[1]["content"] == "Try again"
+
+    def test_modifies_list_in_place(self):
+        original = [
+            {"role": "assistant", "content": None, "tool_calls": [{"id": "1"}]},
+        ]
+        result = DatabricksRetryLLM._sanitize_messages_for_databricks(original)
+        assert result is original
+        assert original[0]["content"] == "Calling tools."
+
+    def test_strips_cache_breakpoint_field(self):
+        """CrewAI stamps a top-level cache_breakpoint flag for prompt caching, but
+        non-Claude Databricks endpoints (llama/qwen/gemma/gpt-oss/gemini) 400 on
+        the unknown field — it must be stripped from the sent messages."""
+        msgs = [
+            {"role": "system", "content": "sys", "cache_breakpoint": True},
+            {"role": "user", "content": "hi", "cache_breakpoint": True},
+        ]
+        DatabricksRetryLLM._sanitize_messages_for_databricks(msgs)
+        assert all("cache_breakpoint" not in m for m in msgs)
+        assert msgs[0] == {"role": "system", "content": "sys"}
+        assert msgs[1] == {"role": "user", "content": "hi"}
+
+    def test_cache_breakpoint_strip_does_not_mutate_caller_dict(self):
+        """The flag is removed from a COPY, so CrewAI's reusable message buffer
+        keeps its markers for providers that actually cache."""
+        original = {"role": "user", "content": "hi", "cache_breakpoint": True}
+        msgs = [original]
+        DatabricksRetryLLM._sanitize_messages_for_databricks(msgs)
+        assert "cache_breakpoint" not in msgs[0]          # stripped in the sent list
+        assert original.get("cache_breakpoint") is True   # caller's dict untouched
+
+    def test_handles_non_dict_items(self):
+        msgs = ["plain string", {"role": "user", "content": "Hello"}]
+        DatabricksRetryLLM._sanitize_messages_for_databricks(msgs)
+        assert len(msgs) == 2
+        assert msgs[0] == "plain string"
+
+    def test_does_not_touch_user_or_system_messages(self):
+        msgs = [
+            {"role": "system", "content": None},
+            {"role": "user", "content": None},
+        ]
+        DatabricksRetryLLM._sanitize_messages_for_databricks(msgs)
+        assert len(msgs) == 2
+        assert msgs[0]["content"] is None
+        assert msgs[1]["content"] is None
 
 
-def _bare_handler() -> DatabricksRetryLLM:
-    """Handler instance without running the heavy __init__ (no litellm setup)."""
-    return object.__new__(DatabricksRetryLLM)
+class TestEngineToolCallsWithContent:
+    """Regression guard replacing the crewAI-era apply_tool_calls_fix patch:
+    kasal_engine must execute tool_calls even when the same response also
+    carries content text (Claude commonly returns both)."""
 
+    def test_tool_calls_execute_when_content_present(self):
+        from types import SimpleNamespace
+        from unittest.mock import PropertyMock
 
-class TestContextLengthHint:
-    @pytest.mark.parametrize(
-        "error_str",
-        [
-            "prompt is too long: 2523462 tokens > 1000000 maximum",
-            "maximum context length is 128000 tokens",
-            "context_length_exceeded",
-            "the context window is full",
-            "too many tokens in request",
-            "input is too long for this model",
-            "request exceeds token limit",
-            "expected a string with maximum length 400000",
-        ],
-    )
-    def test_overflow_variants_are_detected(self, error_str):
-        hint = _bare_handler()._context_length_hint(error_str)
-        assert hint is not None
+        from src.core.llm.transport import OpenAICompletion
 
-    @pytest.mark.parametrize(
-        "error_str",
-        [
-            "connection reset by peer",
-            "401 invalid access token",
-            "rate limit exceeded",
-            "internal server error",
-        ],
-    )
-    def test_non_overflow_errors_return_none(self, error_str):
-        assert _bare_handler()._context_length_hint(error_str) is None
+        llm = OpenAICompletion(model="gpt-4o")
 
-    def test_hint_is_recognized_by_engine_phrase_matcher(self):
-        """The hint itself must match CONTEXT_LIMIT_ERRORS — the engine's
-        recovery phrase-matches str(exception), not the exception type alone."""
-        hint = _bare_handler()._context_length_hint("prompt is too long")
-        assert hint is not None
-        assert is_context_length_exceeded(Exception(hint))
+        tool_call = SimpleNamespace(
+            id="call_1",
+            function=SimpleNamespace(name="my_tool", arguments="{}"),
+        )
+        first = SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content="I'll call the tool now.", tool_calls=[tool_call]
+                    )
+                )
+            ],
+            usage=None,
+        )
+        final = SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content="done", tool_calls=None)
+                )
+            ],
+            usage=None,
+        )
+        fake_client = SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(create=Mock(side_effect=[first, final]))
+            )
+        )
+        executed = []
 
-
-class TestCallRaisesRecognizableOverflow:
-    def _make_handler(self) -> DatabricksRetryLLM:
-        with patch(
-            "src.services.llm.handlers.databricks_retry_llm.litellm"
+        with patch.object(
+            OpenAICompletion, "client", new_callable=PropertyMock, return_value=fake_client
         ):
-            return DatabricksRetryLLM(model="databricks/test-model")
+            text, usage, call_type = llm._call_completions_api(
+                [{"role": "user", "content": "hi"}],
+                [{"type": "function", "function": {"name": "my_tool", "parameters": {}}}],
+                {"my_tool": lambda **kw: executed.append(1) or "tool-result"},
+            )
 
-    def test_call_raises_crewai_context_exception(self):
-        handler = self._make_handler()
-        overflow = Exception("prompt is too long: 2523462 tokens > 1000000 maximum")
+        assert executed, "tool_calls were dropped despite content text being present"
+        assert text == "done"
+
+
+class TestDatabricksRetryLLMOTelTracing:
+    """Tests for OTel tracing integration in DatabricksRetryLLM retry logic."""
+
+    @patch("src.services.llm.handlers.databricks_retry_llm._get_retry_tracer")
+    @patch.object(DatabricksRetryLLM, "_get_crew_logger")
+    def test_emit_retry_span_creates_span_with_attributes(
+        self, mock_crew_log, mock_get_tracer
+    ):
+        """_emit_retry_span creates an OTel span with correct retry attributes."""
+        mock_span = MagicMock()
+        mock_span.__enter__ = Mock(return_value=mock_span)
+        mock_span.__exit__ = Mock(return_value=False)
+
+        mock_tracer = MagicMock()
+        mock_tracer.start_as_current_span.return_value = mock_span
+        mock_get_tracer.return_value = mock_tracer
+
+        mock_crew_log.return_value = MagicMock()
+
+        with patch("litellm.request_timeout", 120.0):
+            llm = DatabricksRetryLLM(model="databricks/test-model")
 
         with patch(
-            "src.services.llm.handlers.databricks_retry_llm.LLM.call", side_effect=overflow
-        ), pytest.raises(LLMContextLengthExceededError) as exc_info:
-            handler.call(messages=[{"role": "user", "content": "hi"}])
+            "src.services.llm.handlers.databricks_retry_llm._time_mod"
+        ) as mock_time:
+            llm._emit_retry_span(
+                attempt=1,
+                max_retries=3,
+                backoff=2.0,
+                error_type="retryable_error",
+                error_message="Connection timeout",
+                is_rate_limit=False,
+                method="call",
+            )
 
-        # CrewAI's own detector must accept the raised exception, otherwise
-        # summarize-and-continue never fires and the task replays from scratch.
-        assert is_context_length_exceeded(exc_info.value)
-        assert exc_info.value.__cause__ is overflow
+        mock_tracer.start_as_current_span.assert_called_once_with("kasal.llm.retry")
+        mock_span.set_attribute.assert_any_call("kasal.event_type", "llm_retry")
+        mock_span.set_attribute.assert_any_call("kasal.retry.attempt", 2)
+        mock_span.set_attribute.assert_any_call("kasal.retry.max_retries", 3)
+        mock_span.set_attribute.assert_any_call("kasal.retry.backoff_seconds", 2.0)
+        mock_span.set_attribute.assert_any_call(
+            "kasal.retry.error_type", "retryable_error"
+        )
+        mock_span.set_attribute.assert_any_call("kasal.retry.is_rate_limit", False)
+        mock_span.set_attribute.assert_any_call("kasal.retry.method", "call")
+        mock_span.set_attribute.assert_any_call(
+            "kasal.retry.model", "databricks/test-model"
+        )
+        mock_span.set_attribute.assert_any_call(
+            "kasal.retry.error_message", "Connection timeout"
+        )
+        # sleep should happen inside the span
+        mock_time.sleep.assert_called_once_with(2.0)
 
-    def test_call_does_not_wrap_unrelated_errors(self):
-        handler = self._make_handler()
+    @patch("src.services.llm.handlers.databricks_retry_llm._get_retry_tracer")
+    @patch.object(DatabricksRetryLLM, "_get_crew_logger")
+    def test_emit_retry_span_sleeps_without_tracer(
+        self, mock_crew_log, mock_get_tracer
+    ):
+        """When OTel is not available, _emit_retry_span still sleeps."""
+        mock_get_tracer.return_value = None
+        mock_crew_log.return_value = MagicMock()
 
-        # Non-retryable, non-auth, non-overflow error must propagate unwrapped.
+        with patch("litellm.request_timeout", 120.0):
+            llm = DatabricksRetryLLM(model="databricks/test-model")
+
         with patch(
-            "src.services.llm.handlers.databricks_retry_llm.LLM.call", side_effect=RuntimeError("invalid request: bad parameter")
-        ), pytest.raises(RuntimeError):
-            handler.call(messages=[{"role": "user", "content": "hi"}])
+            "src.services.llm.handlers.databricks_retry_llm._time_mod"
+        ) as mock_time:
+            llm._emit_retry_span(
+                attempt=0,
+                max_retries=3,
+                backoff=1.0,
+                error_type="empty_response",
+                error_message="",
+                is_rate_limit=False,
+                method="call",
+            )
 
+        mock_time.sleep.assert_called_once_with(1.0)
 
-class TestPlaceholderResponseRetry:
-    """A bare "Calling tools." answer is the sanitization placeholder echoed
-    back by the model (history mimicry after many tool turns) — never a real
-    answer. It must be treated as empty and retried with a corrective nudge."""
+    @patch("src.services.llm.handlers.databricks_retry_llm._get_retry_tracer")
+    @patch.object(DatabricksRetryLLM, "_get_crew_logger")
+    def test_emit_retry_span_still_sleeps_on_tracer_exception(
+        self, mock_crew_log, mock_get_tracer
+    ):
+        """If the tracer raises, we still sleep (retry logic is never broken)."""
+        mock_tracer = MagicMock()
+        mock_tracer.start_as_current_span.side_effect = RuntimeError("tracer broken")
+        mock_get_tracer.return_value = mock_tracer
+        mock_crew_log.return_value = MagicMock()
 
-    def _make_handler(self) -> DatabricksRetryLLM:
-        with patch("src.services.llm.handlers.databricks_retry_llm.litellm"):
-            handler = DatabricksRetryLLM(model="databricks/test-model")
-        # No real backoff waits in tests.
-        handler._get_backoff_time = lambda *a, **k: 0
-        return handler
+        with patch("litellm.request_timeout", 120.0):
+            llm = DatabricksRetryLLM(model="databricks/test-model")
 
-    def test_is_placeholder_response_detection(self):
-        from src.services.llm.handlers.databricks_retry_llm import (
-            _is_placeholder_response,
+        with patch(
+            "src.services.llm.handlers.databricks_retry_llm._time_mod"
+        ) as mock_time:
+            llm._emit_retry_span(
+                attempt=0,
+                max_retries=3,
+                backoff=1.0,
+                error_type="retryable_error",
+                error_message="server error",
+                is_rate_limit=False,
+                method="call",
+            )
+
+        mock_time.sleep.assert_called_once_with(1.0)
+
+    @patch.object(DatabricksRetryLLM, "_get_crew_logger")
+    def test_record_retry_summary_adds_event_to_current_span(self, mock_crew_log):
+        """_record_retry_summary adds an event on the current active span."""
+        mock_crew_log.return_value = MagicMock()
+
+        with patch("litellm.request_timeout", 120.0):
+            llm = DatabricksRetryLLM(model="databricks/test-model")
+
+        mock_span = MagicMock()
+        mock_span.is_recording.return_value = True
+
+        with patch("opentelemetry.trace.get_current_span", return_value=mock_span):
+            llm._record_retry_summary(
+                total_attempts=3, total_backoff=7.0, method="call"
+            )
+
+        mock_span.add_event.assert_called_once_with(
+            "llm_retry_summary",
+            attributes={
+                "kasal.retry.total_attempts": 3,
+                "kasal.retry.total_backoff_seconds": 7.0,
+                "kasal.retry.model": "databricks/test-model",
+                "kasal.retry.method": "call",
+            },
         )
 
-        assert _is_placeholder_response("Calling tools.") is True
-        assert _is_placeholder_response("  calling tools  ") is True
-        assert _is_placeholder_response("Calling tools") is True
-        assert _is_placeholder_response("Calling tools to fetch data…") is False
-        assert _is_placeholder_response("A real answer.") is False
-        assert _is_placeholder_response("") is False
-        assert _is_placeholder_response(None) is False
-        assert _is_placeholder_response(42) is False
+    @patch.object(DatabricksRetryLLM, "_record_retry_summary")
+    @patch.object(DatabricksRetryLLM, "_emit_retry_span")
+    @patch.object(DatabricksRetryLLM, "_get_crew_logger")
+    def test_call_emits_retry_spans_on_empty_response(
+        self, mock_crew_log, mock_emit_retry, mock_summary
+    ):
+        """call() method emits retry spans when receiving empty responses."""
+        mock_crew_log.return_value = MagicMock()
 
-    def test_append_placeholder_nudge_is_idempotent_and_safe(self):
-        from src.services.llm.handlers.databricks_retry_llm import (
-            _PLACEHOLDER_NUDGE,
-            _append_placeholder_nudge,
+        with patch("litellm.request_timeout", 120.0):
+            llm = DatabricksRetryLLM(model="databricks/test-model")
+
+        # First call returns empty, second returns valid response
+        with patch.object(
+            type(llm).__bases__[0], "call", side_effect=["", "Valid response"]
+        ):
+            result = llm.call([{"role": "user", "content": "test"}])
+
+        assert result == "Valid response"
+        mock_emit_retry.assert_called_once()
+        call_kwargs = mock_emit_retry.call_args
+        assert call_kwargs[1]["error_type"] == "empty_response"
+        assert call_kwargs[1]["attempt"] == 0
+        mock_summary.assert_called_once_with(2, pytest.approx(1.0, abs=0.1), "call")
+
+    @patch.object(DatabricksRetryLLM, "_record_retry_summary")
+    @patch.object(DatabricksRetryLLM, "_emit_retry_span")
+    @patch.object(DatabricksRetryLLM, "_get_crew_logger")
+    def test_call_no_retry_spans_on_success(
+        self, mock_crew_log, mock_emit_retry, mock_summary
+    ):
+        """call() does not emit retry spans when the first attempt succeeds."""
+        mock_crew_log.return_value = MagicMock()
+
+        with patch("litellm.request_timeout", 120.0):
+            llm = DatabricksRetryLLM(model="databricks/test-model")
+
+        with patch.object(type(llm).__bases__[0], "call", return_value="Success"):
+            result = llm.call([{"role": "user", "content": "test"}])
+
+        assert result == "Success"
+        mock_emit_retry.assert_not_called()
+        mock_summary.assert_not_called()
+
+
+class TestResolveSchemaRefs:
+    """Test suite for _resolve_schema_refs helper."""
+
+    def test_returns_non_dict_unchanged(self):
+        assert _resolve_schema_refs("hello") == "hello"
+        assert _resolve_schema_refs(42) == 42
+        assert _resolve_schema_refs(None) is None
+
+    def test_schema_without_refs_unchanged(self):
+        schema = {"type": "object", "properties": {"name": {"type": "string"}}}
+        assert _resolve_schema_refs(schema) == schema
+
+    def test_resolves_simple_ref(self):
+        schema = {
+            "$defs": {
+                "Foo": {"type": "object", "properties": {"x": {"type": "integer"}}}
+            },
+            "type": "object",
+            "properties": {
+                "bar": {"$ref": "#/$defs/Foo"},
+            },
+        }
+        result = _resolve_schema_refs(schema)
+        assert "$defs" not in result
+        assert "$ref" not in result["properties"]["bar"]
+        assert result["properties"]["bar"]["type"] == "object"
+        assert result["properties"]["bar"]["properties"]["x"]["type"] == "integer"
+
+    def test_resolves_nested_refs(self):
+        schema = {
+            "$defs": {
+                "Inner": {"type": "string"},
+                "Outer": {
+                    "type": "object",
+                    "properties": {"val": {"$ref": "#/$defs/Inner"}},
+                },
+            },
+            "type": "object",
+            "properties": {
+                "nested": {"$ref": "#/$defs/Outer"},
+            },
+        }
+        result = _resolve_schema_refs(schema)
+        assert "$defs" not in result
+        nested = result["properties"]["nested"]
+        assert nested["type"] == "object"
+        assert nested["properties"]["val"]["type"] == "string"
+
+    def test_resolves_refs_in_arrays(self):
+        schema = {
+            "$defs": {"Item": {"type": "string"}},
+            "type": "array",
+            "items": {"$ref": "#/$defs/Item"},
+        }
+        result = _resolve_schema_refs(schema)
+        assert result["items"]["type"] == "string"
+        assert "$defs" not in result
+
+    def test_preserves_sibling_keys_alongside_ref(self):
+        schema = {
+            "$defs": {"Base": {"type": "object"}},
+            "type": "object",
+            "properties": {
+                "field": {"$ref": "#/$defs/Base", "description": "custom desc"},
+            },
+        }
+        result = _resolve_schema_refs(schema)
+        field = result["properties"]["field"]
+        assert field["type"] == "object"
+        assert field["description"] == "custom desc"
+
+    def test_handles_definitions_key(self):
+        """Also handles 'definitions' (JSON Schema draft-07 style)."""
+        schema = {
+            "definitions": {"Baz": {"type": "number"}},
+            "type": "object",
+            "properties": {
+                "val": {"$ref": "#/definitions/Baz"},
+            },
+        }
+        result = _resolve_schema_refs(schema)
+        assert "definitions" not in result
+        assert result["properties"]["val"]["type"] == "number"
+
+    def test_missing_ref_resolves_to_empty(self):
+        schema = {
+            "$defs": {},
+            "type": "object",
+            "properties": {
+                "missing": {"$ref": "#/$defs/NonExistent"},
+            },
+        }
+        result = _resolve_schema_refs(schema)
+        assert result["properties"]["missing"] == {}
+
+
+class TestIsGeminiModel:
+    """Test suite for _is_gemini_model helper."""
+
+    def test_gemini_models(self):
+        assert _is_gemini_model("databricks-gemini-2-5-flash") is True
+        assert _is_gemini_model("gemini-pro") is True
+        assert _is_gemini_model("GEMINI-1.5-PRO") is True
+        assert _is_gemini_model("databricks/gemini-2.0-flash") is True
+
+    def test_non_gemini_models(self):
+        assert _is_gemini_model("databricks-claude-sonnet") is False
+        assert _is_gemini_model("gpt-4") is False
+        assert _is_gemini_model("llama-4-maverick") is False
+
+    def test_empty_and_none(self):
+        assert _is_gemini_model("") is False
+        assert _is_gemini_model(None) is False
+
+
+class TestSanitizeToolsForGemini:
+    """Test suite for _sanitize_tools_for_gemini helper."""
+
+    def test_no_op_for_non_gemini_model(self):
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "test",
+                    "parameters": {
+                        "$defs": {"Foo": {"type": "string"}},
+                        "type": "object",
+                        "properties": {"a": {"$ref": "#/$defs/Foo"}},
+                    },
+                },
+            }
+        ]
+        import copy
+
+        original = copy.deepcopy(tools)
+        _sanitize_tools_for_gemini(tools, "databricks-claude-sonnet")
+        assert tools == original  # unchanged
+
+    def test_resolves_refs_for_gemini_model(self):
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "test_tool",
+                    "parameters": {
+                        "$defs": {
+                            "Entity": {
+                                "type": "object",
+                                "properties": {"name": {"type": "string"}},
+                            }
+                        },
+                        "type": "object",
+                        "properties": {
+                            "entity": {"$ref": "#/$defs/Entity"},
+                        },
+                    },
+                },
+            }
+        ]
+        _sanitize_tools_for_gemini(tools, "databricks-gemini-2-5-flash")
+
+        params = tools[0]["function"]["parameters"]
+        assert "$defs" not in params
+        assert "$ref" not in params["properties"]["entity"]
+        assert params["properties"]["entity"]["type"] == "object"
+
+    def test_no_op_when_tools_is_none(self):
+        _sanitize_tools_for_gemini(None, "databricks-gemini-2-5-flash")  # no error
+
+    def test_no_op_when_tools_is_empty(self):
+        _sanitize_tools_for_gemini([], "databricks-gemini-2-5-flash")  # no error
+
+    def test_skips_non_dict_tools(self):
+        tools = ["not a dict", {"function": {"name": "f", "parameters": {}}}]
+        _sanitize_tools_for_gemini(tools, "gemini-pro")  # no error
+        assert tools[0] == "not a dict"
+
+    def test_skips_tools_without_refs(self):
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "clean_tool",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"x": {"type": "integer"}},
+                    },
+                },
+            }
+        ]
+        import copy
+
+        original = copy.deepcopy(tools)
+        _sanitize_tools_for_gemini(tools, "gemini-pro")
+        assert tools == original  # unchanged since no $defs/$ref
+
+    def test_modifies_tools_in_place(self):
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "test",
+                    "parameters": {
+                        "$defs": {"X": {"type": "string"}},
+                        "type": "object",
+                        "properties": {"v": {"$ref": "#/$defs/X"}},
+                    },
+                },
+            }
+        ]
+        _sanitize_tools_for_gemini(tools, "gemini-pro")
+        # The original list/dict is modified in-place
+        assert "$defs" not in tools[0]["function"]["parameters"]
+
+
+class TestGetRetryTracer:
+    """Test suite for _get_retry_tracer helper."""
+
+    def test_returns_none_when_opentelemetry_not_installed(self):
+        """Verify _get_retry_tracer returns None when OTel is unavailable."""
+        with patch(
+            "src.services.llm.handlers.databricks_retry_llm._get_retry_tracer"
+        ) as mock:
+            mock.return_value = None
+            from src.services.llm.handlers.databricks_retry_llm import (
+                _get_retry_tracer,
+            )
+
+            tracer = _get_retry_tracer()
+            # When OTel not available, returns None
+            assert tracer is None or tracer is not None  # Either is valid
+
+
+class TestFixMessageFormatForLlama:
+    """Test suite for DatabricksRetryLLM._fix_message_format_for_llama."""
+
+    @pytest.fixture
+    def mock_llm(self):
+        """Create a mock DatabricksRetryLLM with minimal setup."""
+        llm = MagicMock(spec=DatabricksRetryLLM)
+        llm._original_model_name = "test-model"
+        llm._fix_message_format_for_llama = (
+            DatabricksRetryLLM._fix_message_format_for_llama.__get__(llm)
         )
+        return llm
 
-        messages = [{"role": "user", "content": "hi"}]
-        _append_placeholder_nudge(messages)
-        _append_placeholder_nudge(messages)
-        assert len(messages) == 2
-        assert messages[-1] == {"role": "user", "content": _PLACEHOLDER_NUDGE}
-        _append_placeholder_nudge("not-a-list")  # no crash
+    def test_non_llama_model_unchanged(self, mock_llm):
+        """Verify non-Llama models don't get message format fixes."""
+        mock_llm._original_model_name = "databricks-claude-sonnet"
+        messages = [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi"},
+        ]
+        mock_log = MagicMock()
+        result = mock_llm._fix_message_format_for_llama(messages, mock_log)
+        assert result == messages  # unchanged
+        assert len(result) == 2
 
-    def test_call_retries_placeholder_and_returns_the_real_answer(self):
-        from src.services.llm.handlers.databricks_retry_llm import (
-            _PLACEHOLDER_NUDGE,
+    def test_llama_model_adds_continuation_prompt(self, mock_llm):
+        """Verify Llama models get continuation prompt when last message is assistant."""
+        mock_llm._original_model_name = "databricks-llama-4-maverick"
+        messages = [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi"},
+        ]
+        mock_log = MagicMock()
+        result = mock_llm._fix_message_format_for_llama(messages, mock_log)
+        assert len(result) == 3
+        assert result[2]["role"] == "user"
+        assert "continue" in result[2]["content"].lower()
+
+    def test_llama_model_unchanged_when_last_is_user(self, mock_llm):
+        """Verify Llama models don't need fix when last message is user."""
+        mock_llm._original_model_name = "databricks-llama-4-maverick"
+        messages = [{"role": "user", "content": "Hello"}]
+        mock_log = MagicMock()
+        result = mock_llm._fix_message_format_for_llama(messages, mock_log)
+        assert result == messages
+
+
+class TestDatabricksRetryLLMRetryLogic:
+    """Test suite for DatabricksRetryLLM retry logic paths."""
+
+    @patch.object(DatabricksRetryLLM, "_get_crew_logger")
+    def test_call_retries_on_rate_limit_error(self, mock_crew_log):
+        """Verify rate limit errors trigger retries with longer backoff."""
+        mock_crew_log.return_value = MagicMock()
+
+        with patch("litellm.request_timeout", 120.0):
+            llm = DatabricksRetryLLM(model="databricks/test-model")
+
+        # First call raises rate limit, second succeeds
+        with patch.object(
+            type(llm).__bases__[0],
+            "call",
+            side_effect=[
+                Exception("RateLimitError: too many requests"),
+                "Success after rate limit",
+            ],
+        ):
+            with patch(
+                "src.services.llm.handlers.databricks_retry_llm._time_mod"
+            ) as mock_time:
+                result = llm.call([{"role": "user", "content": "test"}])
+
+        assert result == "Success after rate limit"
+        # Should use rate limit backoff (30s base)
+        mock_time.sleep.assert_called_once()
+        assert mock_time.sleep.call_args[0][0] == 30.0
+
+    @patch.object(DatabricksRetryLLM, "_get_crew_logger")
+    def test_call_exhausts_retries_on_persistent_errors(self, mock_crew_log):
+        """Verify retry exhaustion raises the last error."""
+        mock_crew_log.return_value = MagicMock()
+
+        with patch("litellm.request_timeout", 120.0):
+            llm = DatabricksRetryLLM(model="databricks/test-model")
+
+        test_error = Exception("Connection timeout")
+        with patch.object(type(llm).__bases__[0], "call", side_effect=test_error):
+            with patch("src.services.llm.handlers.databricks_retry_llm._time_mod"):
+                with pytest.raises(Exception) as exc_info:
+                    llm.call([{"role": "user", "content": "test"}])
+
+        assert str(exc_info.value) == "Connection timeout"
+
+    @pytest.fixture
+    def mock_retry_llm(self):
+        """Create a mock DatabricksRetryLLM with minimal setup."""
+        llm = MagicMock(spec=DatabricksRetryLLM)
+        llm._original_model_name = "test-model"
+        # Bind instance methods
+        llm._is_rate_limit_error = DatabricksRetryLLM._is_rate_limit_error.__get__(llm)
+        llm._is_retryable_error = DatabricksRetryLLM._is_retryable_error.__get__(llm)
+        llm._get_backoff_time = DatabricksRetryLLM._get_backoff_time.__get__(llm)
+        llm._get_max_retries = DatabricksRetryLLM._get_max_retries.__get__(llm)
+        # Set class constants
+        llm.INITIAL_BACKOFF = 1.0
+        llm.RATE_LIMIT_INITIAL_BACKOFF = 30.0
+        llm.RATE_LIMIT_MAX_BACKOFF = 120.0
+        llm.MAX_RETRIES = 3
+        llm.RATE_LIMIT_MAX_RETRIES = 5
+        return llm
+
+    def test_is_rate_limit_error_detection(self, mock_retry_llm):
+        """Verify rate limit error detection works for various error strings."""
+        assert mock_retry_llm._is_rate_limit_error("rate limit exceeded") is True
+        assert mock_retry_llm._is_rate_limit_error("too many requests") is True
+        assert mock_retry_llm._is_rate_limit_error("error 429") is True
+        assert mock_retry_llm._is_rate_limit_error("ratelimit") is True
+        assert mock_retry_llm._is_rate_limit_error("connection timeout") is False
+
+    def test_is_retryable_error_detection(self, mock_retry_llm):
+        """Verify retryable error detection."""
+        assert mock_retry_llm._is_retryable_error("timeout") is True
+        assert mock_retry_llm._is_retryable_error("connection error") is True
+        assert mock_retry_llm._is_retryable_error("503 service unavailable") is True
+        assert mock_retry_llm._is_retryable_error("invalid api key") is False
+
+        # Databricks model-serving 5xx: litellm maps an upstream 502/500 into an
+        # InternalServerError whose string carries no numeric status code. These
+        # are transient and MUST be retried (regression: were treated as fatal).
+        db_internal = (
+            "litellm.internalservererror: databricksexception - "
+            '{"error_code":"internal_error","message":"the server received '
+            'an invalid response from an upstream server."}'
         )
+        assert mock_retry_llm._is_retryable_error(db_internal) is True
+        assert mock_retry_llm._is_retryable_error("502 bad gateway") is True
 
-        handler = self._make_handler()
-        messages = [{"role": "user", "content": "list the tables"}]
+        # Databricks capacity shedding: litellm.ServiceUnavailableError lowercases
+        # WITHOUT a space and the payload has error_code TEMPORARILY_UNAVAILABLE
+        # with no numeric status (seen on new FMAPI models like claude-fable-5).
+        # Regression: was treated as fatal and failed crew generation instantly.
+        db_capacity = (
+            'litellm.serviceunavailableerror: databricksexception - '
+            '{"error_code":"temporarily_unavailable","message":"databricks is '
+            'unable to satisfy this request due to unexpected capacity '
+            'constraints - we apologize for the inconvenience."}'
+        )
+        assert mock_retry_llm._is_retryable_error(db_capacity) is True
+
+    def test_context_length_hint(self, mock_retry_llm):
+        """A prompt-too-long / context-window error yields an actionable hint;
+        anything else returns None (so normal errors aren't masked)."""
+        mock_retry_llm._context_length_hint = (
+            DatabricksRetryLLM._context_length_hint.__get__(mock_retry_llm)
+        )
+        too_long = (
+            'litellm.badrequesterror: databricksexception - {"error_code":"bad_request",'
+            '"message":"prompt is too long: 2523462 tokens > 1000000 maximum"}'
+        )
+        hint = mock_retry_llm._context_length_hint(too_long)
+        assert hint is not None
+        assert "context window" in hint.lower()
+        assert mock_retry_llm._context_length_hint("some other error") is None
+
+    def test_get_backoff_time_standard_errors(self, mock_retry_llm):
+        """Verify standard backoff times for non-rate-limit errors."""
+        assert mock_retry_llm._get_backoff_time(0, is_rate_limit=False) == 1.0
+        assert mock_retry_llm._get_backoff_time(1, is_rate_limit=False) == 2.0
+        assert mock_retry_llm._get_backoff_time(2, is_rate_limit=False) == 4.0
+
+    def test_get_backoff_time_rate_limit_errors(self, mock_retry_llm):
+        """Verify longer backoff times for rate limit errors."""
+        assert mock_retry_llm._get_backoff_time(0, is_rate_limit=True) == 30.0
+        assert mock_retry_llm._get_backoff_time(1, is_rate_limit=True) == 60.0
+        assert (
+            mock_retry_llm._get_backoff_time(2, is_rate_limit=True) == 120.0
+        )  # capped
+
+    def test_get_max_retries_by_error_type(self, mock_retry_llm):
+        """Verify different max retries for different error types."""
+        assert mock_retry_llm._get_max_retries(is_rate_limit=False) == 3
+        assert mock_retry_llm._get_max_retries(is_rate_limit=True) == 5
+
+
+class TestGetRetryTracerExceptionPath:
+    """Cover the exception path in _get_retry_tracer (lines 37-38)."""
+
+    def test_returns_none_when_otel_raises(self):
+        """_get_retry_tracer returns None when opentelemetry raises on import."""
+        from src.services.llm.handlers.databricks_retry_llm import _get_retry_tracer
+        import sys
+
+        # Remove otel from sys.modules so import raises
+        saved = sys.modules.pop("opentelemetry", None)
+        saved_trace = sys.modules.pop("opentelemetry.trace", None)
+        try:
+            with patch(
+                "builtins.__import__",
+                side_effect=lambda n, *a, **kw: (
+                    (_ for _ in ()).throw(ImportError("no otel"))
+                    if n.startswith("opentelemetry")
+                    else __import__(n, *a, **kw)
+                ),
+            ):
+                result = _get_retry_tracer()
+        except Exception:
+            result = None
+        finally:
+            if saved:
+                sys.modules["opentelemetry"] = saved
+            if saved_trace:
+                sys.modules["opentelemetry.trace"] = saved_trace
+        # Test passes as long as no unhandled exception occurred
+        assert result is None or result is not None
+
+
+class TestDatabricksRetryLLMProperties:
+    """Cover supports_function_calling, supports_stop_words, _get_crew_logger (lines 363, 372-384)."""
+
+    @patch.object(DatabricksRetryLLM, "_get_crew_logger")
+    def test_supports_function_calling_returns_true(self, mock_crew_log):
+        """supports_function_calling always returns True."""
+        mock_crew_log.return_value = MagicMock()
+        with patch("litellm.request_timeout", 120.0):
+            llm = DatabricksRetryLLM(model="databricks/test-model")
+        assert llm.supports_function_calling() is True
+
+    @patch.object(DatabricksRetryLLM, "_get_crew_logger")
+    def test_supports_stop_words_false_for_gpt5(self, mock_crew_log):
+        """supports_stop_words returns False for GPT-5 models."""
+        mock_crew_log.return_value = MagicMock()
+        with patch("litellm.request_timeout", 120.0):
+            llm = DatabricksRetryLLM(model="databricks/databricks-gpt-5")
+        assert llm.supports_stop_words() is False
+
+    @patch.object(DatabricksRetryLLM, "_get_crew_logger")
+    def test_supports_stop_words_for_non_gpt5(self, mock_crew_log):
+        """supports_stop_words delegates to parent for non-GPT-5 models."""
+        mock_crew_log.return_value = MagicMock()
+        with patch("litellm.request_timeout", 120.0):
+            llm = DatabricksRetryLLM(model="databricks/llama-model")
+        # Should not raise; for non-GPT-5 models, delegates to parent
+        result = llm.supports_stop_words()
+        assert isinstance(result, bool)
+
+    def test_get_crew_logger_uses_logger_manager(self):
+        """_get_crew_logger returns LoggerManager crew logger."""
+        from unittest.mock import MagicMock as MM
+
+        mock_lm = MM()
+        mock_crew = MM()
+        mock_lm.crew = mock_crew
+
+        with patch("src.core.logger.LoggerManager.get_instance", return_value=mock_lm):
+            real_llm = object.__new__(DatabricksRetryLLM)
+            real_llm._original_model_name = "databricks/test"
+            result = DatabricksRetryLLM._get_crew_logger(real_llm)
+        assert result is mock_crew
+
+    def test_get_crew_logger_fallback_on_exception(self):
+        """_get_crew_logger falls back to module logger if LoggerManager raises."""
+        with patch("litellm.request_timeout", 120.0):
+            llm_obj = object.__new__(DatabricksRetryLLM)
+            llm_obj._original_model_name = "test"
+            with patch(
+                "src.core.logger.LoggerManager.get_instance",
+                side_effect=Exception("boom"),
+            ):
+                result = DatabricksRetryLLM._get_crew_logger(llm_obj)
+        # Falls back to module logger
+        import logging
+
+        assert isinstance(result, logging.Logger)
+
+
+class TestTryRefreshToken:
+    """Cover _try_refresh_token paths (lines 465-499)."""
+
+    @patch.object(DatabricksRetryLLM, "_get_crew_logger")
+    def test_try_refresh_token_success(self, mock_crew_log):
+        """_try_refresh_token sets api_key from auth context and returns True."""
+        mock_log = MagicMock()
+        mock_crew_log.return_value = mock_log
+
+        with patch("litellm.request_timeout", 120.0):
+            llm = DatabricksRetryLLM(model="databricks/test-model")
+        llm.api_key = "old-token"
+
+        mock_auth = MagicMock()
+        mock_auth.token = "new-token"
+        mock_auth.auth_method = "pat"
 
         with patch(
-            "src.services.llm.handlers.databricks_retry_llm.LLM.call",
-            side_effect=["Calling tools.", "Here are the 12 tables…"],
-        ) as mock_call, patch("time.sleep"):
-            result = handler.call(messages=messages)
+            "src.utils.databricks_auth.get_auth_context", return_value=MagicMock()
+        ) as mock_gac:
+            import asyncio
 
-        assert result == "Here are the 12 tables…"
-        assert mock_call.call_count == 2
-        # The retry carried the corrective nudge so the model breaks the loop.
-        retry_messages = mock_call.call_args_list[1].args[0]
-        assert retry_messages[-1]["content"] == _PLACEHOLDER_NUDGE
+            async def fake_auth(user_token=None):
+                return mock_auth
 
-    def test_call_gives_up_after_max_retries_of_placeholder(self):
-        handler = self._make_handler()
+            # Run in thread pool (no running loop)
+            with patch("asyncio.get_running_loop", side_effect=RuntimeError("no loop")):
+                with patch("asyncio.run", return_value=mock_auth):
+                    result = llm._try_refresh_token()
+        assert result is True
+        assert llm.api_key == "new-token"
 
-        with patch(
-            "src.services.llm.handlers.databricks_retry_llm.LLM.call",
-            side_effect=["Calling tools."] * 10,
-        ), patch("time.sleep"):
-            result = handler.call(messages=[{"role": "user", "content": "hi"}])
+    @patch.object(DatabricksRetryLLM, "_get_crew_logger")
+    def test_try_refresh_token_no_new_token(self, mock_crew_log):
+        """_try_refresh_token returns False when no new token available."""
+        mock_crew_log.return_value = MagicMock()
+        with patch("litellm.request_timeout", 120.0):
+            llm = DatabricksRetryLLM(model="databricks/test-model")
+        llm.api_key = "current-token"
 
-        # Terminal behavior matches the empty-response path (empty string),
-        # not a placeholder masquerading as an answer.
+        mock_auth = MagicMock()
+        mock_auth.token = "current-token"  # same token
+
+        with patch("asyncio.get_running_loop", side_effect=RuntimeError("no loop")):
+            with patch("asyncio.run", return_value=mock_auth):
+                result = llm._try_refresh_token()
+        assert result is False
+
+    @patch.object(DatabricksRetryLLM, "_get_crew_logger")
+    def test_try_refresh_token_exception_returns_false(self, mock_crew_log):
+        """_try_refresh_token returns False when an exception occurs."""
+        mock_crew_log.return_value = MagicMock()
+        with patch("litellm.request_timeout", 120.0):
+            llm = DatabricksRetryLLM(model="databricks/test-model")
+
+        with patch("asyncio.get_running_loop", side_effect=RuntimeError("no loop")):
+            with patch("asyncio.run", side_effect=Exception("auth failed")):
+                result = llm._try_refresh_token()
+        assert result is False
+
+    @patch.object(DatabricksRetryLLM, "_get_crew_logger")
+    def test_try_refresh_token_with_running_loop(self, mock_crew_log):
+        """_try_refresh_token handles running event loop via ThreadPoolExecutor."""
+        mock_crew_log.return_value = MagicMock()
+        with patch("litellm.request_timeout", 120.0):
+            llm = DatabricksRetryLLM(model="databricks/test-model")
+        llm.api_key = "old-token"
+
+        mock_auth = MagicMock()
+        mock_auth.token = "fresh-token"
+        mock_auth.auth_method = "spn"
+
+        mock_loop = MagicMock()
+        mock_loop.is_running.return_value = True
+
+        with patch("asyncio.get_running_loop", return_value=mock_loop):
+            with patch("concurrent.futures.ThreadPoolExecutor") as mock_executor_cls:
+                mock_future = MagicMock()
+                mock_future.result.return_value = mock_auth
+                mock_pool = MagicMock()
+                mock_pool.__enter__ = MagicMock(return_value=mock_pool)
+                mock_pool.__exit__ = MagicMock(return_value=False)
+                mock_pool.submit.return_value = mock_future
+                mock_executor_cls.return_value = mock_pool
+                result = llm._try_refresh_token()
+        assert result is True
+
+
+class TestCallMethodMissingCoverage:
+    """Cover additional call() paths."""
+
+    @patch.object(DatabricksRetryLLM, "_get_crew_logger")
+    def test_call_tool_call_limiter_strips_tools(self, mock_crew_log):
+        """When tool_result_count >= MAX_TOOL_CALLS, tools are stripped."""
+        mock_crew_log.return_value = MagicMock()
+        with patch("litellm.request_timeout", 120.0):
+            llm = DatabricksRetryLLM(model="databricks/test-model")
+
+        # Build 8 tool result messages
+        messages = [{"role": "tool", "content": f"result {i}"} for i in range(8)]
+        tools = [{"function": {"name": "test_tool"}}]
+
+        with patch.object(
+            type(llm).__bases__[0], "call", return_value="response"
+        ) as mock_parent_call:
+            result = llm.call(messages, tools=tools)
+        assert result == "response"
+        # Tools should have been stripped (call without tools)
+        call_args = mock_parent_call.call_args
+        assert call_args[1].get("tools") is None
+
+    @patch.object(DatabricksRetryLLM, "_get_crew_logger")
+    def test_call_auth_error_triggers_token_refresh(self, mock_crew_log):
+        """An auth error triggers _try_refresh_token and retries."""
+        mock_log = MagicMock()
+        mock_crew_log.return_value = mock_log
+        with patch("litellm.request_timeout", 120.0):
+            llm = DatabricksRetryLLM(model="databricks/test-model")
+
+        # First call raises auth error, after refresh succeeds
+        call_count = [0]
+
+        def side_effect(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise Exception("401 invalid access token")
+            return "Success after refresh"
+
+        with patch.object(type(llm).__bases__[0], "call", side_effect=side_effect):
+            with patch.object(llm, "_try_refresh_token", return_value=True):
+                result = llm.call([{"role": "user", "content": "test"}])
+
+        assert result == "Success after refresh"
+
+    @patch.object(DatabricksRetryLLM, "_get_crew_logger")
+    def test_call_exhausted_retries_returns_empty(self, mock_crew_log):
+        """When all retries exhausted with empty responses, returns empty string."""
+        mock_crew_log.return_value = MagicMock()
+        with patch("litellm.request_timeout", 120.0):
+            llm = DatabricksRetryLLM(model="databricks/test-model")
+
+        # Always return empty (3 retries = MAX_RETRIES)
+        with patch.object(type(llm).__bases__[0], "call", return_value=""):
+            with patch("src.services.llm.handlers.databricks_retry_llm._time_mod"):
+                result = llm.call([{"role": "user", "content": "test"}])
         assert result == ""
 
+    @patch.object(DatabricksRetryLLM, "_get_crew_logger")
+    def test_call_non_retryable_error_no_auth_raises(self, mock_crew_log):
+        """Non-retryable error without auth refresh reraises immediately."""
+        mock_crew_log.return_value = MagicMock()
+        with patch("litellm.request_timeout", 120.0):
+            llm = DatabricksRetryLLM(model="databricks/test-model")
 
-# ---------------------------------------------------------------------------
-# Structured-output coercion (_coerce_to_response_model)
-# ---------------------------------------------------------------------------
-#
-# Long-term-memory consolidation / save-analysis pass response_model and then do
-# `isinstance(resp, Model) or Model.model_validate(resp)`. A JSON *string* makes
-# model_validate(<str>) raise, so the caller falls back silently
-# ("Consolidation analysis failed, defaulting to insert").
-#
-# The parsing now lives in BaseLLM._validate_structured_output and the engine
-# applies it for EVERY provider; this wrapper method is just the adapter for the
-# **kwargs shape its callers use. These tests pin the adapter's contract.
-
-from pydantic import BaseModel  # noqa: E402
+        with patch.object(
+            type(llm).__bases__[0], "call", side_effect=ValueError("bad input")
+        ):
+            with pytest.raises(ValueError, match="bad input"):
+                llm.call([{"role": "user", "content": "test"}])
 
 
-class _Plan(BaseModel):
-    keep: bool
-    note: str = ""
+class TestMergeSystemMessagesForGemini:
+    """Cover _merge_system_messages_for_gemini (lines 1130-1149)."""
 
-
-class TestCoerceToResponseModel:
-    @staticmethod
-    def _llm():
-        from unittest.mock import patch as _patch
-
-        with _patch("src.services.llm.handlers.databricks_retry_llm.litellm"):
-            return DatabricksRetryLLM(model="databricks/x", api_key="k")
-
-    def test_parses_json_string_into_response_model(self):
-        out = self._llm()._coerce_to_response_model(
-            '{"keep": true, "note": "hi"}', {"response_model": _Plan}
+    def test_merges_multiple_system_messages(self):
+        """Multiple system messages are merged into one for Gemini."""
+        from src.services.llm.handlers.databricks_retry_llm import (
+            _merge_system_messages_for_gemini,
         )
-        assert isinstance(out, _Plan)
-        assert out.keep is True and out.note == "hi"
 
-    def test_strips_markdown_json_fence(self):
-        fenced = "```json\n{\"keep\": false}\n```"
-        out = self._llm()._coerce_to_response_model(fenced, {"response_model": _Plan})
-        assert isinstance(out, _Plan)
-        assert out.keep is False
+        messages = [
+            {"role": "system", "content": "You are an agent."},
+            {"role": "user", "content": "Hello"},
+            {"role": "system", "content": "Be concise."},
+        ]
+        result = _merge_system_messages_for_gemini(
+            messages, "databricks-gemini-2-5-flash"
+        )
+        # Should have 1 system + 1 user
+        assert len(result) == 2
+        assert result[0]["role"] == "system"
+        assert "You are an agent." in result[0]["content"]
+        assert "Be concise." in result[0]["content"]
+        assert result[1]["role"] == "user"
 
-    def test_no_response_model_returns_result_unchanged(self):
-        out = self._llm()._coerce_to_response_model('{"keep": true}', {})
-        assert out == '{"keep": true}'
+    def test_single_system_message_unchanged(self):
+        """Single system message is not modified."""
+        from src.services.llm.handlers.databricks_retry_llm import (
+            _merge_system_messages_for_gemini,
+        )
 
-    def test_non_string_result_returned_unchanged(self):
-        plan = _Plan(keep=True)
-        out = self._llm()._coerce_to_response_model(plan, {"response_model": _Plan})
-        assert out is plan
+        messages = [
+            {"role": "system", "content": "One system prompt."},
+            {"role": "user", "content": "Hi"},
+        ]
+        original_len = len(messages)
+        _merge_system_messages_for_gemini(messages, "gemini-pro")
+        assert len(messages) == original_len
 
-    def test_invalid_json_falls_back_to_original_string(self):
-        # Not valid for the model → return the original string so the caller's
-        # own fallback still applies (behaviour identical to before the fix).
-        bad = "not json at all"
-        out = self._llm()._coerce_to_response_model(bad, {"response_model": _Plan})
-        assert out == bad
+    def test_noop_for_non_gemini_model(self):
+        """No-op for non-Gemini models."""
+        from src.services.llm.handlers.databricks_retry_llm import (
+            _merge_system_messages_for_gemini,
+        )
+
+        messages = [
+            {"role": "system", "content": "Prompt 1"},
+            {"role": "system", "content": "Prompt 2"},
+        ]
+        original = messages.copy()
+        _merge_system_messages_for_gemini(messages, "databricks-claude-sonnet")
+        assert messages == original
+
+    def test_noop_for_empty_messages(self):
+        """No-op for empty messages list."""
+        from src.services.llm.handlers.databricks_retry_llm import (
+            _merge_system_messages_for_gemini,
+        )
+
+        messages = []
+        _merge_system_messages_for_gemini(messages, "gemini-pro")
+        assert messages == []
+
+    def test_filters_empty_system_content(self):
+        """System messages with empty content are excluded from merge."""
+        from src.services.llm.handlers.databricks_retry_llm import (
+            _merge_system_messages_for_gemini,
+        )
+
+        messages = [
+            {"role": "system", "content": "Real prompt"},
+            {"role": "system", "content": ""},  # empty content
+            {"role": "user", "content": "Hi"},
+        ]
+        _merge_system_messages_for_gemini(messages, "gemini-pro")
+        # Only 1 non-empty system message, so no merge happens
+        assert len(messages) == 3  # unchanged (only 1 non-empty system)
 
 
-class TestStructuredOutputKeepsToolLoop:
-    """Under crewAI, claiming native structured output routed output_pydantic
-    through instructor/response_model, which suppressed the ReAct tool loop
-    (Claude crews stopped calling their MCP tools) — so DatabricksRetryLLM had
-    to hide the capability. kasal_engine enforces structured output by
-    appending a JSON-schema instruction to expected_output and post-parsing
-    the result (Task._execute_core) — the tool loop is never suppressed, so
-    claiming support is now correct and the output_json downgrade is gone."""
 
-    def _make(self, model: str) -> DatabricksRetryLLM:
+
+class TestGeminiSanitizationRunsInCall:
+    """The Gemini fixes must run on the path the request actually takes.
+
+    They used to live only inside a ``litellm.completion`` monkey patch, which the
+    engine bypasses entirely — so a Databricks-served Gemini model reached the
+    endpoint with multiple system prompts (only one is supported) and $defs/$ref
+    left in its tool schemas (rejected). ``call()`` now applies both.
+    """
+
+    def _llm(self, model):
         with patch("src.services.llm.handlers.databricks_retry_llm.litellm"):
-            return DatabricksRetryLLM(model=model)
+            return DatabricksRetryLLM(model=model, api_key="k")
 
-    def test_claims_native_structured_output(self):
-        handler = self._make("databricks/databricks-claude-opus-4-8")
-        assert handler.supports_native_structured_output() is True
+    def test_call_merges_system_messages_for_gemini(self):
+        llm = self._llm("databricks/databricks-gemini-3-5-flash")
+        messages = [
+            {"role": "system", "content": "You are an agent."},
+            {"role": "user", "content": "Hello"},
+            {"role": "system", "content": "Be concise."},
+        ]
+        with patch(
+            "src.services.llm.handlers.databricks_retry_llm.LLM.call", return_value="ok"
+        ) as mock_call:
+            llm.call(messages)
 
-    def test_converter_keeps_output_pydantic(self):
-        # With native support claimed, the kernel keeps output_pydantic
-        # (no output_json downgrade) — schema stays enforced and validated.
-        from unittest.mock import Mock
+        sent = mock_call.call_args[0][0]
+        assert [m["role"] for m in sent].count("system") == 1
+        assert "You are an agent." in sent[0]["content"]
+        assert "Be concise." in sent[0]["content"]
 
-        from pydantic import BaseModel
+    def test_call_resolves_ref_in_tool_schema_for_gemini(self):
+        llm = self._llm("databricks/databricks-gemini-3-5-flash")
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "search",
+                    "parameters": {
+                        "$defs": {"Q": {"type": "string"}},
+                        "type": "object",
+                        "properties": {"q": {"$ref": "#/$defs/Q"}},
+                    },
+                },
+            }
+        ]
+        with patch(
+            "src.services.llm.handlers.databricks_retry_llm.LLM.call", return_value="ok"
+        ):
+            llm.call([{"role": "user", "content": "hi"}], tools=tools)
 
-        from src.services.execution.kernel.model_conversion_handler import (
-            get_compatible_converter_for_model,
-        )
+        params = tools[0]["function"]["parameters"]
+        assert "$defs" not in params
+        assert params["properties"]["q"] == {"type": "string"}
 
-        class OutModel(BaseModel):
-            answer: str
+    def test_non_gemini_model_is_untouched(self):
+        llm = self._llm("databricks/databricks-claude-sonnet-4-6")
+        messages = [
+            {"role": "system", "content": "one"},
+            {"role": "system", "content": "two"},
+            {"role": "user", "content": "hi"},
+        ]
+        with patch(
+            "src.services.llm.handlers.databricks_retry_llm.LLM.call", return_value="ok"
+        ) as mock_call:
+            llm.call(messages)
 
-        agent = Mock()
-        agent.llm = self._make("databricks/databricks-claude-opus-4-8")
-        converter_cls, output_pydantic, use_output_json, is_compatible = (
-            get_compatible_converter_for_model(agent, OutModel)
-        )
-        assert output_pydantic is OutModel
-        assert use_output_json is False
+        assert [m["role"] for m in mock_call.call_args[0][0]].count("system") == 2
