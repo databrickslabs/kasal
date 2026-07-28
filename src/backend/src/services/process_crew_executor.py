@@ -1000,7 +1000,7 @@ def run_crew_in_process(
 
                 # The crew's own step/task hooks (execution logs + secret
                 # redaction). Event SUBSCRIPTIONS are the OTel bridge's job.
-                from src.engines.kasal.callbacks.execution_callback import (
+                from src.engines.kasal.kernel.execution_callback import (
                     create_execution_callbacks,
                 )
                 from src.engines.kasal.infra.trace_management import TraceManager
@@ -1075,7 +1075,7 @@ def run_crew_in_process(
                     # output so a killed/crashed run can resume without redoing
                     # finished tasks (POST /executions/{id}/resume). Fail-open.
                     try:
-                        from src.engines.kasal.callbacks.crew_checkpoint import (
+                        from src.services.crew_checkpoint import (
                             CrewTaskCheckpointRecorder,
                         )
 
@@ -1153,7 +1153,7 @@ def run_crew_in_process(
                     loggers_to_configure = [
                         logging.getLogger("crew"),  # Main crew logger
                         logging.getLogger(
-                            "src.engines.kasal.callbacks.execution_callback"
+                            "src.engines.kasal.kernel.execution_callback"
                         ),
                         logging.getLogger("src.engines.kasal"),
                         logging.getLogger("mlflow"),

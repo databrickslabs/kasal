@@ -64,10 +64,10 @@ class TestTraceManagerEventFiltering:
 
     def test_step_callback_creates_log(self):
         """Test that step callback creates execution log."""
-        from src.engines.kasal.callbacks.execution_callback import create_execution_callbacks
+        from src.engines.kasal.kernel.execution_callback import create_execution_callbacks
 
         with patch(
-            "src.engines.kasal.callbacks.execution_callback.enqueue_log"
+            "src.engines.kasal.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             step_callback, _ = create_execution_callbacks("test_job_123", {"model": "test"}, None)
 
@@ -82,10 +82,10 @@ class TestTraceManagerEventFiltering:
 
     def test_step_callback_with_various_output_types(self):
         """Test that step callback handles various output object types."""
-        from src.engines.kasal.callbacks.execution_callback import create_execution_callbacks
+        from src.engines.kasal.kernel.execution_callback import create_execution_callbacks
 
         with patch(
-            "src.engines.kasal.callbacks.execution_callback.enqueue_log"
+            "src.engines.kasal.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             step_callback, _ = create_execution_callbacks("test_job", {}, None)
 
@@ -105,14 +105,14 @@ class TestTraceManagerEventFiltering:
 
     def test_group_context_in_logs(self):
         """Test that group context is properly included in logs."""
-        from src.engines.kasal.callbacks.execution_callback import create_execution_callbacks
+        from src.engines.kasal.kernel.execution_callback import create_execution_callbacks
 
         mock_group_context = MagicMock()
         mock_group_context.primary_group_id = "group_123"
         mock_group_context.group_email = "test@group.com"
 
         with patch(
-            "src.engines.kasal.callbacks.execution_callback.enqueue_log"
+            "src.engines.kasal.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             step_callback, _ = create_execution_callbacks(
                 "test_job_123", {"model": "test"}, mock_group_context
@@ -127,10 +127,10 @@ class TestTraceManagerEventFiltering:
 
     def test_log_isolation_by_job_id(self):
         """Test that logs are isolated by job ID."""
-        from src.engines.kasal.callbacks.execution_callback import create_execution_callbacks
+        from src.engines.kasal.kernel.execution_callback import create_execution_callbacks
 
         with patch(
-            "src.engines.kasal.callbacks.execution_callback.enqueue_log"
+            "src.engines.kasal.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             step_1, _ = create_execution_callbacks("execution_1", {}, None)
             step_2, _ = create_execution_callbacks("execution_2", {}, None)
@@ -154,7 +154,7 @@ class TestCallbackCrewIntegration:
 
     def test_crew_callbacks_creation(self):
         """Test that crew callbacks are created correctly."""
-        from src.engines.kasal.callbacks.execution_callback import create_crew_callbacks
+        from src.engines.kasal.kernel.execution_callback import create_crew_callbacks
 
         callbacks = create_crew_callbacks("test_job", {"model": "test"}, None)
 
@@ -167,10 +167,10 @@ class TestCallbackCrewIntegration:
 
     def test_crew_start_callback_creates_log(self):
         """Test crew start callback creates execution log."""
-        from src.engines.kasal.callbacks.execution_callback import create_crew_callbacks
+        from src.engines.kasal.kernel.execution_callback import create_crew_callbacks
 
         with patch(
-            "src.engines.kasal.callbacks.execution_callback.enqueue_log"
+            "src.engines.kasal.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             callbacks = create_crew_callbacks("test_job", {"model": "test"}, None)
             callbacks["on_start"]()
@@ -182,10 +182,10 @@ class TestCallbackCrewIntegration:
 
     def test_crew_complete_callback_creates_log(self):
         """Test crew completion callback creates execution log."""
-        from src.engines.kasal.callbacks.execution_callback import create_crew_callbacks
+        from src.engines.kasal.kernel.execution_callback import create_crew_callbacks
 
         with patch(
-            "src.engines.kasal.callbacks.execution_callback.enqueue_log"
+            "src.engines.kasal.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             callbacks = create_crew_callbacks("test_job", {"model": "test"}, None)
             callbacks["on_complete"]("Test result")
@@ -197,10 +197,10 @@ class TestCallbackCrewIntegration:
 
     def test_crew_error_callback(self):
         """Test crew error callback functionality."""
-        from src.engines.kasal.callbacks.execution_callback import create_crew_callbacks
+        from src.engines.kasal.kernel.execution_callback import create_crew_callbacks
 
         with patch(
-            "src.engines.kasal.callbacks.execution_callback.enqueue_log"
+            "src.engines.kasal.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             callbacks = create_crew_callbacks("test_job", {"model": "test"}, None)
             callbacks["on_error"](Exception("Test error"))
@@ -217,10 +217,10 @@ class TestTaskCallback:
 
     def test_task_callback_creates_log(self):
         """Test task callback creates execution log."""
-        from src.engines.kasal.callbacks.execution_callback import create_execution_callbacks
+        from src.engines.kasal.kernel.execution_callback import create_execution_callbacks
 
         with patch(
-            "src.engines.kasal.callbacks.execution_callback.enqueue_log"
+            "src.engines.kasal.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             _, task_callback = create_execution_callbacks("test_job", {"model": "test"}, None)
 
@@ -240,7 +240,7 @@ class TestConfigSanitization:
 
     def test_config_sanitization(self):
         """Test that sensitive config data is sanitized."""
-        from src.engines.kasal.callbacks.execution_callback import log_crew_initialization
+        from src.engines.kasal.kernel.execution_callback import log_crew_initialization
 
         config_with_secrets = {
             "model": "test-model",
@@ -251,7 +251,7 @@ class TestConfigSanitization:
         }
 
         with patch(
-            "src.engines.kasal.callbacks.execution_callback.enqueue_log"
+            "src.engines.kasal.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             log_crew_initialization("test_job", config_with_secrets, None)
 
@@ -264,10 +264,10 @@ class TestConfigSanitization:
 
     def test_empty_config_handling(self):
         """Test handling of empty or None config."""
-        from src.engines.kasal.callbacks.execution_callback import log_crew_initialization
+        from src.engines.kasal.kernel.execution_callback import log_crew_initialization
 
         with patch(
-            "src.engines.kasal.callbacks.execution_callback.enqueue_log"
+            "src.engines.kasal.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             log_crew_initialization("test_job", None, None)
             mock_enqueue.assert_called_once()

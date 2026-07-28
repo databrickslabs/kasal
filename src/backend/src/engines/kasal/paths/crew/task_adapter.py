@@ -168,7 +168,7 @@ def create_callback_from_string(callback_name: str, task_key: str, callback_conf
     
     if callback_name == 'DatabricksVolumeCallback':
         try:
-            from src.engines.kasal.callbacks.databricks_volume_callback import DatabricksVolumeCallback
+            from src.services.task_output.databricks_volume import DatabricksVolumeCallback
             
             # Create the callback instance with configuration
             databricks_callback = DatabricksVolumeCallback(

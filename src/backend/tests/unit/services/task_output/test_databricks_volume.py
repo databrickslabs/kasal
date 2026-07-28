@@ -11,7 +11,7 @@ import pytest
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
-from src.engines.kasal.callbacks.databricks_volume_callback import (
+from src.services.task_output.databricks_volume import (
     DatabricksVolumeCallback,
 )
 
@@ -146,7 +146,7 @@ class TestEnsureClient:
     async def test_creates_client_via_centralized_auth(self, callback):
         mock_ws = MagicMock()
         with patch(
-            "src.engines.kasal.callbacks.databricks_volume_callback.get_workspace_client",
+            "src.services.task_output.databricks_volume.get_workspace_client",
             new_callable=AsyncMock,
             return_value=mock_ws,
         ):
@@ -157,7 +157,7 @@ class TestEnsureClient:
     @pytest.mark.asyncio
     async def test_raises_when_client_is_none(self, callback):
         with patch(
-            "src.engines.kasal.callbacks.databricks_volume_callback.get_workspace_client",
+            "src.services.task_output.databricks_volume.get_workspace_client",
             new_callable=AsyncMock,
             return_value=None,
         ):

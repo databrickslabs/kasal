@@ -3,7 +3,7 @@ import asyncio
 from unittest.mock import MagicMock, patch, AsyncMock
 from datetime import datetime
 
-from src.engines.kasal.callbacks.base import KasalCallback, CallbackFailedError
+from src.services.task_output.base import KasalCallback, CallbackFailedError
 
 
 class TestKasalCallback:
@@ -44,7 +44,7 @@ class TestKasalCallback:
         
         callback = TestCallback(task_key="test_task")
         
-        with patch('src.engines.kasal.callbacks.base.logger') as mock_logger:
+        with patch('src.services.task_output.base.logger') as mock_logger:
             result = await callback("test_input")
             
             assert result == "processed_test_input"
@@ -62,7 +62,7 @@ class TestKasalCallback:
         
         callback = TestCallback()
         
-        with patch('src.engines.kasal.callbacks.base.logger') as mock_logger:
+        with patch('src.services.task_output.base.logger') as mock_logger:
             result = await callback("test_input")
             
             assert result == "processed_test_input"
@@ -84,7 +84,7 @@ class TestKasalCallback:
         
         callback = TestCallback(task_key="test_task")
         
-        with patch('src.engines.kasal.callbacks.base.logger') as mock_logger, \
+        with patch('src.services.task_output.base.logger') as mock_logger, \
              patch('asyncio.sleep', new_callable=AsyncMock) as mock_sleep:
             
             result = await callback("test_input")
@@ -103,7 +103,7 @@ class TestKasalCallback:
         
         callback = TestCallback(max_retries=2, task_key="test_task")
         
-        with patch('src.engines.kasal.callbacks.base.logger') as mock_logger, \
+        with patch('src.services.task_output.base.logger') as mock_logger, \
              patch('asyncio.sleep', new_callable=AsyncMock):
             
             with pytest.raises(CallbackFailedError) as exc_info:
@@ -130,7 +130,7 @@ class TestKasalCallback:
         
         callback = TestCallback(max_retries=1, task_key="test_task")
         
-        with patch('src.engines.kasal.callbacks.base.logger'), \
+        with patch('src.services.task_output.base.logger'), \
              patch('asyncio.sleep', new_callable=AsyncMock):
             
             with pytest.raises(CallbackFailedError) as exc_info:
@@ -153,7 +153,7 @@ class TestKasalCallback:
         
         mock_output = MockOutput()
         
-        with patch('src.engines.kasal.callbacks.base.logger') as mock_logger:
+        with patch('src.services.task_output.base.logger') as mock_logger:
             callback._log_output_info(mock_output)
             
             mock_logger.info.assert_any_call(f"Output Type: {type(mock_output)}")
@@ -167,7 +167,7 @@ class TestKasalCallback:
         
         callback = TestCallback()
         
-        with patch('src.engines.kasal.callbacks.base.logger') as mock_logger:
+        with patch('src.services.task_output.base.logger') as mock_logger:
             callback._log_output_info("test string")
             
             mock_logger.info.assert_any_call("Output Type: <class 'str'>")
@@ -181,7 +181,7 @@ class TestKasalCallback:
         
         callback = TestCallback()
         
-        with patch('src.engines.kasal.callbacks.base.logger') as mock_logger:
+        with patch('src.services.task_output.base.logger') as mock_logger:
             callback._log_output_info(42)
             
             mock_logger.info.assert_any_call("Output Type: <class 'int'>")
@@ -195,7 +195,7 @@ class TestKasalCallback:
         
         callback = TestCallback()
         
-        with patch('src.engines.kasal.callbacks.base.logger') as mock_logger:
+        with patch('src.services.task_output.base.logger') as mock_logger:
             callback._log_output_info(True)
             
             mock_logger.info.assert_any_call("Output Type: <class 'bool'>")
@@ -210,7 +210,7 @@ class TestKasalCallback:
         callback = TestCallback()
         test_dict = {"key": "value", "number": 123}
         
-        with patch('src.engines.kasal.callbacks.base.logger') as mock_logger:
+        with patch('src.services.task_output.base.logger') as mock_logger:
             callback._log_output_info(test_dict)
             
             mock_logger.info.assert_any_call("Output Type: <class 'dict'>")
@@ -233,7 +233,7 @@ class TestKasalCallback:
         
         custom_obj = CustomObject()
         
-        with patch('src.engines.kasal.callbacks.base.logger') as mock_logger:
+        with patch('src.services.task_output.base.logger') as mock_logger:
             callback._log_output_info(custom_obj)
             
             mock_logger.info.assert_any_call(f"Output Type: {type(custom_obj)}")
@@ -248,7 +248,7 @@ class TestKasalCallback:
         callback = TestCallback()
         long_string = "x" * 600  # Longer than 500 character limit
         
-        with patch('src.engines.kasal.callbacks.base.logger') as mock_logger:
+        with patch('src.services.task_output.base.logger') as mock_logger:
             callback._log_output_info(long_string)
             
             args, _ = mock_logger.info.call_args_list[-1]
@@ -264,7 +264,7 @@ class TestKasalCallback:
         
         callback = TestCallback()
         
-        with patch('src.engines.kasal.callbacks.base.logger') as mock_logger:
+        with patch('src.services.task_output.base.logger') as mock_logger:
             callback._log_output_info(3.14)
             
             mock_logger.info.assert_any_call("Output Type: <class 'float'>")
@@ -284,7 +284,7 @@ class TestKasalCallback:
         
         mock_output = MockOutput()
         
-        with patch('src.engines.kasal.callbacks.base.logger') as mock_logger:
+        with patch('src.services.task_output.base.logger') as mock_logger:
             callback._log_output_info(mock_output)
             
             mock_logger.info.assert_any_call(f"Output Type: {type(mock_output)}")
@@ -302,7 +302,7 @@ class TestKasalCallback:
         
         callback = TestCallback(max_retries=1, task_key="test_task")
         
-        with patch('src.engines.kasal.callbacks.base.logger') as mock_logger, \
+        with patch('src.services.task_output.base.logger') as mock_logger, \
              patch('asyncio.sleep', new_callable=AsyncMock):
             
             with pytest.raises(CallbackFailedError):
@@ -321,7 +321,7 @@ class TestKasalCallback:
         
         callback = TestCallback(max_retries=0, task_key="test_task")
         
-        with patch('src.engines.kasal.callbacks.base.logger') as mock_logger:
+        with patch('src.services.task_output.base.logger') as mock_logger:
             with pytest.raises(CallbackFailedError) as exc_info:
                 await callback("test_input")
             
@@ -346,7 +346,7 @@ class TestKasalCallback:
         
         callback = TestCallback(max_retries=3, task_key="test_task")
         
-        with patch('src.engines.kasal.callbacks.base.logger'), \
+        with patch('src.services.task_output.base.logger'), \
              patch('asyncio.sleep', new_callable=AsyncMock):
             
             result = await callback("test_input")

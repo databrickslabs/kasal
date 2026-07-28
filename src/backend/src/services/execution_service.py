@@ -1316,7 +1316,7 @@ class ExecutionService:
                 not in a resumable (terminal-failed) state
         """
         from src.repositories.execution_history_repository import ExecutionHistoryRepository
-        from src.engines.kasal.callbacks.crew_checkpoint import build_resume_checkpoint
+        from src.services.crew_checkpoint import build_resume_checkpoint
 
         if not self.session:
             raise ValueError("resume_execution requires a database session")

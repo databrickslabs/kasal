@@ -1,7 +1,8 @@
 """
-Base callbacks for CrewAI engine.
+Base class for task-output sinks.
 
-This module provides base callback classes for CrewAI.
+An async callback with retry + a structured failure error. Subclass it and
+implement ``execute``.
 """
 import logging
 from typing import Any, Optional, Dict

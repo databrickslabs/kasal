@@ -51,10 +51,10 @@ class TestExecutionRunnerCallbackIntegration:
     @pytest.mark.asyncio
     def test_callback_isolation_between_instances(self):
         """Test that different callback instances are isolated."""
-        from src.engines.kasal.callbacks.execution_callback import create_execution_callbacks
+        from src.engines.kasal.kernel.execution_callback import create_execution_callbacks
 
         with patch(
-            "src.engines.kasal.callbacks.execution_callback.enqueue_log"
+            "src.engines.kasal.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             step_1, task_1 = create_execution_callbacks("execution_1", {"model": "test"}, None)
             step_2, task_2 = create_execution_callbacks("execution_2", {"model": "test"}, None)
@@ -81,10 +81,10 @@ class TestCallbackFunctionality:
 
     def test_step_callback_creates_execution_log(self):
         """Test that step callback creates execution log."""
-        from src.engines.kasal.callbacks.execution_callback import create_execution_callbacks
+        from src.engines.kasal.kernel.execution_callback import create_execution_callbacks
 
         with patch(
-            "src.engines.kasal.callbacks.execution_callback.enqueue_log"
+            "src.engines.kasal.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             step_callback, _ = create_execution_callbacks("test_job", {"model": "test"}, None)
 
@@ -99,10 +99,10 @@ class TestCallbackFunctionality:
 
     def test_step_callback_skips_log_on_error(self):
         """Test that step callback handles enqueue errors gracefully."""
-        from src.engines.kasal.callbacks.execution_callback import create_execution_callbacks
+        from src.engines.kasal.kernel.execution_callback import create_execution_callbacks
 
         with patch(
-            "src.engines.kasal.callbacks.execution_callback.enqueue_log"
+            "src.engines.kasal.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             mock_enqueue.side_effect = Exception("Enqueue error")
             step_callback, _ = create_execution_callbacks("test_job", {"model": "test"}, None)
@@ -114,10 +114,10 @@ class TestCallbackFunctionality:
 
     def test_task_callback_creates_execution_log(self):
         """Test that task callback creates execution log."""
-        from src.engines.kasal.callbacks.execution_callback import create_execution_callbacks
+        from src.engines.kasal.kernel.execution_callback import create_execution_callbacks
 
         with patch(
-            "src.engines.kasal.callbacks.execution_callback.enqueue_log"
+            "src.engines.kasal.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             _, task_callback = create_execution_callbacks("test_job", {"model": "test"}, None)
 

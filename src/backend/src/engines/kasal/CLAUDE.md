@@ -46,13 +46,19 @@ engines/kasal/
 │   └── flow/                  # flow_runner_service, backend_flow, modules/
 ├── kernel/                    # path-AGNOSTIC single-source build logic (was common/)
 │                              #   agent_builder, agent_tools, task_builder,
-│                              #   agent_security, model_conversion_handler, a2ui_runner...
+│                              #   agent_security, model_conversion_handler, a2ui_runner,
+│                              #   execution_callback (the crew's step/task hooks)
 ├── memory/                    # memory_hooks ONLY — recall before a task, persist after
 ├── infra/                     # logging_config, trace_management, mlflow_integration, crew_logger
 ├── guardrails/                # GuardrailWrapper ONLY — the engine's guardrail label
-├── config/                    # crew/embedder/manager config builders
-└── callbacks/                 # the crew's own step/task hooks + the volume writer
+└── config/                    # crew/embedder/manager config builders
 ```
+
+There is no `callbacks/` package any more. Three generations of event-bus
+listeners lived there and all of them were dead; what was left split three ways
+by the same rule as everything else — `kernel/execution_callback.py` (shared by
+crew and flow), `services/task_output/` (the volume sink), and
+`services/crew_checkpoint.py` (the resume recorder).
 
 ## Rules
 
@@ -108,6 +114,9 @@ orchestration: what runs, in what order, wired to what.
 | `services/security/` | injection scanning, secret redaction, capability manifest |
 | `services/knowledge/` | uploads, embedding, and `KnowledgeSearch` |
 | `services/export/` | Databricks App / notebook / python-project export + templates |
+| `services/a2ui/` | surface composition + the catalog |
+| `services/task_output/` | `KasalCallback` base + the Databricks Volume sink |
+| `services/crew_checkpoint.py` | task-checkpoint recorder + resume builder |
 
 The test for which side something belongs on: does it import `kasal_engine`
 (a vendored LIBRARY — that is fine in services, like `BaseTool`), or

@@ -9,7 +9,7 @@ from kasal_engine.core.types import Process, TaskOutput
 from kasal_engine.events.bus import CrewAIEventsBus
 from kasal_engine.events.types import CrewKickoffCompletedEvent, TaskCompletedEvent
 
-from src.engines.kasal.callbacks.crew_checkpoint import (
+from src.services.crew_checkpoint import (
     CrewTaskCheckpointRecorder,
     build_resume_checkpoint,
 )

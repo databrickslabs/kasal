@@ -12,7 +12,7 @@ from pathlib import Path
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service import files
 
-from src.engines.kasal.callbacks.base import KasalCallback
+from src.services.task_output.base import KasalCallback
 from src.utils.databricks_auth import get_workspace_client
 from src.utils.telemetry import KASAL_BASE, VERSION, KasalProduct
 

@@ -353,7 +353,7 @@ class TestGetPydanticClassFromNameFieldTypes:
 class TestCreateCallbackFromString:
     def test_databricks_volume_callback(self):
         with patch(
-            "src.engines.kasal.callbacks.databricks_volume_callback.DatabricksVolumeCallback"
+            "src.services.task_output.databricks_volume.DatabricksVolumeCallback"
         ) as mock_cb_cls:
             mock_cb_instance = AsyncMock()
             mock_cb_instance.execute = AsyncMock(return_value=None)
@@ -375,7 +375,7 @@ class TestCreateCallbackFromString:
 
     def test_databricks_volume_callback_default_config(self):
         with patch(
-            "src.engines.kasal.callbacks.databricks_volume_callback.DatabricksVolumeCallback"
+            "src.services.task_output.databricks_volume.DatabricksVolumeCallback"
         ) as mock_cb_cls:
             mock_cb_cls.return_value = AsyncMock()
             callback = create_callback_from_string(
@@ -387,7 +387,7 @@ class TestCreateCallbackFromString:
 
     def test_databricks_volume_callback_import_error(self):
         with patch(
-            "src.engines.kasal.callbacks.databricks_volume_callback.DatabricksVolumeCallback",
+            "src.services.task_output.databricks_volume.DatabricksVolumeCallback",
             side_effect=ImportError("no module"),
         ):
             callback = create_callback_from_string(
@@ -406,7 +406,7 @@ class TestCreateCallbackFromString:
         mock_cb_instance.execute = AsyncMock(return_value=None)
 
         with patch(
-            "src.engines.kasal.callbacks.databricks_volume_callback.DatabricksVolumeCallback",
+            "src.services.task_output.databricks_volume.DatabricksVolumeCallback",
             return_value=mock_cb_instance,
         ):
             callback = create_callback_from_string(
@@ -838,7 +838,7 @@ class TestCreateTaskGuardrail:
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc, \
              patch("src.services.guardrails.guardrail_factory.GuardrailFactory") as mock_gf, \
-             patch("src.engines.kasal.callbacks.databricks_volume_callback.DatabricksVolumeCallback") as mock_dvcb:
+             patch("src.services.task_output.databricks_volume.DatabricksVolumeCallback") as mock_dvcb:
 
             mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
             mock_session = AsyncMock()
@@ -1290,7 +1290,7 @@ class TestCreateTaskGuardrail:
              patch("src.engines.kasal.paths.crew.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc, \
-             patch("src.engines.kasal.callbacks.databricks_volume_callback.DatabricksVolumeCallback") as mock_dvcb:
+             patch("src.services.task_output.databricks_volume.DatabricksVolumeCallback") as mock_dvcb:
 
             mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
             mock_session = AsyncMock()
@@ -1355,7 +1355,7 @@ class TestCreateTaskDatabricksVolumeAutoCallback:
              patch("src.engines.kasal.paths.crew.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc, \
-             patch("src.engines.kasal.callbacks.databricks_volume_callback.DatabricksVolumeCallback") as mock_dvcb:
+             patch("src.services.task_output.databricks_volume.DatabricksVolumeCallback") as mock_dvcb:
 
             mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
             mock_session = AsyncMock()

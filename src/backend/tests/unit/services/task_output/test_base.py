@@ -1,12 +1,12 @@
 """
-Unit tests for engines/kasal/callbacks/base.py
+Unit tests for services/task_output/base.py
 
 Auto-generated test template. TODO: Add comprehensive test coverage.
 """
 
 import pytest
 from unittest.mock import Mock, patch, MagicMock
-from src.engines.kasal.callbacks.base import (
+from src.services.task_output.base import (
     KasalCallback,
     CallbackFailedError
 )

@@ -9,6 +9,24 @@ coordinate one or more repositories, enforce group isolation, and
 encrypt/decrypt sensitive data. They are called by routers and by the engine,
 never the reverse.
 
+## Two shapes live here
+
+Not everything in this directory is a `*_service.py` CRUD class, and that is
+deliberate. **Capability packages** — `tools/`, `memory/`, `guardrails/`,
+`security/`, `knowledge/`, `export/`, `a2ui/`, `trace/`, `task_output/` — are
+things an agent run needs that do not require a crew to be running. They were
+moved out of `engines/kasal/` so a chat turn, crew generation, or an exported
+app can use them without importing the orchestrator.
+
+The rule that decides whether something belongs in a capability package or in
+the engine: does it import `kasal_engine` (the vendored LIBRARY — fine here,
+e.g. `BaseTool`, `crewai_event_bus`), or `src.engines.kasal.*` (the
+orchestration layer — then it is engine code, not a capability). **A capability
+package must not import `src.engines.kasal.*`.** The exception is the handful of
+modules whose whole job is to LAUNCH the engine — `process_crew_executor.py`,
+`process_flow_executor.py`, `kasal_execution_service.py`,
+`execution_service.py`. They sit above it and are supposed to import it.
+
 ## Conventions (match `agent_service.py`)
 
 - File named `<resource>_service.py`. Extend `BaseService[Model, CreateSchema]`

@@ -43,7 +43,7 @@ class TestCreateExecutionCallbacksExtended:
 
     def test_callbacks_accept_crew_parameter(self, mock_group_context, mock_crew):
         """Test that crew parameter is accepted for API compatibility."""
-        from src.engines.kasal.callbacks.execution_callback import create_execution_callbacks
+        from src.engines.kasal.kernel.execution_callback import create_execution_callbacks
 
         step_cb, task_cb = create_execution_callbacks(
             job_id="test_job",
@@ -56,7 +56,7 @@ class TestCreateExecutionCallbacksExtended:
 
     def test_callbacks_work_without_crew(self, mock_group_context):
         """Test that callbacks work without crew parameter."""
-        from src.engines.kasal.callbacks.execution_callback import create_execution_callbacks
+        from src.engines.kasal.kernel.execution_callback import create_execution_callbacks
 
         step_cb, task_cb = create_execution_callbacks(
             job_id="test_job",
@@ -68,7 +68,7 @@ class TestCreateExecutionCallbacksExtended:
 
     def test_callbacks_work_without_config(self, mock_group_context):
         """Test that callbacks work with None config."""
-        from src.engines.kasal.callbacks.execution_callback import create_execution_callbacks
+        from src.engines.kasal.kernel.execution_callback import create_execution_callbacks
 
         step_cb, task_cb = create_execution_callbacks(
             job_id="test_job",
@@ -83,7 +83,7 @@ class TestStepCallbackExtended:
     """Extended tests for step callback functionality."""
 
     def _create_step_callback(self, job_id="test_job", group_context=None):
-        from src.engines.kasal.callbacks.execution_callback import create_execution_callbacks
+        from src.engines.kasal.kernel.execution_callback import create_execution_callbacks
 
         step_cb, _ = create_execution_callbacks(
             job_id=job_id, config={}, group_context=group_context
@@ -93,7 +93,7 @@ class TestStepCallbackExtended:
     def test_step_callback_handles_output_attribute(self):
         """Test step callback reads 'output' attribute."""
         with patch(
-            "src.engines.kasal.callbacks.execution_callback.enqueue_log"
+            "src.engines.kasal.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             step_cb = self._create_step_callback()
             mock_output = MagicMock()
@@ -108,7 +108,7 @@ class TestStepCallbackExtended:
     def test_step_callback_handles_raw_attribute(self):
         """Test step callback reads 'raw' attribute when 'output' is missing."""
         with patch(
-            "src.engines.kasal.callbacks.execution_callback.enqueue_log"
+            "src.engines.kasal.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             step_cb = self._create_step_callback()
             mock_output = MagicMock(spec=[])
@@ -121,7 +121,7 @@ class TestStepCallbackExtended:
     def test_step_callback_handles_log_attribute(self):
         """Test step callback reads 'log' attribute as fallback."""
         with patch(
-            "src.engines.kasal.callbacks.execution_callback.enqueue_log"
+            "src.engines.kasal.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             step_cb = self._create_step_callback()
             mock_output = MagicMock(spec=[])
@@ -134,7 +134,7 @@ class TestStepCallbackExtended:
     def test_step_callback_handles_string_output(self):
         """Test step callback handles plain string output."""
         with patch(
-            "src.engines.kasal.callbacks.execution_callback.enqueue_log"
+            "src.engines.kasal.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             step_cb = self._create_step_callback()
             step_cb("Simple string output")
@@ -146,7 +146,7 @@ class TestStepCallbackExtended:
     def test_step_callback_truncates_long_content(self):
         """Test step callback truncates content longer than 500 chars."""
         with patch(
-            "src.engines.kasal.callbacks.execution_callback.enqueue_log"
+            "src.engines.kasal.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             step_cb = self._create_step_callback()
             mock_output = MagicMock()
@@ -160,7 +160,7 @@ class TestStepCallbackExtended:
     def test_step_callback_handles_exception_gracefully(self):
         """Test step callback handles exceptions without crashing."""
         with patch(
-            "src.engines.kasal.callbacks.execution_callback.enqueue_log"
+            "src.engines.kasal.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             mock_enqueue.side_effect = Exception("Log error")
             step_cb = self._create_step_callback()
@@ -170,7 +170,7 @@ class TestStepCallbackExtended:
     def test_step_callback_includes_job_id(self):
         """Test step callback passes correct execution_id."""
         with patch(
-            "src.engines.kasal.callbacks.execution_callback.enqueue_log"
+            "src.engines.kasal.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             step_cb = self._create_step_callback(job_id="my_job_42")
             mock_output = MagicMock()
@@ -187,7 +187,7 @@ class TestStepCallbackExtended:
         gc.group_email = "g@test.com"
 
         with patch(
-            "src.engines.kasal.callbacks.execution_callback.enqueue_log"
+            "src.engines.kasal.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             step_cb = self._create_step_callback(group_context=gc)
             mock_output = MagicMock()
@@ -202,7 +202,7 @@ class TestTaskCallbackExtended:
     """Extended tests for task callback functionality."""
 
     def _create_task_callback(self, job_id="test_job", group_context=None):
-        from src.engines.kasal.callbacks.execution_callback import create_execution_callbacks
+        from src.engines.kasal.kernel.execution_callback import create_execution_callbacks
 
         _, task_cb = create_execution_callbacks(
             job_id=job_id, config={}, group_context=group_context
@@ -212,7 +212,7 @@ class TestTaskCallbackExtended:
     def test_task_callback_extracts_description(self):
         """Test task callback extracts description from task_output.description."""
         with patch(
-            "src.engines.kasal.callbacks.execution_callback.enqueue_log"
+            "src.engines.kasal.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             task_cb = self._create_task_callback()
             mock_output = MagicMock()
@@ -227,7 +227,7 @@ class TestTaskCallbackExtended:
     def test_task_callback_extracts_description_from_task_attr(self):
         """Test task callback extracts description from task_output.task.description."""
         with patch(
-            "src.engines.kasal.callbacks.execution_callback.enqueue_log"
+            "src.engines.kasal.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             task_cb = self._create_task_callback()
             mock_output = MagicMock(spec=[])
@@ -242,7 +242,7 @@ class TestTaskCallbackExtended:
     def test_task_callback_extracts_raw_content(self):
         """Test task callback extracts content from raw attribute."""
         with patch(
-            "src.engines.kasal.callbacks.execution_callback.enqueue_log"
+            "src.engines.kasal.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             task_cb = self._create_task_callback()
             mock_output = MagicMock()
@@ -256,7 +256,7 @@ class TestTaskCallbackExtended:
     def test_task_callback_extracts_output_content(self):
         """Test task callback extracts content from output attribute when raw is missing."""
         with patch(
-            "src.engines.kasal.callbacks.execution_callback.enqueue_log"
+            "src.engines.kasal.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             task_cb = self._create_task_callback()
             mock_output = MagicMock(spec=[])
@@ -273,7 +273,7 @@ class TestTaskCallbackExtended:
         when the task_output object has neither .raw nor .output attributes.
         """
         with patch(
-            "src.engines.kasal.callbacks.execution_callback.enqueue_log"
+            "src.engines.kasal.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             task_cb = self._create_task_callback()
 
@@ -296,7 +296,7 @@ class TestTaskCallbackExtended:
     def test_task_callback_handles_exception_gracefully(self):
         """Test task callback handles exceptions without crashing."""
         with patch(
-            "src.engines.kasal.callbacks.execution_callback.enqueue_log"
+            "src.engines.kasal.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             mock_enqueue.side_effect = Exception("Log error")
             task_cb = self._create_task_callback()
@@ -309,7 +309,7 @@ class TestTaskCallbackExtended:
     def test_task_callback_truncates_long_description(self):
         """Test task callback truncates descriptions longer than 100 chars."""
         with patch(
-            "src.engines.kasal.callbacks.execution_callback.enqueue_log"
+            "src.engines.kasal.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             task_cb = self._create_task_callback()
             mock_output = MagicMock()
@@ -324,7 +324,7 @@ class TestTaskCallbackExtended:
     def test_task_callback_includes_job_id(self):
         """Test task callback passes correct execution_id."""
         with patch(
-            "src.engines.kasal.callbacks.execution_callback.enqueue_log"
+            "src.engines.kasal.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             task_cb = self._create_task_callback(job_id="my_job_99")
             mock_output = MagicMock()
@@ -341,7 +341,7 @@ class TestCrewCallbacksExtended:
 
     def test_create_crew_callbacks_returns_callbacks(self):
         """Test create_crew_callbacks returns callback functions."""
-        from src.engines.kasal.callbacks.execution_callback import create_crew_callbacks
+        from src.engines.kasal.kernel.execution_callback import create_crew_callbacks
 
         callbacks = create_crew_callbacks(
             job_id="test_job",
@@ -354,10 +354,10 @@ class TestCrewCallbacksExtended:
 
     def test_log_crew_initialization_logs_config(self):
         """Test log_crew_initialization logs configuration."""
-        from src.engines.kasal.callbacks.execution_callback import log_crew_initialization
+        from src.engines.kasal.kernel.execution_callback import log_crew_initialization
 
         with patch(
-            "src.engines.kasal.callbacks.execution_callback.enqueue_log"
+            "src.engines.kasal.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             log_crew_initialization(
                 job_id="test_job",
@@ -368,10 +368,10 @@ class TestCrewCallbacksExtended:
 
     def test_log_crew_initialization_sanitizes_config(self):
         """Test log_crew_initialization removes sensitive data."""
-        from src.engines.kasal.callbacks.execution_callback import log_crew_initialization
+        from src.engines.kasal.kernel.execution_callback import log_crew_initialization
 
         with patch(
-            "src.engines.kasal.callbacks.execution_callback.enqueue_log"
+            "src.engines.kasal.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             log_crew_initialization(
                 job_id="test_job",
@@ -396,10 +396,10 @@ class TestCrewCallbacksExtended:
 
         Covers lines 152-153: except Exception handler in on_crew_start.
         """
-        from src.engines.kasal.callbacks.execution_callback import create_crew_callbacks
+        from src.engines.kasal.kernel.execution_callback import create_crew_callbacks
 
         with patch(
-            "src.engines.kasal.callbacks.execution_callback.enqueue_log"
+            "src.engines.kasal.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             mock_enqueue.side_effect = RuntimeError("Queue unavailable")
             callbacks = create_crew_callbacks(
@@ -414,10 +414,10 @@ class TestCrewCallbacksExtended:
 
         Covers lines 173-174: except Exception handler in on_crew_complete.
         """
-        from src.engines.kasal.callbacks.execution_callback import create_crew_callbacks
+        from src.engines.kasal.kernel.execution_callback import create_crew_callbacks
 
         with patch(
-            "src.engines.kasal.callbacks.execution_callback.enqueue_log"
+            "src.engines.kasal.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             mock_enqueue.side_effect = RuntimeError("Queue unavailable")
             callbacks = create_crew_callbacks(
@@ -432,10 +432,10 @@ class TestCrewCallbacksExtended:
 
         Covers lines 193-194: except Exception handler in on_crew_error.
         """
-        from src.engines.kasal.callbacks.execution_callback import create_crew_callbacks
+        from src.engines.kasal.kernel.execution_callback import create_crew_callbacks
 
         with patch(
-            "src.engines.kasal.callbacks.execution_callback.enqueue_log"
+            "src.engines.kasal.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             mock_enqueue.side_effect = RuntimeError("Queue unavailable")
             callbacks = create_crew_callbacks(
@@ -451,10 +451,10 @@ class TestMultiAgentExecution:
 
     def test_sequential_step_callbacks_isolated(self):
         """Test that step callbacks from different jobs produce separate logs."""
-        from src.engines.kasal.callbacks.execution_callback import create_execution_callbacks
+        from src.engines.kasal.kernel.execution_callback import create_execution_callbacks
 
         with patch(
-            "src.engines.kasal.callbacks.execution_callback.enqueue_log"
+            "src.engines.kasal.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             step_1, _ = create_execution_callbacks("job_1", {}, None)
             step_2, _ = create_execution_callbacks("job_2", {}, None)
@@ -474,10 +474,10 @@ class TestMultiAgentExecution:
 
     def test_sequential_task_callbacks_isolated(self):
         """Test that task callbacks from different jobs produce separate logs."""
-        from src.engines.kasal.callbacks.execution_callback import create_execution_callbacks
+        from src.engines.kasal.kernel.execution_callback import create_execution_callbacks
 
         with patch(
-            "src.engines.kasal.callbacks.execution_callback.enqueue_log"
+            "src.engines.kasal.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             _, task_1 = create_execution_callbacks("job_1", {}, None)
             _, task_2 = create_execution_callbacks("job_2", {}, None)

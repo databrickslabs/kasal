@@ -567,7 +567,7 @@ def configure_subprocess_logging(execution_id: str, process_type: str = "crew"):
     # Apply file handler (and console handler in Databricks Apps) to all relevant loggers
     for logger_name in [
         'kasal_engine',  # engine logs (crew kickoff, task execution, etc.)
-        'src.engines.kasal.callbacks.execution_callback',
+        'src.engines.kasal.kernel.execution_callback',
         'src.engines.kasal.infra.trace_management',
         'src.services.trace.queue',  # Add trace queue logger
         'src.engines.kasal.paths.crew.execution_runner',  # Add execution runner logger
