@@ -145,13 +145,27 @@ def test_respect_context_window_false_disables_compaction(captured_events):
 
 def test_event_is_registered_all_the_way_to_a_trace_row():
     """The bus event is worthless if the bridge or exporter drops it, so assert
-    both registrations rather than trusting the emit alone."""
+    every registration rather than trusting the emit alone.
+
+    The SUBSCRIPTION is the one that was missing. Mapping the event in
+    _EVENT_SPAN_MAP looks like wiring it up, but the bridge only ever sees what
+    it subscribes to in register(), and ContextCompactionEvent was absent from
+    that list — so compaction emitted faithfully onto the bus and produced not a
+    single trace row. The database had zero of them."""
+    import inspect
+
     from src.services.otel_tracing.db_exporter import SPAN_NAME_MAP
-    from src.services.otel_tracing.event_bridge import _EVENT_SPAN_MAP
+    from src.services.otel_tracing.event_bridge import (
+        _EVENT_SPAN_MAP,
+        OTelEventBridge,
+    )
 
     span_name, event_type = _EVENT_SPAN_MAP["ContextCompactionEvent"]
     assert event_type == "context_compaction"
     assert SPAN_NAME_MAP[span_name] == "context_compaction"
+    assert '"ContextCompactionEvent"' in inspect.getsource(OTelEventBridge.register), (
+        "mapped but not subscribed: the bridge never receives it"
+    )
 
 
 # ---------------------------------------------------------------------------

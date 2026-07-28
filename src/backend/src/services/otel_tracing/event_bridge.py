@@ -96,6 +96,10 @@ _EVENT_SPAN_MAP = {
     # Context compaction — lossy, so it must be visible: a silently amputated
     # conversation makes an agent re-query what it already knew and loop.
     "ContextCompactionEvent": ("kasal.llm.context_compaction", "context_compaction"),
+    # A2UI surface composition — recorded for EVERY outcome (composed, or the
+    # gate that declined), because a skipped surface is the case people ask
+    # about and it used to leave no trace at all.
+    "A2UISurfaceEvent": ("kasal.a2ui.compose", "a2ui_surface"),
 }
 
 # Events to skip. LLMStreamChunkEvent: too noisy (one per token).
@@ -375,6 +379,14 @@ class OTelEventBridge:
             # HITL
             ("kasal_engine.events", "HumanFeedbackRequestedEvent"),
             ("kasal_engine.events", "HumanFeedbackReceivedEvent"),
+            # A2UI surface composition. Emitted for every outcome, including the
+            # gates that decline — a chat turn that produced no surface is the
+            # case people ask about, and it left no trace at all.
+            ("kasal_engine.events", "A2UISurfaceEvent"),
+            # Context compaction. Lossy, and its absence from this list is how
+            # a whole event type stays invisible: the map below is not enough,
+            # the bridge only ever sees what it SUBSCRIBES to here.
+            ("kasal_engine.events", "ContextCompactionEvent"),
         ]
 
         import importlib
@@ -922,6 +934,25 @@ class OTelEventBridge:
         strategy = getattr(event, "strategy", None)
         if strategy:
             span.set_attribute("kasal.extra.strategy", str(strategy))
+
+        # ── A2UI surface fields ──
+        # ``outcome`` is stamped by the HITL block above (both events use the
+        # name); these are what say WHICH surface, how big, and how long it took.
+        surface_kind = getattr(event, "surface_kind", None)
+        if surface_kind:
+            span.set_attribute("kasal.extra.surface_kind", str(surface_kind))
+        component_count = getattr(event, "component_count", None)
+        if component_count is not None:
+            span.set_attribute("kasal.extra.component_count", int(component_count))
+        a2ui_duration = getattr(event, "duration_ms", None)
+        if a2ui_duration is not None:
+            span.set_attribute("kasal.extra.duration_ms", float(a2ui_duration))
+        a2ui_query = getattr(event, "query", None)
+        if a2ui_query and not getattr(event, "memory_content", None):
+            span.set_attribute("kasal.extra.query", _safe_str(a2ui_query, 200))
+        purpose = getattr(event, "purpose", None)
+        if purpose:
+            span.set_attribute("kasal.extra.purpose", _safe_str(purpose, 200))
 
         limit = getattr(event, "limit", None)
         if limit is not None:

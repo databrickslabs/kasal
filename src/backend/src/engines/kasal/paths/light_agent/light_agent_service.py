@@ -75,7 +75,7 @@ class _RunTraceWriter:
     async def persist(self, trace_data: Dict[str, Any]) -> None:
         """Write one trace event. Never raises — a lost trace must not fail the run."""
         try:
-            from src.services.execution_trace_service import ExecutionTraceService
+            from src.services.trace import ExecutionTraceService
             async with self._lock:
                 session = await self._get_session()
                 try:
@@ -1004,6 +1004,8 @@ class LightAgentService:
                         query=prompt,
                         model=getattr(config, "model", None),
                         group_id=group_id,
+                        execution_id=execution_id,
+                        group_context=group_context,
                     ),
                     # The model needs headroom to emit a full surface (e.g. a
                     # multi-slide presentation deck) as valid JSON; 30s and then 60s

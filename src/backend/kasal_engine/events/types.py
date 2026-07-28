@@ -200,6 +200,31 @@ class ContextCompactionEvent(LLMEventBase):
     reason: str | None = None
 
 
+class A2UISurfaceEvent(LLMEventBase):
+    """An answer was considered for rendering as an A2UI surface.
+
+    Emitted for EVERY outcome, not only the successful one. Composition is a
+    gauntlet of quiet skips — the workspace has A2UI off, the request implies no
+    rich surface, the composer fell back to prose, a dashboard came back with no
+    data component — and each one returns the answer as plain text with nothing
+    in the event bus or the trace to say which gate closed. "Why did I not get a
+    presentation?" was unanswerable without reading the logs of a subprocess.
+
+    ``outcome`` is the gate that decided, and ``reason`` says it in words.
+    """
+
+    type: Literal["a2ui_surface"] = "a2ui_surface"
+    #: composed | disabled | no_rich_intent | no_text | composer_unavailable |
+    #: compose_failed | conversation_fallback | no_data_component
+    outcome: str = "composed"
+    reason: str | None = None
+    surface_kind: str | None = None
+    component_count: int | None = None
+    query: str | None = None
+    purpose: str | None = None
+    duration_ms: float | None = None
+
+
 class LLMCallStartedEvent(LLMEventBase):
     """Engine replacement for crewai.events.types.llm_events.LLMCallStartedEvent"""
 

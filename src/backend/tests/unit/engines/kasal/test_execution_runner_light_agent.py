@@ -141,7 +141,7 @@ async def _run_with_captured_handlers(exec_id, config, ctx, mock_agent, trace_in
                new_callable=AsyncMock, return_value=MagicMock()), \
          patch("src.engines.kasal.kernel.agent_tools.build_agent_with_tools",
                new_callable=AsyncMock, return_value=mock_agent), \
-         patch("src.services.execution_trace_service.ExecutionTraceService", trace_cls), \
+         patch("src.services.trace.ExecutionTraceService", trace_cls), \
          patch.object(_ce.crewai_event_bus, "register_handler", side_effect=_cap), \
          patch.object(_ce.crewai_event_bus, "off"), \
          patch("src.services.execution_status_service.ExecutionStatusService.update_status",

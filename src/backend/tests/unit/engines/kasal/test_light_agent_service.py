@@ -511,7 +511,7 @@ async def test_trace_writer_reuses_one_session_for_the_whole_run():
     captured: list = []
 
     with patch("src.db.session.get_isolated_db_session", _fake_isolated_session(opens)), \
-         patch("src.services.execution_trace_service.ExecutionTraceService",
+         patch("src.services.trace.ExecutionTraceService",
                _capture_trace_service(captured)):
         writer = _RunTraceWriter()
         await writer.persist({"job_id": "j1", "event_type": "tool_usage"})
@@ -532,7 +532,7 @@ async def test_trace_writer_verifies_parent_once_and_carries_run_id():
     captured: list = []
 
     with patch("src.db.session.get_isolated_db_session", _fake_isolated_session(opens)), \
-         patch("src.services.execution_trace_service.ExecutionTraceService",
+         patch("src.services.trace.ExecutionTraceService",
                _capture_trace_service(captured)):
         writer = _RunTraceWriter()
         await writer.persist({"job_id": "j1", "event_type": "tool_usage"})
@@ -552,7 +552,7 @@ async def test_trace_writer_drops_poisoned_session_and_reopens():
     captured: list = []
 
     with patch("src.db.session.get_isolated_db_session", _fake_isolated_session(opens)), \
-         patch("src.services.execution_trace_service.ExecutionTraceService",
+         patch("src.services.trace.ExecutionTraceService",
                _capture_trace_service(captured, fail_first=True)):
         writer = _RunTraceWriter()
         # Must not raise — a lost trace never fails the run.

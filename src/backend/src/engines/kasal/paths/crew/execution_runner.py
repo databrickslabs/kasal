@@ -226,6 +226,11 @@ async def run_crew_in_process(
                         group_context.primary_group_id if group_context else None
                     ),
                     inputs=user_inputs,
+                    # This runs in the PARENT, after the subprocess that owned
+                    # the OTel bridge exited — so composition can only be filed
+                    # under this run by naming it explicitly.
+                    execution_id=execution_id,
+                    group_context=group_context,
                 )
             except Exception as a2ui_err:  # noqa: BLE001 — never break a finished run
                 logger.debug(f"[a2ui] crew surface skipped for {execution_id}: {a2ui_err}")

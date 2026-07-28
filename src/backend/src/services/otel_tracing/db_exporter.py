@@ -68,6 +68,7 @@ SPAN_NAME_MAP: Dict[str, str] = {
     "kasal.llm.retry": "llm_retry",
     # Context compaction (emitted when a conversation is trimmed to fit)
     "kasal.llm.context_compaction": "context_compaction",
+    "kasal.a2ui.compose": "a2ui_surface",
 }
 
 
