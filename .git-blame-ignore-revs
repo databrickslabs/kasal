@@ -1,0 +1,12 @@
+# Revisions to skip when running `git blame`.
+#
+# Enable locally (once per clone):
+#     git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# GitHub reads this file automatically. Only add commits that provably change
+# no behaviour — bulk reformats, mass renames — never functional changes.
+
+# style: apply isort + black to the backend (formatting only, no code changes)
+# 1,239 files reformatted; verified via AST comparison that 0 files had any
+# executable-code or import-binding change.
+5ed4a1afb4a6559dcba9b30fd651c5852680c2f1
