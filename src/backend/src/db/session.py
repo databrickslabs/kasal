@@ -813,7 +813,7 @@ async def _ensure_workflow_recipe_trials_table(conn) -> None:
 
 
 async def _ensure_crew_publications_table(conn) -> None:
-    """Idempotently create crew_publications (the external-publication registry).
+    """Idempotently create `publications` (the external-publication registry).
 
     A brand-new table, so a checkfirst-create reaches already-deployed installs
     identically on SQLite, PostgreSQL and Lakebase — same reasoning as the
@@ -824,15 +824,15 @@ async def _ensure_crew_publications_table(conn) -> None:
     UndefinedTable turns a discovery request into a 500.
     """
     try:
-        from src.models.crew_publication import CrewPublication
+        from src.models.crew_publication import Publication
 
         def _create_crew_publications_table(sync_conn):
-            CrewPublication.__table__.create(sync_conn, checkfirst=True)
+            Publication.__table__.create(sync_conn, checkfirst=True)
 
         await conn.run_sync(_create_crew_publications_table)
-        logger.info("Ensured crew_publications table exists")
+        logger.info("Ensured publications table exists")
     except Exception as e:
-        logger.warning(f"Could not ensure crew_publications table: {e}")
+        logger.warning(f"Could not ensure publications table: {e}")
 
 
 async def _ensure_chat_sessions_columns(conn) -> None:

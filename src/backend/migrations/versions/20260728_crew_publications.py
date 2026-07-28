@@ -1,11 +1,17 @@
-"""add crew_publications — the registry of crews exposed outside the workspace
+"""add publications — the registry of crews and flows exposed outside the workspace
 
 Revision ID: 20260728_crew_publications
 Revises: 20260726_recipe_trials
 Create Date: 2026-07-28
 
-A crew is reachable from outside Kasal only if it has a row here. Nothing is
-published by default, and the row IS the record of someone deciding to publish.
+A crew or FLOW is reachable from outside Kasal only if it has a row here.
+Nothing is published by default, and the row IS the record of someone deciding
+to publish.
+
+`entity_type` is what lets flows be published on equal terms. A flow is a
+capability an external agent invokes exactly as a crew is; only the execution
+path differs, and that difference belongs in the invocation layer rather than in
+a second table with its own copy of description, schema and group scoping.
 
 One record per crew with a `protocols` list, rather than an `mcp_published` flag
 beside an `a2a_published` flag: `description` and `input_schema` are needed
@@ -26,7 +32,7 @@ down_revision = "20260726_recipe_trials"
 branch_labels = None
 depends_on = None
 
-_TABLE = "crew_publications"
+_TABLE = "publications"
 
 
 def upgrade() -> None:
@@ -40,7 +46,13 @@ def upgrade() -> None:
     op.create_table(
         _TABLE,
         sa.Column("id", sa.Integer(), nullable=False),
-        sa.Column("crew_id", sa.String(length=255), nullable=False),
+        # "crew" | "flow" — which execution path this capability runs on.
+        sa.Column(
+            "entity_type", sa.String(length=16), nullable=False, server_default="crew"
+        ),
+        # The crew id or flow id. A string because the two use different id
+        # types and this column addresses both.
+        sa.Column("entity_id", sa.String(length=255), nullable=False),
         # e.g. ["mcp", "a2a"]. An empty list keeps the name/description/schema
         # someone wrote while exposing nothing — toggling a protocol off must
         # not destroy the publication.
@@ -53,19 +65,21 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(), nullable=True),
         sa.Column("updated_at", sa.DateTime(), nullable=True),
         sa.PrimaryKeyConstraint("id"),
-        # A crew is published once; its protocols live inside the row.
-        sa.UniqueConstraint("crew_id", name="uq_crew_publication_crew"),
+        # An entity is published once; its protocols live inside the row.
+        sa.UniqueConstraint("entity_type", "entity_id", name="uq_publication_entity"),
         # The external name is how a caller addresses the capability, so it must
-        # be unambiguous within a group. Across groups it may repeat.
+        # be unambiguous within a group — and across TYPES: a crew and a flow
+        # sharing a name would be one ambiguous tool. Across groups it may repeat.
         sa.UniqueConstraint(
-            "external_name", "group_id", name="uq_crew_publication_name_group"
+            "external_name", "group_id", name="uq_publication_name_group"
         ),
     )
-    op.create_index("ix_crew_publications_crew_id", _TABLE, ["crew_id"])
-    op.create_index("ix_crew_publications_group_id", _TABLE, ["group_id"])
+    op.create_index("ix_publications_entity_id", _TABLE, ["entity_id"])
+    op.create_index("ix_publications_entity_type", _TABLE, ["entity_type"])
+    op.create_index("ix_publications_group_id", _TABLE, ["group_id"])
     # The hot path: every external capability listing filters on group first.
     op.create_index(
-        "idx_crew_publications_group_name", _TABLE, ["group_id", "external_name"]
+        "idx_publications_group_name", _TABLE, ["group_id", "external_name"]
     )
 
 
@@ -75,7 +89,8 @@ def downgrade() -> None:
         if _TABLE not in inspector.get_table_names():
             return
 
-    op.drop_index("idx_crew_publications_group_name", table_name=_TABLE)
-    op.drop_index("ix_crew_publications_group_id", table_name=_TABLE)
-    op.drop_index("ix_crew_publications_crew_id", table_name=_TABLE)
+    op.drop_index("idx_publications_group_name", table_name=_TABLE)
+    op.drop_index("ix_publications_group_id", table_name=_TABLE)
+    op.drop_index("ix_publications_entity_type", table_name=_TABLE)
+    op.drop_index("ix_publications_entity_id", table_name=_TABLE)
     op.drop_table(_TABLE)

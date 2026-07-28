@@ -382,7 +382,9 @@ async def publish_crew(
     if not crew:
         raise NotFoundError("Crew not found")
 
-    row = await service.publish(str(crew_id), publication, group_context)
+    row = await service.publish(
+        str(crew_id), publication, group_context, entity_type="crew"
+    )
     return CrewPublicationResponse.model_validate(row)
 
 
@@ -393,8 +395,10 @@ async def get_crew_publication(
     group_context: GroupContextDep,
 ):
     """The crew's publication record, or 404 if it is not published."""
-    row = await service.repository.find_by_crew_id(
-        crew_id=str(crew_id), group_ids=group_context.group_ids or []
+    row = await service.repository.find_by_entity(
+        entity_type="crew",
+        entity_id=str(crew_id),
+        group_ids=group_context.group_ids or [],
     )
     if not row:
         raise NotFoundError("Crew is not published")
@@ -412,7 +416,9 @@ async def update_crew_publication(
     if not check_role_in_context(group_context, ["admin", "editor"]):
         raise ForbiddenError("Only editors and admins can change a publication")
 
-    row = await service.update(str(crew_id), publication, group_context)
+    row = await service.update(
+        str(crew_id), publication, group_context, entity_type="crew"
+    )
     if not row:
         raise NotFoundError("Crew is not published")
     return CrewPublicationResponse.model_validate(row)
@@ -428,5 +434,5 @@ async def unpublish_crew(
     if not check_role_in_context(group_context, ["admin", "editor"]):
         raise ForbiddenError("Only editors and admins can unpublish crews")
 
-    if not await service.unpublish(str(crew_id), group_context):
+    if not await service.unpublish(str(crew_id), group_context, entity_type="crew"):
         raise NotFoundError("Crew is not published")

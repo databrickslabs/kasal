@@ -14,6 +14,11 @@ from pydantic import BaseModel, Field, field_validator
 #: new protocol needs registering for publication purposes.
 ExternalProtocol = Literal["mcp", "a2a"]
 
+#: What kind of thing is being published. Crews and flows are equal citizens
+#: externally — a caller invokes a capability and does not care which execution
+#: path runs it.
+PublishableEntity = Literal["crew", "flow"]
+
 #: MCP tool names and A2A skill ids share this shape in practice: lowercase,
 #: digits, underscores. Kept deliberately narrow — it is a wire identifier that
 #: external clients pin, not a display name.
@@ -92,7 +97,8 @@ class CrewPublicationResponse(CrewPublicationBase):
     """A publication as returned by the API."""
 
     id: int
-    crew_id: str
+    entity_type: PublishableEntity = "crew"
+    entity_id: str
     group_id: str
     created_by_email: Optional[str] = None
     created_at: Optional[datetime] = None
@@ -110,7 +116,13 @@ class PublishedCapability(BaseModel):
     already been applied, and re-exposing it invites a caller-supplied override.
     """
 
-    crew_id: str
+    entity_type: PublishableEntity = "crew"
+    entity_id: str
     name: str
     description: str
     input_schema: Optional[Dict[str, Any]] = None
+
+    @property
+    def crew_id(self) -> str:
+        """Back-compat for readers written when only crews were publishable."""
+        return self.entity_id

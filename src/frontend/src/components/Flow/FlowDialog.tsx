@@ -25,6 +25,8 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
 import SearchIcon from '@mui/icons-material/Search';
 import DownloadIcon from '@mui/icons-material/Download';
+import PublishButton from '../Crew/CrewFlowDialog/PublishButton';
+import { usePublicationStore } from '../../store/publication';
 
 const FlowDialog: React.FC<FlowSelectionDialogProps> = ({ open, onClose, onFlowSelect }): JSX.Element => {
   const [flows, setFlows] = useState<FlowResponse[]>([]);
@@ -37,6 +39,7 @@ const FlowDialog: React.FC<FlowSelectionDialogProps> = ({ open, onClose, onFlowS
   useEffect(() => {
     if (open) {
       loadFlows();
+      refreshPublications();
     }
   }, [open]);
 
@@ -100,15 +103,27 @@ const FlowDialog: React.FC<FlowSelectionDialogProps> = ({ open, onClose, onFlowS
     }
   };
 
+  // Shared with the catalogue in CrewFlowDialog — a flow published there must
+  // not still look unpublished here.
+  const publishedFlowIds = usePublicationStore((s) => s.publishedFlowIds);
+  const setPublished = usePublicationStore((s) => s.setPublished);
+  const refreshPublications = usePublicationStore((s) => s.refresh);
+
   const handleDeleteFlow = async (event: React.MouseEvent, flowId: string) => {
     event.stopPropagation();
     try {
       // Use the string ID directly
       await FlowService.deleteFlow(flowId);
-      loadFlows();
+      // Drop the row locally rather than re-fetching: loadFlows() sets `loading`,
+      // which swaps the whole grid for a spinner, so deleting one flow read as a
+      // full-screen refresh.
+      setFlows((current) => current.filter((f) => String(f.id) !== String(flowId)));
+      setError(null);
     } catch (error) {
       console.error('Error deleting flow:', error);
       setError('Failed to delete flow');
+      // The delete failed, so the row is still on the server — resync.
+      loadFlows();
     }
   };
 
@@ -180,36 +195,23 @@ const FlowDialog: React.FC<FlowSelectionDialogProps> = ({ open, onClose, onFlowS
                   onClick={() => handleFlowSelect(flow.id.toString())}
                 >
                   <CardContent>
-                    <Box sx={{ 
-                      display: 'flex', 
-                      alignItems: 'center', 
-                      mb: 1.5,
-                      justifyContent: 'space-between' 
-                    }}>
-                      <Typography variant="h6" noWrap sx={{ maxWidth: '80%' }}>
-                        {flow.name}
-                      </Typography>
-                      <Box>
-                        <Tooltip title="Export Flow">
-                          <IconButton 
-                            size="small" 
-                            onClick={(e) => handleExportFlow(e, flow)}
-                            sx={{ mr: 0.5 }}
-                          >
-                            <DownloadIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                        <Tooltip title="Delete Flow">
-                          <IconButton 
-                            size="small" 
-                            onClick={(e) => handleDeleteFlow(e, flow.id.toString())}
-                            color="error"
-                          >
-                            <DeleteIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                      </Box>
-                    </Box>
+                    <Typography
+                      variant="h6"
+                      title={flow.name}
+                      sx={{
+                        // The name gets the full card width; the actions moved
+                        // to a footer below. Sharing the row with icons clipped
+                        // longer names to an unreadable stub.
+                        display: '-webkit-box',
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: 'vertical',
+                        overflow: 'hidden',
+                        lineHeight: 1.3,
+                        mb: 1.5,
+                      }}
+                    >
+                      {flow.name}
+                    </Typography>
 
                     <Box 
                       sx={{ 
@@ -237,6 +239,46 @@ const FlowDialog: React.FC<FlowSelectionDialogProps> = ({ open, onClose, onFlowS
                       <Typography variant="body2">
                         {new Date(flow.created_at).toLocaleDateString()}
                       </Typography>
+                    </Box>
+
+                    <Box
+                      sx={{
+                        display: 'flex',
+                        justifyContent: 'flex-end',
+                        alignItems: 'center',
+                        gap: 0.25,
+                        mt: 1.5,
+                        pt: 1,
+                        borderTop: 1,
+                        borderColor: 'divider',
+                      }}
+                    >
+                      <PublishButton
+                        entityType="flow"
+                        entityId={String(flow.id)}
+                        entityName={flow.name}
+                        published={publishedFlowIds.has(String(flow.id))}
+                        onChanged={(isPublished) =>
+                          setPublished('flow', String(flow.id), isPublished)
+                        }
+                      />
+                      <Tooltip title="Export Flow">
+                        <IconButton
+                          size="small"
+                          onClick={(e) => handleExportFlow(e, flow)}
+                        >
+                          <DownloadIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="Delete Flow">
+                        <IconButton
+                          size="small"
+                          onClick={(e) => handleDeleteFlow(e, flow.id.toString())}
+                          color="error"
+                        >
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
                     </Box>
                   </CardContent>
                 </Card>

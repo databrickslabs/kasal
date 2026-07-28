@@ -15,8 +15,8 @@ from typing import List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.models.crew_publication import CrewPublication
-from src.repositories.crew_publication_repository import CrewPublicationRepository
+from src.models.crew_publication import Publication
+from src.repositories.crew_publication_repository import PublicationRepository
 from src.schemas.crew_publication import (
     CrewPublicationCreate,
     CrewPublicationUpdate,
@@ -33,7 +33,7 @@ class PublicationService:
 
     def __init__(self, session: AsyncSession):
         self.session = session
-        self.repository = CrewPublicationRepository(session)
+        self.repository = PublicationRepository(session)
 
     async def list_capabilities(
         self, caller: ExternalCaller, protocol: Optional[str] = None
@@ -51,7 +51,8 @@ class PublicationService:
         )
         return [
             PublishedCapability(
-                crew_id=row.crew_id,
+                entity_type=row.entity_type,
+                entity_id=row.entity_id,
                 name=row.external_name,
                 description=row.description,
                 input_schema=row.input_schema,
@@ -61,7 +62,7 @@ class PublicationService:
 
     async def resolve_capability(
         self, caller: ExternalCaller, external_name: str
-    ) -> Optional[CrewPublication]:
+    ) -> Optional[Publication]:
         """The publication behind a name the caller used, or None.
 
         Returns None both when the name does not exist and when it exists in
@@ -87,10 +88,11 @@ class PublicationService:
 
     async def publish(
         self,
-        crew_id: str,
+        entity_id: str,
         data: CrewPublicationCreate,
         group_context: GroupContext,
-    ) -> CrewPublication:
+        entity_type: str = "crew",
+    ) -> Publication:
         """Publish a crew, or update its publication if it already has one.
 
         Idempotent by crew: publishing twice adjusts the existing record rather
@@ -101,8 +103,10 @@ class PublicationService:
         if not group_id:
             raise ValueError("Cannot publish without a group context.")
 
-        existing = await self.repository.find_by_crew_id(
-            crew_id=crew_id, group_ids=group_context.group_ids or []
+        existing = await self.repository.find_by_entity(
+            entity_type=entity_type,
+            entity_id=entity_id,
+            group_ids=group_context.group_ids or [],
         )
         if existing is not None:
             existing.external_name = data.external_name
@@ -112,8 +116,9 @@ class PublicationService:
             await self.session.flush()
             return existing
 
-        row = CrewPublication(
-            crew_id=crew_id,
+        row = Publication(
+            entity_type=entity_type,
+            entity_id=entity_id,
             external_name=data.external_name,
             description=data.description,
             protocols=list(data.protocols),
@@ -124,8 +129,9 @@ class PublicationService:
         self.session.add(row)
         await self.session.flush()
         logger.info(
-            "[external] published crew %s as %s over %s (group %s)",
-            crew_id,
+            "[external] published %s %s as %s over %s (group %s)",
+            entity_type,
+            entity_id,
             data.external_name,
             data.protocols,
             group_id,
@@ -134,13 +140,16 @@ class PublicationService:
 
     async def update(
         self,
-        crew_id: str,
+        entity_id: str,
         data: CrewPublicationUpdate,
         group_context: GroupContext,
-    ) -> Optional[CrewPublication]:
+        entity_type: str = "crew",
+    ) -> Optional[Publication]:
         """Adjust an existing publication. Omitted fields are left alone."""
-        row = await self.repository.find_by_crew_id(
-            crew_id=crew_id, group_ids=group_context.group_ids or []
+        row = await self.repository.find_by_entity(
+            entity_type=entity_type,
+            entity_id=entity_id,
+            group_ids=group_context.group_ids or [],
         )
         if row is None:
             return None
@@ -157,11 +166,18 @@ class PublicationService:
         await self.session.flush()
         return row
 
-    async def unpublish(self, crew_id: str, group_context: GroupContext) -> bool:
-        """Withdraw a crew from every external surface. True if a row went."""
-        removed = await self.repository.delete_by_crew_id(
-            crew_id=crew_id, group_ids=group_context.group_ids or []
+    async def unpublish(
+        self,
+        entity_id: str,
+        group_context: GroupContext,
+        entity_type: str = "crew",
+    ) -> bool:
+        """Withdraw a crew or flow from every external surface."""
+        removed = await self.repository.delete_by_entity(
+            entity_type=entity_type,
+            entity_id=entity_id,
+            group_ids=group_context.group_ids or [],
         )
         if removed:
-            logger.info("[external] unpublished crew %s", crew_id)
+            logger.info("[external] unpublished %s %s", entity_type, entity_id)
         return removed > 0

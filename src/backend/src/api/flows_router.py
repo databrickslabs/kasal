@@ -6,6 +6,11 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 
 from src.core.dependencies import GroupContextDep, SessionDep
 from src.repositories.execution_trace_repository import ExecutionTraceRepository
+from src.schemas.crew_publication import (
+    CrewPublicationCreate,
+    CrewPublicationResponse,
+    CrewPublicationUpdate,
+)
 from src.schemas.execution_history import (
     CheckpointInfo,
     CheckpointListResponse,
@@ -13,6 +18,7 @@ from src.schemas.execution_history import (
 )
 from src.schemas.flow import FlowCreate, FlowResponse, FlowUpdate
 from src.services.execution.history import ExecutionHistoryService
+from src.services.external.publication import PublicationService
 from src.services.flow_builder.flow_service import FlowService
 
 router = APIRouter(
@@ -394,3 +400,85 @@ async def delete_checkpoint(
     )
 
     return {"status": "success", "message": "Checkpoint expired successfully"}
+
+
+# ---------------------------------------------------------------------------
+# Publication — exposing a flow to callers OUTSIDE this Kasal instance.
+#
+# Identical shape to the crew endpoints in crews_router.py, over the SAME
+# PublicationService and the same table. A flow is a capability an external
+# agent invokes exactly as a crew is; only entity_type differs, and the
+# invocation layer is what routes it to the flow engine.
+# ---------------------------------------------------------------------------
+
+
+def get_publication_service(session: SessionDep) -> PublicationService:
+    return PublicationService(session)
+
+
+@router.post("/{flow_id}/publish", response_model=CrewPublicationResponse)
+async def publish_flow(
+    flow_id: Annotated[uuid.UUID, Path(title="The ID of the flow to publish")],
+    publication: CrewPublicationCreate,
+    flow_service: Annotated[FlowService, Depends(get_flow_service)],
+    service: Annotated[PublicationService, Depends(get_publication_service)],
+    group_context: GroupContextDep,
+):
+    """Expose a flow over the listed external protocols.
+
+    Idempotent: publishing an already-published flow updates its record.
+    """
+    # Resolve the flow through the group-scoped service FIRST, so a caller
+    # cannot publish another workspace's flow by id.
+    flow = await flow_service.get_flow_with_group_check(flow_id, group_context)
+    if not flow:
+        raise HTTPException(status_code=404, detail="Flow not found")
+
+    row = await service.publish(
+        str(flow_id), publication, group_context, entity_type="flow"
+    )
+    return CrewPublicationResponse.model_validate(row)
+
+
+@router.get("/{flow_id}/publish", response_model=CrewPublicationResponse)
+async def get_flow_publication(
+    flow_id: Annotated[uuid.UUID, Path(title="The ID of the flow")],
+    service: Annotated[PublicationService, Depends(get_publication_service)],
+    group_context: GroupContextDep,
+):
+    """The flow's publication record, or 404 if it is not published."""
+    row = await service.repository.find_by_entity(
+        entity_type="flow",
+        entity_id=str(flow_id),
+        group_ids=group_context.group_ids or [],
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Flow is not published")
+    return CrewPublicationResponse.model_validate(row)
+
+
+@router.patch("/{flow_id}/publish", response_model=CrewPublicationResponse)
+async def update_flow_publication(
+    flow_id: Annotated[uuid.UUID, Path(title="The ID of the flow")],
+    publication: CrewPublicationUpdate,
+    service: Annotated[PublicationService, Depends(get_publication_service)],
+    group_context: GroupContextDep,
+):
+    """Adjust an existing publication. Omitted fields are left alone."""
+    row = await service.update(
+        str(flow_id), publication, group_context, entity_type="flow"
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Flow is not published")
+    return CrewPublicationResponse.model_validate(row)
+
+
+@router.delete("/{flow_id}/publish", status_code=status.HTTP_204_NO_CONTENT)
+async def unpublish_flow(
+    flow_id: Annotated[uuid.UUID, Path(title="The ID of the flow to unpublish")],
+    service: Annotated[PublicationService, Depends(get_publication_service)],
+    group_context: GroupContextDep,
+):
+    """Withdraw a flow from every external surface."""
+    if not await service.unpublish(str(flow_id), group_context, entity_type="flow"):
+        raise HTTPException(status_code=404, detail="Flow is not published")

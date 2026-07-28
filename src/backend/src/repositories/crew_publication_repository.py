@@ -4,10 +4,10 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.base_repository import BaseRepository
-from src.models.crew_publication import CrewPublication
+from src.models.crew_publication import Publication
 
 
-class CrewPublicationRepository(BaseRepository[CrewPublication]):
+class PublicationRepository(BaseRepository[Publication]):
     """Data access for crew publications.
 
     Every read here is group-filtered without exception. This repository backs
@@ -17,11 +17,11 @@ class CrewPublicationRepository(BaseRepository[CrewPublication]):
     """
 
     def __init__(self, session: AsyncSession):
-        super().__init__(CrewPublication, session)
+        super().__init__(Publication, session)
 
     async def list_published_for_group(
         self, group_ids: List[str], protocol: Optional[str] = None
-    ) -> List[CrewPublication]:
+    ) -> List[Publication]:
         """Publications visible to ``group_ids``, optionally for one protocol.
 
         The single most security-sensitive query in the external-invocation work:
@@ -47,15 +47,16 @@ class CrewPublicationRepository(BaseRepository[CrewPublication]):
             return rows
         return [r for r in rows if protocol in (r.protocols or [])]
 
-    async def find_by_crew_id(
-        self, crew_id: str, group_ids: List[str]
-    ) -> Optional[CrewPublication]:
-        """The publication for one crew, if the caller's group may see it."""
+    async def find_by_entity(
+        self, entity_type: str, entity_id: str, group_ids: List[str]
+    ) -> Optional[Publication]:
+        """The publication for one crew or flow, if the caller's group may see it."""
         if not group_ids:
             return None
 
         query = select(self.model).where(
-            self.model.crew_id == crew_id,
+            self.model.entity_type == entity_type,
+            self.model.entity_id == entity_id,
             self.model.group_id.in_(group_ids),
         )
         result = await self.session.execute(query)
@@ -63,7 +64,7 @@ class CrewPublicationRepository(BaseRepository[CrewPublication]):
 
     async def find_by_external_name(
         self, external_name: str, group_ids: List[str]
-    ) -> Optional[CrewPublication]:
+    ) -> Optional[Publication]:
         """Resolve the name a caller used back to a publication.
 
         This is the lookup an adapter performs on every inbound invocation, so it
@@ -80,14 +81,21 @@ class CrewPublicationRepository(BaseRepository[CrewPublication]):
         result = await self.session.execute(query)
         return result.scalars().first()
 
-    async def delete_by_crew_id(self, crew_id: str, group_ids: List[str]) -> int:
-        """Unpublish a crew. Returns the number of rows removed."""
+    async def delete_by_entity(
+        self, entity_type: str, entity_id: str, group_ids: List[str]
+    ) -> int:
+        """Unpublish a crew or flow. Returns the number of rows removed."""
         if not group_ids:
             return 0
 
         query = delete(self.model).where(
-            self.model.crew_id == crew_id,
+            self.model.entity_type == entity_type,
+            self.model.entity_id == entity_id,
             self.model.group_id.in_(group_ids),
         )
         result = await self.session.execute(query)
         return result.rowcount or 0
+
+
+#: Named CrewPublicationRepository while only crews were publishable.
+CrewPublicationRepository = PublicationRepository

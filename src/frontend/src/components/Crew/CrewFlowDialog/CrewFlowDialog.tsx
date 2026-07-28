@@ -52,6 +52,8 @@ import ListItemText from '@mui/material/ListItemText';
 import { useFlowConfigStore } from '../../../store/flowConfig';
 import { useCrewExecutionStore, ReasoningConfig } from '../../../store/crewExecution';
 import { useTabManagerStore, TabExecutionConfig } from '../../../store/tabManager';
+import PublishButton from './PublishButton';
+import { usePublicationStore } from '../../../store/publication';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -118,6 +120,13 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
   }, [showOnlyTab, initialTab]);
   const [crews, setCrews] = useState<CrewResponse[]>([]);
   const [flows, setFlows] = useState<FlowResponse[]>([]);
+  // Publication state lives in a store because the standalone FlowDialog draws
+  // the same marker: two local copies is how a flow published in one view still
+  // looks unpublished in the other.
+  const publishedCrewIds = usePublicationStore((s) => s.publishedCrewIds);
+  const publishedFlowIds = usePublicationStore((s) => s.publishedFlowIds);
+  const setPublished = usePublicationStore((s) => s.setPublished);
+  const refreshPublications = usePublicationStore((s) => s.refresh);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedAgents, setSelectedAgents] = useState<Agent[]>([]);
@@ -159,12 +168,14 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
       // Load data based on current tab
       if (tabValue === 0) {
         loadCrews();
+        refreshPublications();
       } else if (tabValue === 1) {
         loadAgents();
       } else if (tabValue === 2) {
         loadTasks();
       } else if (tabValue === 3 && kasalFlowEnabled) {
         loadFlows();
+        refreshPublications();
       }
     }
   }, [open, tabValue, kasalFlowEnabled]);
@@ -632,18 +643,25 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
     }
   };
 
+  // Deleting removes the row from local state rather than calling load*().
+  //
+  // The reload was the whole problem: load* sets `loading`, and every TabPanel
+  // swaps its list for a centred spinner while it is true — so deleting one crew
+  // blanked the entire panel and rebuilt it, losing scroll position and reading
+  // as a full-screen refresh. The server is already the source of truth for the
+  // delete; re-fetching a list we can update in place buys nothing.
   const handleDeleteFlow = async (event: React.MouseEvent, flowId: string) => {
     event.stopPropagation();
     try {
-      setLoading(true);
-      
       await FlowService.deleteFlow(flowId);
-      loadFlows();
+      setFlows((current) => current.filter((flow) => String(flow.id) !== String(flowId)));
+      setError(null);
     } catch (error) {
       console.error('Error deleting flow:', error);
       setError('Failed to delete flow');
-    } finally {
-      setLoading(false);
+      // The delete failed, so the row is still there on the server — put the
+      // list back rather than leaving the UI disagreeing with it.
+      loadFlows();
     }
   };
 
@@ -651,10 +669,12 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
     event.stopPropagation();
     try {
       await CrewService.deleteCrew(crewId);
-      loadCrews();
+      setCrews((current) => current.filter((crew) => String(crew.id) !== String(crewId)));
+      setError(null);
     } catch (error) {
       console.error('Error deleting crew:', error);
       setError('Failed to delete crew');
+      loadCrews();
     }
   };
 
@@ -1501,42 +1521,23 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                           data-card-index={`crew-${index}`}
                         >
                           <CardContent>
-                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                              <Typography variant="h6" component="h2" gutterBottom noWrap>
-                                {crew.name}
-                              </Typography>
-                              <Box>
-                                <Tooltip title="Optimize Prompts">
-                                  <IconButton
-                                    size="small"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setOptimizeCrew(crew);
-                                    }}
-                                  >
-                                    <AutoFixHighIcon fontSize="small" />
-                                  </IconButton>
-                                </Tooltip>
-                                <Tooltip title="Export Crew">
-                                  <IconButton
-                                    size="small"
-                                    onClick={(e) => handleExportCrew(e, crew)}
-                                  >
-                                    <DownloadIcon fontSize="small" />
-                                  </IconButton>
-                                </Tooltip>
-                                <Tooltip title="Delete Crew">
-                                  <IconButton
-                                    size="small"
-                                    onClick={(e) => handleDeleteCrew(e, crew.id)}
-                                  >
-                                    <DeleteIcon fontSize="small" />
-                                  </IconButton>
-                                </Tooltip>
-                              </Box>
-                            </Box>
-                            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                              No description
+                            <Typography
+                              variant="h6"
+                              component="h2"
+                              title={crew.name}
+                              sx={{
+                                // Two lines then ellipsis: the name is what
+                                // someone scans for, so it gets the whole card
+                                // width rather than competing with four icons.
+                                display: '-webkit-box',
+                                WebkitLineClamp: 2,
+                                WebkitBoxOrient: 'vertical',
+                                overflow: 'hidden',
+                                lineHeight: 1.3,
+                                mb: 0.5,
+                              }}
+                            >
+                              {crew.name}
                             </Typography>
                             <Typography variant="caption" color="text.secondary" display="block">
                               Created: {new Date(crew.created_at).toLocaleString()}
@@ -1639,6 +1640,59 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                                 return Math.max(nodesCount, tasksCount, taskIdsCount);
                               })()}
                             </Typography>
+                            {/* Actions live BELOW the content, not beside the
+                                title: four icons on the title row squeezed the
+                                crew name down to "Swiss Ne…", and the name is
+                                the thing people scan for. */}
+                            <Box
+                              sx={{
+                                display: 'flex',
+                                justifyContent: 'flex-end',
+                                alignItems: 'center',
+                                gap: 0.25,
+                                mt: 1.5,
+                                pt: 1,
+                                borderTop: 1,
+                                borderColor: 'divider',
+                              }}
+                            >
+                                <Tooltip title="Optimize Prompts">
+                                  <IconButton
+                                    size="small"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setOptimizeCrew(crew);
+                                    }}
+                                  >
+                                    <AutoFixHighIcon fontSize="small" />
+                                  </IconButton>
+                                </Tooltip>
+                                <PublishButton
+                                  entityType="crew"
+                                  entityId={String(crew.id)}
+                                  entityName={crew.name}
+                                  published={publishedCrewIds.has(String(crew.id))}
+                                  onChanged={(isPublished) =>
+                                    setPublished('crew', String(crew.id), isPublished)
+                                  }
+                                />
+                                <Tooltip title="Export Crew">
+                                  <IconButton
+                                    size="small"
+                                    onClick={(e) => handleExportCrew(e, crew)}
+                                  >
+                                    <DownloadIcon fontSize="small" />
+                                  </IconButton>
+                                </Tooltip>
+                                <Tooltip title="Delete Crew">
+                                  <IconButton
+                                    size="small"
+                                    onClick={(e) => handleDeleteCrew(e, crew.id)}
+                                  >
+                                    <DeleteIcon fontSize="small" />
+                                  </IconButton>
+                                </Tooltip>
+                            </Box>
                           </CardContent>
                         </Card>
                       </Grid>
@@ -1853,40 +1907,32 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                           data-card-index={`flow-${index}`}
                         >
                           <CardContent>
-                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                              <Typography variant="h6" component="h2" gutterBottom noWrap>
+                            <Box
+                              sx={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                gap: 1,
+                                minWidth: 0,
+                              }}
+                            >
+                              <Typography
+                                variant="h6"
+                                component="h2"
+                                title={flow.name}
+                                sx={{
+                                  display: '-webkit-box',
+                                  WebkitLineClamp: 2,
+                                  WebkitBoxOrient: 'vertical',
+                                  overflow: 'hidden',
+                                  lineHeight: 1.3,
+                                  mb: 0.5,
+                                  width: '100%',
+                                }}
+                              >
                                 {flow.name}
                               </Typography>
-                              <Box>
-                                <Tooltip title="Edit Flow">
-                                  <IconButton 
-                                    size="small" 
-                                    onClick={(e) => handleEditFlow(e, flow.id.toString())}
-                                  >
-                                    <EditIcon fontSize="small" />
-                                  </IconButton>
-                                </Tooltip>
-                                <Tooltip title="Export Flow">
-                                  <IconButton 
-                                    size="small" 
-                                    onClick={(e) => handleExportFlow(e, flow)}
-                                  >
-                                    <DownloadIcon fontSize="small" />
-                                  </IconButton>
-                                </Tooltip>
-                                <Tooltip title="Delete Flow">
-                                  <IconButton 
-                                    size="small" 
-                                    onClick={(e) => handleDeleteFlow(e, flow.id.toString())}
-                                  >
-                                    <DeleteIcon fontSize="small" />
-                                  </IconButton>
-                                </Tooltip>
-                              </Box>
                             </Box>
-                            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                              No description
-                            </Typography>
                             
                             {/* Crew list section */}
                             <Typography variant="subtitle2" color="text.primary" sx={{ mt: 1 }}>
@@ -1948,6 +1994,55 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                               Components: {flow.nodes?.length || 0} / 
                               Connections: {flow.edges?.length || 0}
                             </Typography>
+                            {/* Actions at the bottom, after the facts — the
+                                flow name gets the full card width. */}
+                            <Box
+                              sx={{
+                                display: 'flex',
+                                justifyContent: 'flex-end',
+                                alignItems: 'center',
+                                gap: 0.25,
+                                mt: 1.5,
+                                pt: 1,
+                                borderTop: 1,
+                                borderColor: 'divider',
+                              }}
+                            >
+
+                                <Tooltip title="Edit Flow">
+                                  <IconButton 
+                                    size="small" 
+                                    onClick={(e) => handleEditFlow(e, flow.id.toString())}
+                                  >
+                                    <EditIcon fontSize="small" />
+                                  </IconButton>
+                                </Tooltip>
+                                <PublishButton
+                                  entityType="flow"
+                                  entityId={String(flow.id)}
+                                  entityName={flow.name}
+                                  published={publishedFlowIds.has(String(flow.id))}
+                                  onChanged={(isPublished) =>
+                                    setPublished('flow', String(flow.id), isPublished)
+                                  }
+                                />
+                                <Tooltip title="Export Flow">
+                                  <IconButton 
+                                    size="small" 
+                                    onClick={(e) => handleExportFlow(e, flow)}
+                                  >
+                                    <DownloadIcon fontSize="small" />
+                                  </IconButton>
+                                </Tooltip>
+                                <Tooltip title="Delete Flow">
+                                  <IconButton 
+                                    size="small" 
+                                    onClick={(e) => handleDeleteFlow(e, flow.id.toString())}
+                                  >
+                                    <DeleteIcon fontSize="small" />
+                                  </IconButton>
+                                </Tooltip>
+                            </Box>
                           </CardContent>
                         </Card>
                       </Grid>

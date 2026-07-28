@@ -278,36 +278,45 @@ async def start_run(
     inputs: Optional[Dict[str, Any]] = None,
     session: Any = None,
 ) -> InvocationResult:
-    """Start a published crew and return a handle immediately.
+    """Start a published crew OR flow and return a handle immediately.
 
-    Never waits for the run. The caller polls :func:`run_status` (or, later,
-    subscribes) — see the module docstring for why a blocking variant does not
-    exist.
+    Never waits for the run. The caller polls :func:`run_status` (or streams) —
+    see the module docstring for why a blocking variant does not exist.
 
-    ``publication`` is a CrewPublication the caller has ALREADY been authorised
-    for by ``PublicationService.resolve_capability``; this function does not
-    re-resolve it, so there is exactly one place that decides whether a caller
-    may reach a given crew.
+    ``publication`` is one the caller has ALREADY been authorised for by
+    ``PublicationService.resolve_capability``; this function does not re-resolve
+    it, so there is exactly one place that decides whether a caller may reach a
+    given capability.
     """
     # OBO: the run executes as the caller when they presented a token, which
     # in production they always have. Without one the Databricks auth chain
     # applies, exactly as for a UI-initiated run.
     caller.obo_token()
 
+    entity_type = getattr(publication, "entity_type", "crew") or "crew"
+    entity_id = str(getattr(publication, "entity_id", None) or publication.crew_id)
+
+    # Flows run on their own path with their own service. Branching HERE, rather
+    # than threading entity_type down into a crew config, keeps the difference
+    # where it belongs: an external caller invokes a capability and has no reason
+    # to know which engine path runs it.
+    if entity_type == "flow":
+        return await _start_flow(caller, publication, entity_id, inputs, session)
+
     from src.services.catalog.crews import CrewService
     from src.services.execution.service import ExecutionService
 
     crew_service = CrewService(session)
-    # crew_id is persisted as a string on the publication (it is an external
+    # entity_id is persisted as a string on the publication (it is an external
     # identifier there), but Crew.id is a UUID column — asyncpg rejects a str
     # with "'str' object has no attribute 'hex'".
     try:
-        crew_key = UUID(str(publication.crew_id))
+        crew_key = UUID(entity_id)
     except (ValueError, AttributeError, TypeError):
-        crew_key = publication.crew_id
+        crew_key = entity_id
     crew = await crew_service.get(crew_key)
     if crew is None:
-        raise ValueError(f"Published crew {publication.crew_id} no longer exists")
+        raise ValueError(f"Published crew {entity_id} no longer exists")
 
     agents_yaml, tasks_yaml = await _crew_to_yaml(crew, session)
     if not agents_yaml or not tasks_yaml:
@@ -446,3 +455,44 @@ async def _crew_to_yaml(crew: Any, session: Any) -> tuple:
         tasks_yaml[key] = entry
 
     return agents_yaml, tasks_yaml
+
+
+async def _start_flow(
+    caller: ExternalCaller,
+    publication: Any,
+    flow_id: str,
+    inputs: Optional[Dict[str, Any]],
+    session: Any,
+) -> InvocationResult:
+    """Start a published FLOW and return a handle.
+
+    The flow service owns its own job id, run naming and status row, so this
+    delegates rather than reassembling any of it — the same reasoning that keeps
+    the crew branch going through ExecutionService. An externally-started run
+    must be indistinguishable from a UI-started one everywhere except its origin
+    tag, or the traces, logs and history stop lining up.
+    """
+    from src.services.flow_builder.execution_service import KasalFlowService
+
+    run_id = str(uuid.uuid4())
+    result = await KasalFlowService(session).run_flow(
+        flow_id=flow_id,
+        job_id=run_id,
+        run_name=f"{publication.external_name} via {caller.protocol}",
+        config={**(inputs or {}), "external_origin": caller.origin},
+        group_context=caller.group_context,
+        user_token=caller.obo_token(),
+    )
+
+    logger.info(
+        "[external] %s started flow %s as run=%s (group=%s)",
+        caller.protocol,
+        publication.external_name,
+        run_id,
+        caller.group_ids,
+    )
+    returned = (result or {}).get("job_id") or (result or {}).get("execution_id")
+    return InvocationResult(
+        run_id=str(returned or run_id),
+        state=to_external_state((result or {}).get("status")),
+    )
