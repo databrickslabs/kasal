@@ -46,3 +46,15 @@ class ExecutionBudgetExceededError(RuntimeError):
     LLM.call(), the standard failure path emits LLMCallFailedEvent, so the
     breach is visible in traces/logs like any other terminal LLM failure.
     """
+
+
+class ToolExecutionBlockedError(Exception):
+    """A pre-execution tool hook blocked this tool call.
+
+    The message is surfaced to the LLM as the tool result (via the normal error
+    path), so the agent can explain the denial instead of crashing.
+
+    Lives here, not with the runtime that raises it: the tool loop in
+    ``transport/base`` has to CATCH it, and an exception the LLM layer catches
+    cannot be defined in a layer above the LLM layer.
+    """

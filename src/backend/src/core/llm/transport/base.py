@@ -166,7 +166,7 @@ class BaseLLM(BaseModel):
             #
             # NOT swallowed: BaseException (KeyboardInterrupt, SystemExit,
             # asyncio.CancelledError), so cancelling an execution still stops it.
-            from src.services.execution.runtime.executor import ToolExecutionBlockedError
+            from src.core.llm.transport.exceptions import ToolExecutionBlockedError
 
             if isinstance(e, ToolExecutionBlockedError):
                 return f"Tool call blocked: {e}"

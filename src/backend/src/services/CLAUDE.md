@@ -27,6 +27,39 @@ vendored LIBRARY — `BaseTool`, `event_bus`, `MemoryRecord`), but it must
 not import a PATH package. A guardrail that imports `flow_builder` has stopped
 being usable from a chat turn, which is the whole reason these moved.
 
+## Layering, and how it is enforced
+
+    api  →  services  →  repositories  →  models
+                ↓
+              core, utils, schemas   (below everything; never import upward)
+
+`import-linter` checks this on every `run_tests.py` run — contracts live in
+`[tool.importlinter]` in `pyproject.toml`, or run `lint-imports` directly. It
+traces TRANSITIVE chains, which is the point: the violations it found were
+mostly `repositories → utils → services`, invisible to a grep for
+`from src.services` in `repositories/`.
+
+Each contract carries an `ignore_imports` list of KNOWN violations, each with the
+reason it is still there. **That list is meant to shrink.** Adding to it needs a
+reason in review; the whole value of the check is that it fails on new ones.
+
+Two rules the contracts encode, and the reasoning behind them:
+
+- **A repository never imports a service.** The one exception left,
+  `dashboard_repository`, resolves its own Databricks PAT through
+  `ApiKeysService`; the fix is for the calling service to inject the token.
+- **`core/` and `utils/` never import services.** Four remain, all the same
+  shape — core wanting DB-backed configuration (`llm_manager` needs the model
+  catalogue and API keys, `dependencies` needs LLMLogService, `embeddings` needs
+  API keys). Fixing them means injecting config, defining ports in `core`, or
+  deciding `llm_manager` is an application service that merely lives in `core/`.
+
+Not yet encoded, and the next thing worth adding: **a service should not build
+queries.** Repositories own query construction; a service holds a session only
+for transaction control (`commit`/`rollback`) or uses `UnitOfWork`. The
+exemption is DDL — `databricks/lakebase/{migration,schema,permission,management}`
+execute raw SQL because there is no repository for `CREATE SCHEMA`.
+
 ## Conventions (match `agent_service.py`)
 
 - File named `<resource>_service.py`. Extend `BaseService[Model, CreateSchema]`

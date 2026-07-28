@@ -142,7 +142,12 @@ def main():
             ("python -m black --check src tests", "Black code formatting check"),
             ("python -m isort --check-only src tests", "Import sorting check"),
             ("python -m flake8 src tests", "Flake8 linting"),
-            ("python -m mypy src", "Type checking with mypy")
+            ("python -m mypy src", "Type checking with mypy"),
+            # Architecture contracts: routers > services > repositories > models,
+            # and nothing below services imports upward. See [tool.importlinter]
+            # in pyproject.toml — the ignore lists there are known violations
+            # kept passing on purpose, and they are meant to shrink.
+            ("lint-imports", "Architecture contracts (import-linter)"),
         ]
         
         for cmd, desc in linting_commands:

@@ -91,6 +91,7 @@ dev = [
     "isort>=5.13.2",
     "mypy>=1.8.0",
     "ruff>=0.2.1",
+    "import-linter>=2.0",
 ]
 
 [tool.uv]
@@ -149,3 +150,77 @@ python_files = "test_*.py"
 python_functions = "test_*"
 python_classes = "Test*"
 asyncio_mode = "auto"
+
+# ─── Architecture contracts (import-linter) ──────────────────────────────────
+# Run: .venv/bin/lint-imports
+#
+# These encode the layering the code already follows, so the build fails on new
+# violations rather than on a code review noticing one. Everything listed under
+# `ignore_imports` is a KNOWN violation kept passing deliberately — the list is
+# meant to shrink, and nothing should be added to it without a reason in review.
+
+[tool.importlinter]
+root_package = "src"
+
+[[tool.importlinter.contracts]]
+name = "Layers: routers on top, models at the bottom"
+type = "layers"
+layers = [
+    "src.api",
+    "src.services",
+    "src.repositories",
+    "src.models",
+]
+# Every one of these is repositories -> services, direct or through utils. They
+# are listed again here because import-linter evaluates each contract
+# independently; the "Repositories never import services" contract below is
+# where the reasoning lives.
+ignore_imports = [
+    "src.repositories.dashboard_repository -> src.services.settings.api_keys",
+    "src.utils.databricks_auth -> src.services.databricks.workspace.service",
+    "src.utils.databricks_auth -> src.services.settings.api_keys",
+    "src.utils.user_context -> src.services.groups.groups",
+    "src.utils.user_context -> src.services.groups.users",
+    "src.utils.prompt_utils -> src.services.catalog.templates",
+]
+
+[[tool.importlinter.contracts]]
+name = "Repositories never import services"
+type = "forbidden"
+source_modules = ["src.repositories"]
+forbidden_modules = ["src.services"]
+# DashboardRepository is an HTTP repository (no DB session) that resolves its own
+# Databricks PAT through ApiKeysService. The fix is to inject the token from the
+# calling service; until then this is the one exception.
+ignore_imports = [
+    "src.repositories.dashboard_repository -> src.services.settings.api_keys",
+    # Transitive, via utils. The repositories are innocent here: they import
+    # src.utils.databricks_auth / src.utils.user_context, which reach for a
+    # service. Fixing the three utils modules below clears all of these at once.
+    "src.utils.databricks_auth -> src.services.databricks.workspace.service",
+    "src.utils.databricks_auth -> src.services.settings.api_keys",
+    "src.utils.user_context -> src.services.groups.groups",
+    "src.utils.user_context -> src.services.groups.users",
+    "src.utils.prompt_utils -> src.services.catalog.templates",
+]
+
+[[tool.importlinter.contracts]]
+name = "Core and utils never import services"
+type = "forbidden"
+source_modules = ["src.core", "src.utils"]
+forbidden_modules = ["src.services"]
+# All four remaining violations are the same shape: core wants configuration that
+# lives behind a service (the model catalogue, API keys, LLM logs). Fixing them
+# means injecting the config or defining ports in core — or deciding llm_manager
+# is an application service that merely lives in core/. Not yet decided.
+ignore_imports = [
+    "src.core.llm_manager -> src.services.settings.models",
+    "src.core.llm_manager -> src.services.settings.api_keys",
+    "src.core.dependencies -> src.services.execution.logs.llm_log_service",
+    "src.core.llm.embeddings -> src.services.settings.api_keys",
+    "src.utils.user_context -> src.services.groups.groups",
+    "src.utils.user_context -> src.services.groups.users",
+    "src.utils.databricks_auth -> src.services.databricks.workspace.service",
+    "src.utils.databricks_auth -> src.services.settings.api_keys",
+    "src.utils.prompt_utils -> src.services.catalog.templates",
+]

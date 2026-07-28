@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from src.core.llm.json_extraction import extract_json_dict
+from src.core.llm.transport.exceptions import ToolExecutionBlockedError
 
 from pydantic import BaseModel, Field
 
@@ -54,14 +55,6 @@ def tool_schema(tool: BaseTool) -> dict[str, Any]:
             "parameters": tool.args_schema.model_json_schema(),
         },
     }
-
-
-class ToolExecutionBlockedError(Exception):
-    """A pre-execution tool hook blocked this tool call.
-
-    The message is surfaced to the LLM as the tool result (via the normal
-    error path), so the agent can explain the denial instead of crashing.
-    """
 
 
 # Tool lifecycle hooks — the enforcement seam beneath guardrails. Every tool

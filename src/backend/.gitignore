@@ -67,3 +67,6 @@ kasal_databricks_*/
 kasal_lakebase_*/
 **/memories.lance/
 **/memories.lance/**
+
+# import-linter graph cache
+.import_linter_cache/
