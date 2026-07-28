@@ -52,24 +52,20 @@ export class PublicationService {
   }
 
   /**
-   * The ids of every published crew or flow the caller can see.
+   * The ids of every published crew or flow in this workspace.
    *
-   * One request for the whole catalogue rather than one per card — a list of
-   * fifty crews should not become fifty round trips just to draw an icon.
-   * Reads the MCP capability listing, which is the same group-scoped query the
-   * A2A card renders from, so the catalogue cannot disagree with what is
-   * actually exposed.
+   * Reads the workspace's own /publications endpoint, NOT the MCP tool surface.
+   * An MCP tool result is shaped for a calling agent — a name and a description,
+   * which is what it selects on — and carries no entity ids, so filtering it for
+   * ids silently produced an empty set and every card looked unpublished.
+   *
+   * One request for the whole catalogue rather than one per card.
    */
   static async listPublishedIds(entity: PublishableEntity): Promise<string[]> {
-    const response = await API.post<{
-      content?: { crews?: { entity_type?: string; entity_id?: string }[] };
-    }>('/mcp/v1/tools/call', { name: 'list_crews', arguments: {} });
-
-    const published = response.data?.content?.crews ?? [];
-    return published
-      .filter((c) => (c.entity_type ?? 'crew') === entity)
-      .map((c) => String(c.entity_id ?? ''))
-      .filter(Boolean);
+    const response = await API.get<PublicationResponse[]>('/publications', {
+      params: { entity_type: entity },
+    });
+    return (response.data ?? []).map((p) => String(p.entity_id)).filter(Boolean);
   }
 
   /** Withdraw from every external surface. */

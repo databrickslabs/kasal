@@ -26,6 +26,7 @@ from src.services.external.identity import (
     ExternalCaller,
     resolve_caller,
 )
+from src.services.external.permissions import ExternalPermissionError
 
 #: Task operations. Mounted under the API prefix like every other router.
 router = APIRouter(tags=["a2a"], responses={404: {"description": "Not found"}})
@@ -130,6 +131,10 @@ async def send_message(
         raise NotFoundError(str(exc))
     except ExternalAuthError as exc:
         raise A2AAuthRequired(exc.detail)
+    except ExternalPermissionError as exc:
+        from src.core.exceptions import ForbiddenError
+
+        raise ForbiddenError(exc.detail)
     except ValueError as exc:
         raise UnprocessableEntityError(str(exc))
 

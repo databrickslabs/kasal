@@ -27,6 +27,7 @@ from src.services.external.identity import (
     ExternalCaller,
     resolve_caller,
 )
+from src.services.external.permissions import ExternalPermissionError
 from src.services.mcp_server import server as mcp_server
 from src.services.mcp_server.tools import UnknownCapabilityError, UnknownRunError
 
@@ -144,6 +145,13 @@ async def call_tool(
         )
     except mcp_server.UnknownToolError as exc:
         raise NotFoundError(str(exc))
+    except ExternalPermissionError as exc:
+        # 403, not 401: the caller IS authenticated, their role is the problem.
+        # Answering 401 would send them round the auth loop with the same
+        # credentials forever.
+        from src.core.exceptions import ForbiddenError
+
+        raise ForbiddenError(exc.detail)
     except (UnknownCapabilityError, UnknownRunError) as exc:
         # 404 for both "does not exist" and "not yours". They must stay
         # indistinguishable, or run ids and capability names become an oracle

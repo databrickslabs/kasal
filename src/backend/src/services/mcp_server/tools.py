@@ -36,7 +36,7 @@ how to ask a human mid-task.
 import logging
 from typing import Any, Dict, List, Optional
 
-from src.services.external import artifacts, interaction
+from src.services.external import artifacts, authoring, interaction
 from src.services.external.identity import ExternalCaller
 from src.services.external.invocation import (
     ask,
@@ -46,6 +46,11 @@ from src.services.external.invocation import run_result as _run_result
 from src.services.external.invocation import run_status as _run_status
 from src.services.external.invocation import (
     start_run,
+)
+from src.services.external.permissions import (
+    AUTHOR_ROLES,
+    RUN_ROLES,
+    require_role,
 )
 from src.services.external.publication import PublicationService
 
@@ -102,6 +107,31 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             "a description of what each one does and when to use it."
         ),
         "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "create_crew",
+        "description": (
+            "Build a NEW crew in this workspace from a description of what it "
+            "should do. Requires the admin or editor role. The crew is added to "
+            "the catalogue but is NOT reachable from outside until someone "
+            "publishes it."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "prompt": {
+                    "type": "string",
+                    "description": "What the crew should do, in plain language.",
+                },
+                "model": {"type": "string", "description": "Optional model override."},
+                "tools": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional tool names the crew may use.",
+                },
+            },
+            "required": ["prompt"],
+        },
     },
     {
         "name": "start_crew",
@@ -189,7 +219,8 @@ async def ask_kasal(
     model: Optional[str] = None,
     session: Any = None,
 ) -> Dict[str, Any]:
-    """Blocking question over the chat path."""
+    """Blocking question over the chat path. Any workspace member may ask."""
+    require_role(caller, RUN_ROLES)
     result = await ask(caller=caller, question=question, model=model, session=session)
     return result.as_dict()
 
@@ -201,6 +232,7 @@ async def list_crews(caller: ExternalCaller, session: Any = None) -> Dict[str, A
     ``skills[]`` is built from — the two surfaces cannot advertise different
     capabilities because there is only one list.
     """
+    require_role(caller, RUN_ROLES)
     service = PublicationService(session)
     capabilities = await service.list_capabilities(caller)
     return {
@@ -224,6 +256,7 @@ async def start_crew(
     session: Any = None,
 ) -> Dict[str, Any]:
     """Start a published crew, returning a handle."""
+    require_role(caller, RUN_ROLES)
     service = PublicationService(session)
     publication = await service.resolve_capability(caller, name)
     if publication is None:
@@ -241,6 +274,7 @@ async def get_run_status(
     caller: ExternalCaller, run_id: str, session: Any = None
 ) -> Dict[str, Any]:
     """A run's state, and what it is waiting for if it has paused."""
+    require_role(caller, RUN_ROLES)
     result = await _run_status(caller, run_id, session=session)
     if result is None:
         raise UnknownRunError(f"No run {run_id!r}")
@@ -261,6 +295,7 @@ async def get_run_result(
     caller: ExternalCaller, run_id: str, session: Any = None
 ) -> Dict[str, Any]:
     """A run's output, shaped by the shared artifact builder."""
+    require_role(caller, RUN_ROLES)
     result = await _run_result(caller, run_id, session=session)
     if result is None:
         raise UnknownRunError(f"No run {run_id!r}")
@@ -275,6 +310,7 @@ async def cancel_run(
     caller: ExternalCaller, run_id: str, session: Any = None
 ) -> Dict[str, Any]:
     """Stop a run."""
+    require_role(caller, RUN_ROLES)
     result = await _cancel_run(caller, run_id, session=session)
     if result is None:
         raise UnknownRunError(f"No run {run_id!r}")
@@ -292,6 +328,7 @@ async def respond_to_run(
 
     The tool MCP would not have. See the module docstring.
     """
+    require_role(caller, RUN_ROLES)
     accepted = await interaction.respond(
         caller=caller,
         run_id=run_id,
@@ -304,8 +341,22 @@ async def respond_to_run(
     return {"run_id": run_id, "accepted": True}
 
 
+async def create_crew(
+    caller: ExternalCaller,
+    prompt: str,
+    model: Optional[str] = None,
+    tools: Optional[List[str]] = None,
+    session: Any = None,
+) -> Dict[str, Any]:
+    """Build a new crew. Admin and editor only — the check is in the EIL."""
+    return await authoring.create_crew(
+        caller=caller, prompt=prompt, model=model, tools=tools, session=session
+    )
+
+
 TOOL_HANDLERS = {
     "ask_kasal": ask_kasal,
+    "create_crew": create_crew,
     "list_crews": list_crews,
     "start_crew": start_crew,
     "get_run_status": get_run_status,
@@ -379,6 +430,7 @@ async def call_crew_tool(
     session: Any = None,
 ) -> Dict[str, Any]:
     """Invoke a Layer-2 tool — i.e. start the crew published under ``name``."""
+    require_role(caller, RUN_ROLES)
     service = PublicationService(session)
     publication = await service.resolve_capability(caller, name)
     if publication is None:

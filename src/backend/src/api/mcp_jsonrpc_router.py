@@ -34,6 +34,7 @@ from src.services.external.identity import (
     ExternalCaller,
     resolve_caller,
 )
+from src.services.external.permissions import ExternalPermissionError
 from src.services.mcp_server import server as mcp_server
 
 router = APIRouter(tags=["mcp-server"])
@@ -135,6 +136,11 @@ async def _handle(
             )
         except mcp_server.UnknownToolError as exc:
             return _error(request_id, _METHOD_NOT_FOUND, str(exc))
+        except ExternalPermissionError as exc:
+            # -32600 invalid request rather than method-not-found: the tool
+            # exists, and telling the caller otherwise would send it looking for
+            # a name that is right there in tools/list.
+            return _error(request_id, _INVALID_REQUEST, exc.detail)
         except ExternalAuthError as exc:
             return _error(request_id, _INVALID_REQUEST, exc.detail)
         except TypeError as exc:

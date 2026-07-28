@@ -47,6 +47,7 @@ from src.api.models_router import router as models_router
 from src.api.powerbi_router import router as powerbi_router
 from src.api.prompt_improvement_router import router as prompt_improvement_router
 from src.api.prompt_optimization_router import router as prompt_optimization_router
+from src.api.publications_router import router as publications_router
 from src.api.scheduler_router import router as scheduler_router
 from src.api.schemas_router import router as schemas_router
 from src.api.sse_router import router as sse_router
@@ -68,6 +69,9 @@ api_router = APIRouter()
 # Include all the sub-routers
 api_router.include_router(agents_router)
 api_router.include_router(crews_router)
+# The workspace's own view of what it has published (entity ids for the
+# catalogue). The external surfaces below shape their output for agents.
+api_router.include_router(publications_router)
 # Kasal as an MCP SERVER (what external agents call). Distinct from
 # mcp_router above, which is the MCP CLIENT registry.
 api_router.include_router(mcp_server_router)

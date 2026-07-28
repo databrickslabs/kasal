@@ -25,6 +25,7 @@ from src.services.external.invocation import (
     run_status,
     start_run,
 )
+from src.services.external.permissions import RUN_ROLES, require_role
 from src.services.external.publication import PublicationService
 from src.services.external.state import ExternalTaskState
 
@@ -51,6 +52,11 @@ async def send_message(
     With ``task_id``, this is an ANSWER to a paused task — the A2A way of
     completing a human-in-the-loop gate. Without one, it starts the named skill.
     """
+    # Same roles as the MCP surface, from the same list. A capability that is
+    # operator-runnable over MCP and refused over A2A (or worse, the reverse)
+    # would be a privilege bug that looks right in each adapter alone.
+    require_role(caller, RUN_ROLES)
+
     text = render.text_of(message)
 
     if task_id:
@@ -95,6 +101,7 @@ async def _continue_task(
 
 async def get_task(caller: ExternalCaller, task_id: str, session: Any = None) -> Task:
     """A task's current state, with its output or its pending question."""
+    require_role(caller, RUN_ROLES)
     result = await run_status(caller, task_id, session=session)
     if result is None:
         raise UnknownTaskError(f"No task {task_id!r}")
@@ -118,6 +125,7 @@ async def cancel_task(
     caller: ExternalCaller, task_id: str, session: Any = None
 ) -> Task:
     """Stop a task."""
+    require_role(caller, RUN_ROLES)
     result = await cancel_run(caller, task_id, session=session)
     if result is None:
         raise UnknownTaskError(f"No task {task_id!r}")
@@ -134,6 +142,8 @@ async def list_tasks(
     group-filtered path as everything else rather than the generic history
     query.
     """
+    require_role(caller, RUN_ROLES)
+
     from src.services.execution.service import ExecutionService
 
     service = ExecutionService(session)
