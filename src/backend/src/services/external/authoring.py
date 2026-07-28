@@ -90,9 +90,19 @@ async def create_crew(
     from src.schemas.crew import CrewGenerationRequest
     from src.services.generation.crews import CrewGenerationService
 
+    # Tool assignment only happens if generation is GIVEN tools to assign: the
+    # planner picks which agent gets which from this list, and an empty one
+    # produces a crew with "Tools: 0" on every agent. The UI passes the
+    # workspace's enabled tools, so an externally-created crew defaults to the
+    # same set — otherwise a crew built over MCP is quietly less capable than
+    # the identical prompt typed into the canvas.
+    available_tools = (
+        tools if tools is not None else await _enabled_tool_names(caller, session)
+    )
+
     service = CrewGenerationService(session)
     result = await service.create_crew_complete(
-        CrewGenerationRequest(prompt=prompt, model=model, tools=tools or []),
+        CrewGenerationRequest(prompt=prompt, model=model, tools=available_tools),
         caller.group_context,
     )
 
@@ -141,6 +151,30 @@ async def create_crew(
             "until someone publishes it."
         ),
     }
+
+
+async def _enabled_tool_names(caller: ExternalCaller, session: Any) -> List[str]:
+    """The tools this workspace has enabled, as generation expects them.
+
+    Group-scoped through the same service the tools UI reads, so "what an
+    externally-created crew may use" and "what this workspace has switched on"
+    cannot drift apart.
+
+    Best-effort: a crew with no tools is still a crew, and failing creation
+    because the tool catalogue could not be read would be the wrong trade.
+    """
+    try:
+        from src.services.tools.tool_service import ToolService
+
+        response = await ToolService(session).get_enabled_tools_for_group(
+            caller.group_context
+        )
+        names = [t.title for t in (response.tools or []) if getattr(t, "title", None)]
+        logger.info("[external] crew generation offered %d tools", len(names))
+        return names
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[external] could not load enabled tools: %s", exc)
+        return []
 
 
 def _name_from_prompt(prompt: str) -> str:
