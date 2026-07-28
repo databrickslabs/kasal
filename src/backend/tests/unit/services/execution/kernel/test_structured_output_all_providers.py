@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from pydantic import BaseModel
 
-from kasal_engine.llm import LLM
+from src.core.llm.transport import LLM
 
 
 class _Plan(BaseModel):

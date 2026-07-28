@@ -13,8 +13,8 @@ import concurrent.futures
 import re
 import time as _time_mod
 from typing import Any, ClassVar, Dict, List, Optional, Union
-from kasal_engine.llm import LLM
-from kasal_engine.llm import LLMContextLengthExceededError
+from src.core.llm.transport import LLM
+from src.core.llm.transport import LLMContextLengthExceededError
 import litellm
 
 # Use centralized logger
@@ -236,7 +236,7 @@ class DatabricksRetryLLM(LLM):
 
         current_window = 0
         try:
-            from kasal_engine.llm import LLM_CONTEXT_WINDOW_SIZES
+            from src.core.llm.transport import LLM_CONTEXT_WINDOW_SIZES
 
             current_window = LLM_CONTEXT_WINDOW_SIZES.get(getattr(self, "model", ""), 0) or 0
         except Exception:
@@ -1152,7 +1152,7 @@ class DatabricksRetryLLM(LLM):
 # NOTE: the crewAI-era apply_tool_calls_fix() patch is obsolete under
 # kasal_engine: its completions loop executes tool_calls whenever they are
 # present, even when the response also carries content text
-# (see kasal_engine.llm.completion.OpenAICompletion._call_completions_api).
+# (see src.core.llm.transport.completion.OpenAICompletion._call_completions_api).
 
 
 

@@ -11,8 +11,8 @@ import json
 import traceback
 from pydantic import BaseModel, create_model
 
-from kasal_engine.core import Agent, Task
-from kasal_engine.core import TaskOutput
+from src.services.execution.runtime import Agent, Task
+from src.services.execution.runtime import TaskOutput
 
 from src.core.logger import LoggerManager
 from src.services.execution.kernel.tool_helpers import resolve_tool_ids_to_names

@@ -39,8 +39,8 @@ import json
 import logging
 from typing import Any
 
-from kasal_engine.llm import OpenAICompletion
-from kasal_engine.events import LLMCallType
+from src.core.llm.transport import OpenAICompletion
+from src.services.execution.events import LLMCallType
 
 # Use the "crew" logger so messages appear in crew.log alongside other
 # subprocess output (the root logger is set to WARNING in subprocesses).

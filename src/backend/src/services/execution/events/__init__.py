@@ -1,12 +1,12 @@
-"""kasal_engine.events — generated from the kasal_engine datamodel.
+"""src.services.execution.events — generated from the kasal_engine datamodel.
 
 Generated from the kasal_engine datamodel — do not edit by hand."""
 
 from .bus import (
     BaseEventListener,
-    CrewAIEventsBus,
+    EventsBus,
     EventBus,
-    crewai_event_bus,
+    event_bus,
     current_event_context,
     event_context,
     reset_event_causality,
@@ -61,7 +61,7 @@ __all__ = [
     "BaseEventListener",
     "A2UISurfaceEvent",
     "ContextCompactionEvent",
-    "CrewAIEventsBus",
+    "EventsBus",
     "CrewBaseEvent",
     "CrewKickoffCompletedEvent",
     "CrewKickoffStartedEvent",
@@ -96,7 +96,7 @@ __all__ = [
     "ToolUsageEvent",
     "ToolUsageFinishedEvent",
     "ToolUsageStartedEvent",
-    "crewai_event_bus",
+    "event_bus",
     "current_event_context",
     "event_context",
     "reset_event_causality",

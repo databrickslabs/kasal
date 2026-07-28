@@ -13,7 +13,7 @@ from src.services.execution.kernel.agent_builder import (
 
 
 class _FakeLLM:
-    """Stand-in for a built engine LLM (kasal_engine.llm.LLM subclass), which
+    """Stand-in for a built engine LLM (src.core.llm.transport.LLM subclass), which
     carries the resolved provider model and an optional reasoning_effort field."""
 
     def __init__(self, model):

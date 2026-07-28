@@ -4,7 +4,7 @@ import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from kasal_engine.memory import Memory
+from src.services.memory.engine import Memory
 from src.services.memory.engine_storage_adapter import EngineStorageAdapter
 from src.services.memory.local_storage_backend import LocalMemoryStorage
 from src.services.memory.hooks import flush_memory_writes, remember_async

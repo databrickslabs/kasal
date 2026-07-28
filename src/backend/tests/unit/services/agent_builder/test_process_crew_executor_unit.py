@@ -47,8 +47,8 @@ class TestCrewAIContextWindowPatching:
             }
         }
 
-        with patch.dict('sys.modules', {'crewai': MagicMock(), 'kasal_engine.llm': MagicMock()}):
-            with patch('kasal_engine.llm.LLM_CONTEXT_WINDOW_SIZES', mock_llm_context):
+        with patch.dict('sys.modules', {'crewai': MagicMock(), 'src.core.llm.transport': MagicMock()}):
+            with patch('src.core.llm.transport.LLM_CONTEXT_WINDOW_SIZES', mock_llm_context):
                 # Simulate the patching logic
                 for model_name, config in mock_model_configs.items():
                     if config.get('provider') == 'databricks':
@@ -433,11 +433,11 @@ class TestOtelShutdownOnError:
         with patch.dict("sys.modules", {
             "src.services.execution.subprocess_bootstrap": mock_logging_config,
             "crewai": MagicMock(),
-            "kasal_engine.llm": MagicMock(LLM_CONTEXT_WINDOW_SIZES={}),
-            "kasal_engine.events": MagicMock(),
+            "src.core.llm.transport": MagicMock(LLM_CONTEXT_WINDOW_SIZES={}),
+            "src.services.execution.events": MagicMock(),
             "crewai.utilities": MagicMock(),
             "crewai.utilities.exceptions": MagicMock(),
-            "kasal_engine.llm": MagicMock(
+            "src.core.llm.transport": MagicMock(
                 CONTEXT_LIMIT_ERRORS=[]
             ),
             "src.services.otel_tracing": mock_otel_tracing,
@@ -445,7 +445,7 @@ class TestOtelShutdownOnError:
             with patch("src.seeds.model_configs.MODEL_CONFIGS", {}):
                 # Force an exception during the inner try block
                 # by making Crew(...) raise when instantiated
-                with patch("kasal_engine.core.Crew", side_effect=RuntimeError("Boom")):
+                with patch("src.services.execution.runtime.Crew", side_effect=RuntimeError("Boom")):
                     result = run_crew_in_process(
                         execution_id="e-otel-err",
                         crew_config=crew_config,

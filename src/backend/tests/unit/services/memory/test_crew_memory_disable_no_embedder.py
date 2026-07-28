@@ -6,7 +6,7 @@ Updated for app-modes refactoring:
 - configure_crew_memory_components now accepts `storage` (single StorageBackend
   or None) instead of `memory_backends` (dict)
 - MemoryBackendConfig no longer has enable_short_term/enable_long_term/enable_entity
-- The function now builds a unified kasal_engine.memory.Memory instance
+- The function now builds a unified src.services.memory.engine.Memory instance
 
 Tests cover:
 - DEFAULT backend + no custom_embedder + no crew_kwargs embedder → memory disabled
@@ -16,7 +16,7 @@ Tests cover:
 - Verify memory=False is set and crew_kwargs returned early
 """
 import pytest
-import kasal_engine.memory
+import src.services.memory.engine
 from unittest.mock import MagicMock, patch
 
 from src.services.memory.crew_memory import CrewMemoryService
@@ -118,11 +118,11 @@ class TestDefaultBackendNoEmbedderDisablesMemory:
         mock_embedder = MagicMock()
 
         # With custom_embedder present, the disable guard should NOT trigger.
-        # The service does `from kasal_engine.memory import Memory` inside the function.
-        # Since kasal_engine.memory.__init__ does not export Memory, we inject it
+        # The service does `from src.services.memory.engine import Memory` inside the function.
+        # Since src.services.memory.engine.__init__ does not export Memory, we inject it
         # via patch.object with create=True so the import succeeds.
         mock_memory = MagicMock()
-        with patch.object(kasal_engine.memory, 'Memory', mock_memory, create=True):
+        with patch.object(src.services.memory.engine, 'Memory', mock_memory, create=True):
             result = service.configure_crew_memory_components(
                 crew_kwargs=crew_kwargs,
                 memory_config=memory_config,
@@ -145,9 +145,9 @@ class TestDefaultBackendNoEmbedderDisablesMemory:
         crew_kwargs = {'memory': True}
 
         # Storage=None means the code tries Memory() without storage; mock it.
-        # Inject Memory into kasal_engine.memory so the service's import succeeds.
+        # Inject Memory into src.services.memory.engine so the service's import succeeds.
         mock_memory = MagicMock()
-        with patch.object(kasal_engine.memory, 'Memory', mock_memory, create=True):
+        with patch.object(src.services.memory.engine, 'Memory', mock_memory, create=True):
             result = service.configure_crew_memory_components(
                 crew_kwargs=crew_kwargs,
                 memory_config=memory_config,
@@ -168,9 +168,9 @@ class TestDefaultBackendNoEmbedderDisablesMemory:
         crew_kwargs = {'memory': True}
 
         # Storage=None means the code tries Memory() without storage; mock it.
-        # Inject Memory into kasal_engine.memory so the service's import succeeds.
+        # Inject Memory into src.services.memory.engine so the service's import succeeds.
         mock_memory = MagicMock()
-        with patch.object(kasal_engine.memory, 'Memory', mock_memory, create=True):
+        with patch.object(src.services.memory.engine, 'Memory', mock_memory, create=True):
             result = service.configure_crew_memory_components(
                 crew_kwargs=crew_kwargs,
                 memory_config=memory_config,

@@ -289,7 +289,7 @@ def run_crew_in_process(
         # to not trigger summarization when needed. This leads to empty responses from
         # models like Qwen that silently fail when context is too large.
         try:
-            from kasal_engine.llm import LLM_CONTEXT_WINDOW_SIZES
+            from src.core.llm.transport import LLM_CONTEXT_WINDOW_SIZES
 
             from src.seeds.model_configs import MODEL_CONFIGS
 
@@ -337,7 +337,7 @@ def run_crew_in_process(
                 file=sys.stderr,
             )
 
-        from kasal_engine.core import Crew
+        from src.services.execution.runtime import Crew
 
         # Configure subprocess logging with execution ID
         subprocess_logger = configure_subprocess_logging(execution_id)
@@ -1027,7 +1027,7 @@ def run_crew_in_process(
 
                     # Event subscriptions belong to the OTel bridge, registered
                     # just below on this same bus.
-                    from kasal_engine.events import crewai_event_bus
+                    from src.services.execution.events import event_bus
 
                     async_logger.info(
                         f"CREW_SUBPROCESS_MODE={os.environ.get('CREW_SUBPROCESS_MODE')} - Direct DB writes enabled"
@@ -1047,7 +1047,7 @@ def run_crew_in_process(
                             _otel_bridge = OTelEventBridge(
                                 _bridge_tracer, execution_id, group_context
                             )
-                            _otel_bridge.register(crewai_event_bus)
+                            _otel_bridge.register(event_bus)
                             async_logger.info(
                                 f"[SUBPROCESS] OTel Event Bridge registered on event bus for {execution_id}"
                             )
@@ -1062,7 +1062,7 @@ def run_crew_in_process(
                     try:
                         from src.services.execution.event_pipe import EventPipeWriter
 
-                        EventPipeWriter(log_queue, execution_id).register(crewai_event_bus)
+                        EventPipeWriter(log_queue, execution_id).register(event_bus)
                         async_logger.info(
                             f"[SUBPROCESS] Event pipe writer registered for {execution_id}"
                         )
@@ -1080,7 +1080,7 @@ def run_crew_in_process(
                         )
 
                         CrewTaskCheckpointRecorder(execution_id, crew).register(
-                            crewai_event_bus
+                            event_bus
                         )
                         async_logger.info(
                             f"[SUBPROCESS] Crew task checkpoint recorder registered for {execution_id}"
@@ -1465,7 +1465,7 @@ def run_crew_in_process(
                 # thread pool, so without an explicit flush, DB writes for llm_request/
                 # llm_response traces may not complete before subprocess cleanup begins.
                 try:
-                    from kasal_engine.events import crewai_event_bus as _event_bus
+                    from src.services.execution.events import event_bus as _event_bus
 
                     async_logger.info(
                         "[SUBPROCESS] Flushing CrewAI event bus to ensure all trace handlers complete..."
@@ -1525,8 +1525,8 @@ def run_crew_in_process(
                 # This is essential for llm_request/llm_response traces that are written
                 # asynchronously by the event bus's thread pool
                 try:
-                    from kasal_engine.events import (
-                        crewai_event_bus as _cleanup_event_bus,
+                    from src.services.execution.events import (
+                        event_bus as _cleanup_event_bus,
                     )
 
                     _cleanup_event_bus.flush(timeout=15.0)
@@ -1640,7 +1640,7 @@ def run_crew_in_process(
 
         # Flush event bus even on error to capture partial traces
         try:
-            from kasal_engine.events import crewai_event_bus as _event_bus
+            from src.services.execution.events import event_bus as _event_bus
 
             _event_bus.flush(timeout=10.0)
         except Exception:

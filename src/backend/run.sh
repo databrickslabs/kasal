@@ -337,6 +337,11 @@ echo -e "${YELLOW}Press Ctrl+C to stop the server${NC}\n"
 # mid-execution and tears down in-flight crew/flow subprocesses, which stalls
 # the reload until everything is force-killed.
 #
+# This now covers the agent runtime too: it used to live in backend/kasal_engine
+# (outside src/), so editing the agent loop, the LLM transport or the event bus
+# did NOT reload the server — despite that package documenting itself as
+# "edit it directly like any other backend code".
+#
 # --timeout-graceful-shutdown bounds how long a reload waits for in-flight
 # requests. Uvicorn's default is None = WAIT FOREVER, and the frontend holds
 # open SSE streams (sse_router timeout defaults to 3600s) whose keepalive loop

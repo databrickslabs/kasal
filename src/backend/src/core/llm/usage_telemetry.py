@@ -21,8 +21,8 @@ import logging
 import os
 from typing import Any, Optional
 
-from kasal_engine.events import LLMCallCompletedEvent
-from kasal_engine.events.bus import crewai_event_bus
+from src.services.execution.events import LLMCallCompletedEvent
+from src.services.execution.events.bus import event_bus
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +116,6 @@ def register_usage_telemetry() -> None:
     global _registered
     if _registered:
         return
-    crewai_event_bus.register_handler(LLMCallCompletedEvent, _on_llm_call_completed)
+    event_bus.register_handler(LLMCallCompletedEvent, _on_llm_call_completed)
     _registered = True
     logger.info("Token telemetry registered on LLMCallCompletedEvent")

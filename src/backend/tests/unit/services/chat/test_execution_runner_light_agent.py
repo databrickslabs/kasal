@@ -114,7 +114,7 @@ async def test_run_light_agent_success_writes_completed_with_raw_answer():
 # getattr on the event), exactly as crewai's bus would during kickoff.
 
 import asyncio  # noqa: E402
-import kasal_engine.events as _ce
+import src.services.execution.events as _ce
 
 
 async def _run_with_captured_handlers(exec_id, config, ctx, mock_agent, trace_instance, emit_during_kickoff):
@@ -142,8 +142,8 @@ async def _run_with_captured_handlers(exec_id, config, ctx, mock_agent, trace_in
          patch("src.services.execution.kernel.agent_tools.build_agent_with_tools",
                new_callable=AsyncMock, return_value=mock_agent), \
          patch("src.services.trace.ExecutionTraceService", trace_cls), \
-         patch.object(_ce.crewai_event_bus, "register_handler", side_effect=_cap), \
-         patch.object(_ce.crewai_event_bus, "off"), \
+         patch.object(_ce.event_bus, "register_handler", side_effect=_cap), \
+         patch.object(_ce.event_bus, "off"), \
          patch("src.services.execution.status.ExecutionStatusService.update_status",
                update_mock):
         result = await run_light_agent(exec_id, config, group_context=ctx)

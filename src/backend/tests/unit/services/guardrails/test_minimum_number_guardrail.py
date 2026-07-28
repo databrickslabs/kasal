@@ -8,7 +8,7 @@ import sys
 import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 from src.services.guardrails.core.minimum_number_guardrail import MinimumNumberGuardrail
-from kasal_engine.core import TaskOutput
+from src.services.execution.runtime import TaskOutput
 
 
 class TestMinimumNumberGuardrail(unittest.TestCase):

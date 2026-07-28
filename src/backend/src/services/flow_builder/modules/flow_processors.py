@@ -6,7 +6,7 @@ This module handles processing of starting points, listeners, and routers in flo
 import logging
 from typing import Dict, List, Any, Optional, Callable
 from uuid import UUID
-from kasal_engine.flow import listen, router
+from src.services.flow_builder.runtime import listen, router
 
 from src.core.logger import LoggerManager
 from src.utils.sensitive_data_utils import safe_log_tool_configs
@@ -376,7 +376,7 @@ class FlowProcessorManager:
                     if len(async_tasks) > 1:
                         # Auto-create a lightweight completion task that waits for all async tasks
                         # This allows all async tasks to run in parallel while satisfying CrewAI validation
-                        from kasal_engine.core import Task
+                        from src.services.execution.runtime import Task
 
                         # Use the last async task's agent for the completion task
                         completion_agent = async_tasks[-1].agent

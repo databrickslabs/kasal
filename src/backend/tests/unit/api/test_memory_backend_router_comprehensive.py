@@ -681,7 +681,7 @@ class TestLocalDefaultStoreReadDelete:
         Also returns the full store count as ``total`` (via ``storage.count``)
         so the browser knows how many pages exist beyond the one returned.
 
-        This test used to mock ``kasal_engine.memory.Memory`` — the very thing
+        This test used to mock ``src.services.memory.engine.Memory`` — the very thing
         that had broken. The real call built a bare ``Memory()`` under
         ``CREWAI_STORAGE_DIR``, which since crewAI's removal defaults to an
         in-process dict, so the browser reported an EMPTY store (0 shown against

@@ -23,7 +23,7 @@ and `flow_builder/`, over shared machinery in `execution/`. See
 `execution/CLAUDE.md`.
 
 The rule that keeps a capability a capability: it may import `kasal_engine` (the
-vendored LIBRARY — `BaseTool`, `crewai_event_bus`, `MemoryRecord`), but it must
+vendored LIBRARY — `BaseTool`, `event_bus`, `MemoryRecord`), but it must
 not import a PATH package. A guardrail that imports `flow_builder` has stopped
 being usable from a chat turn, which is the whole reason these moved.
 

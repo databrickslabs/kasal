@@ -1426,7 +1426,7 @@ class TestDatabricksAppControls:
         # A CrewAI event-bus listener feeds the progress store.
         crew_progress = files["agent_server/crew_progress.py"]
         assert (
-            "BaseEventListener" in crew_progress and "crewai_event_bus" in crew_progress
+            "BaseEventListener" in crew_progress and "event_bus" in crew_progress
         )
         # The server exposes the poll endpoint the frontend reads.
         assert "/progress/{conversation_id}" in files["agent_server/start_server.py"]
@@ -1686,10 +1686,10 @@ class TestCodexHandlerVendor:
         def _normalize(text: str) -> str:
             return text.replace(
                 "from crewai.llms.providers.openai.completion import OpenAICompletion",
-                "from kasal_engine.llm import OpenAICompletion",
+                "from src.core.llm.transport import OpenAICompletion",
             ).replace(
                 "from crewai.events.types.llm_events import LLMCallType",
-                "from kasal_engine.events import LLMCallType",
+                "from src.services.execution.events import LLMCallType",
             )
 
         assert _normalize(vendored.read_text(encoding="utf-8")) == _normalize(

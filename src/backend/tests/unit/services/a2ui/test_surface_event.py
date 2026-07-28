@@ -13,17 +13,17 @@ and the OTel bridge turns it into a row the timeline can render.
 
 import pytest
 
-from kasal_engine.events.bus import crewai_event_bus
-from kasal_engine.events.types import A2UISurfaceEvent
+from src.services.execution.events.bus import event_bus
+from src.services.execution.events.types import A2UISurfaceEvent
 from src.services.a2ui import runner as a2ui_runner
 
 
 @pytest.fixture
 def captured_events():
     events = []
-    with crewai_event_bus.scoped_handlers():
+    with event_bus.scoped_handlers():
 
-        @crewai_event_bus.on(A2UISurfaceEvent)
+        @event_bus.on(A2UISurfaceEvent)
         def _capture(source, event):  # noqa: ANN001
             events.append(event)
 
@@ -72,7 +72,7 @@ class TestEmission:
         def _explode(*args, **kwargs):
             raise RuntimeError("bus is down")
 
-        monkeypatch.setattr(crewai_event_bus, "emit", _explode)
+        monkeypatch.setattr(event_bus, "emit", _explode)
 
         a2ui_runner._emit_surface_event("composed")  # must not raise
 

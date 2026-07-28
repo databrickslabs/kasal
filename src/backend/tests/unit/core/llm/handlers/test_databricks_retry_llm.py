@@ -14,8 +14,8 @@ phrase-matcher recognizes.
 import pytest
 from unittest.mock import patch
 
-from kasal_engine.llm import is_context_length_exceeded
-from kasal_engine.llm import LLMContextLengthExceededError
+from src.core.llm.transport import is_context_length_exceeded
+from src.core.llm.transport import LLMContextLengthExceededError
 
 from src.core.llm.handlers.databricks_retry_llm import DatabricksRetryLLM
 

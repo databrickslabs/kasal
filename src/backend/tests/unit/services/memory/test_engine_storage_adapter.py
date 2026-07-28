@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from kasal_engine.memory import MemoryRecord
+from src.services.memory.engine import MemoryRecord
 from src.services.memory.engine_storage_adapter import (
     EngineStorageAdapter,
     build_litellm_embedder,
@@ -64,7 +64,7 @@ class FakeBackend:
         return {"beta": 2, "alpha": 1}
 
     def get_scope_info(self, scope):
-        from kasal_engine.memory import ScopeInfo
+        from src.services.memory.engine import ScopeInfo
 
         return ScopeInfo(path=scope, record_count=3)
 

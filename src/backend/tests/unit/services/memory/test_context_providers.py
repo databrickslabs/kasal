@@ -9,8 +9,8 @@ what the crew has actually produced so far.
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from kasal_engine.core.crew import Crew
-from kasal_engine.memory import MemoryRecord
+from src.services.execution.runtime.crew import Crew
+from src.services.memory.engine import MemoryRecord
 from src.services.memory.hooks import (
     MEMORY_BLOCK_HEADER,
     make_memory_context_provider,

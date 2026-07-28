@@ -17,7 +17,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
     InMemorySpanExporter,
 )
 
-from kasal_engine.memory import Memory
+from src.services.memory.engine import Memory
 from src.services.memory.engine_storage_adapter import EngineStorageAdapter
 from src.services.memory.local_storage_backend import LocalMemoryStorage
 from src.services.memory.hooks import (
@@ -34,11 +34,11 @@ def _embedder(texts):
 @pytest.fixture
 def bus():
     """Global engine bus with handler snapshot/restore (bridge has no off())."""
-    from kasal_engine.events import crewai_event_bus
+    from src.services.execution.events import event_bus
 
-    snapshot = {k: list(v) for k, v in crewai_event_bus._handlers.items()}
-    yield crewai_event_bus
-    crewai_event_bus._handlers = snapshot
+    snapshot = {k: list(v) for k, v in event_bus._handlers.items()}
+    yield event_bus
+    event_bus._handlers = snapshot
 
 
 @pytest.fixture
@@ -102,11 +102,11 @@ class TestPersistReachesTrace:
         )
         crew = SimpleNamespace(memory=memory, tasks=[task])
 
-        from kasal_engine.events import TaskCompletedEvent, crewai_event_bus
+        from src.services.execution.events import TaskCompletedEvent, event_bus
 
         unregister = register_task_output_persistence(crew)
         try:
-            crewai_event_bus.emit(
+            event_bus.emit(
                 task,
                 TaskCompletedEvent(
                     output=SimpleNamespace(raw="Summary: growth 4%", agent="Writer"),
@@ -128,7 +128,7 @@ class TestPersistReachesTrace:
         """The crew subprocess flushes after kickoff: once flush returns, the
         record is in storage and the Memory Write span is exported — nothing
         left to die with the interpreter."""
-        from kasal_engine.events import TaskCompletedEvent, crewai_event_bus
+        from src.services.execution.events import TaskCompletedEvent, event_bus
         from src.services.memory.hooks import flush_memory_writes
 
         backend = LocalMemoryStorage(tmp_path / "m.db", embedder=_embedder)
@@ -143,7 +143,7 @@ class TestPersistReachesTrace:
 
         unregister = register_task_output_persistence(crew)
         try:
-            crewai_event_bus.emit(
+            event_bus.emit(
                 task,
                 TaskCompletedEvent(
                     output=SimpleNamespace(raw="done and dusted", agent="Closer"),

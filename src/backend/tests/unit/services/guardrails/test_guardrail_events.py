@@ -11,21 +11,21 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from kasal_engine.core.guardrail import LLMGuardrail
-from kasal_engine.core.task import Task
-from kasal_engine.core.types import TaskOutput
-from kasal_engine.events import (
+from src.services.execution.runtime.guardrail import LLMGuardrail
+from src.services.execution.runtime.task import Task
+from src.services.execution.runtime.types import TaskOutput
+from src.services.execution.events import (
     LLMGuardrailCompletedEvent,
     LLMGuardrailFailedEvent,
     LLMGuardrailStartedEvent,
-    crewai_event_bus,
+    event_bus,
 )
 
 
 @pytest.fixture
 def captured_events():
     """Capture guardrail events; snapshot/restore the global bus handlers."""
-    snapshot = {k: list(v) for k, v in crewai_event_bus._handlers.items()}
+    snapshot = {k: list(v) for k, v in event_bus._handlers.items()}
     events = []
 
     def _capture(source, event):
@@ -36,9 +36,9 @@ def captured_events():
         LLMGuardrailCompletedEvent,
         LLMGuardrailFailedEvent,
     ):
-        crewai_event_bus.register_handler(event_cls, _capture)
+        event_bus.register_handler(event_cls, _capture)
     yield events
-    crewai_event_bus._handlers = snapshot
+    event_bus._handlers = snapshot
 
 
 def _task(guardrail, max_retries=None):

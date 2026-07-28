@@ -121,7 +121,7 @@ class TestCodeGuardrail:
         # A 'guardrail' with description/llm_model but no 'type' is actually an LLM
         # guardrail and must be re-routed.
         with (
-            patch("kasal_engine.core.LLMGuardrail") as MockLLMG,
+            patch("src.services.execution.runtime.LLMGuardrail") as MockLLMG,
             patch(
                 "src.core.llm_manager.LLMManager.configure_kasal_llm",
                 new_callable=AsyncMock,
@@ -147,7 +147,7 @@ class TestLlmGuardrail:
     @pytest.mark.asyncio
     async def test_llm_guardrail_set(self):
         with (
-            patch("kasal_engine.core.LLMGuardrail") as MockLLMG,
+            patch("src.services.execution.runtime.LLMGuardrail") as MockLLMG,
             patch(
                 "src.core.llm_manager.LLMManager.configure_kasal_llm",
                 new_callable=AsyncMock,

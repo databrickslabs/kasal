@@ -26,7 +26,7 @@ from src.services.flow_builder.modules.agent_adapter import AgentConfig
 # `kasal_engine`, and it was actively harmful:
 #
 #   * it stubbed `kasal_engine.*`, which is REAL here, so
-#     `from kasal_engine.core import Task` only resolved when some earlier test
+#     `from src.services.execution.runtime import Task` only resolved when some earlier test
 #     had already imported it — this file errored when run alone;
 #   * it hand-built filesystem paths ("engines/kasal/paths/flow/modules/..."),
 #     so moving the source broke the loader;

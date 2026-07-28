@@ -591,14 +591,7 @@ def deploy_source_to_databricks(
                     backend_dst / "src",
                     ignore=custom_ignore_function(backend_excluded_dirs, backend_excluded_patterns)
                 )
-                # kasal_engine is the vendored native engine package (not a pip
-                # dependency) — it must ship next to src/ or the app can't import it.
-                shutil.copytree(
-                    backend_src / "kasal_engine",
-                    backend_dst / "kasal_engine",
-                    ignore=custom_ignore_function(backend_excluded_dirs, backend_excluded_patterns)
-                )
-                logger.info("Copied backend/src + backend/kasal_engine (dev/test/runtime artifacts stay local)")
+                logger.info("Copied backend/src (dev/test/runtime artifacts stay local)")
 
             if ship_frontend:
                 # Prebuilt assets: build_frontend() just refreshed

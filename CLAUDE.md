@@ -33,7 +33,7 @@ you are editing wins on specifics:
 - Install dependencies: `cd src/backend && uv sync`
 - To change a dependency: edit `pyproject.toml`, run `uv lock` (regenerates `uv.lock`), then `uv sync`. Never hand-edit `uv.lock`.
 - The Databricks App deploy (`src/deploy.py`) ships `pyproject.toml` + `uv.lock` at the bundle root so the build runs `uv sync` (a `requirements.txt` at the root would take precedence and bypass uv).
-- Key dependencies include: psutil (for process management), litellm, databricks-sdk (the agent engine is the vendored `src/backend/kasal_engine` package)
+- Key dependencies include: psutil (for process management), litellm, databricks-sdk. The agent engine is first-party code under `src/backend/src/` — it is no longer a separate `kasal_engine` package.
 
 ### Documentation Location
 - **ALWAYS create documentation in `src/docs/` directory**
@@ -121,7 +121,7 @@ Kasal is an AI agent workflow orchestration platform with a **clean architecture
 ### Technology Stack
 - **Backend**: FastAPI + SQLAlchemy 2.0 (async) + Alembic (Python 3.11, pinned `>=3.11,<3.12`)
 - **Frontend**: React 18 + TypeScript + Material-UI + ReactFlow, built with **Vite**
-- **AI Engine**: Kasal native engine (vendored `kasal_engine` package) for agent orchestration
+- **AI Engine**: Kasal's own agent runtime, in `services/execution/runtime/` (agents, tasks, crews, the tool-call loop) over `services/execution/events/`
 - **Database**: SQLite (dev) / PostgreSQL / Databricks Lakebase (prod)
 - **Authentication**: Databricks OAuth (OBO / SPN); JWT for app sessions
 

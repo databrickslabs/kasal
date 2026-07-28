@@ -192,7 +192,7 @@ _ATTRIBUTION_FIELDS = ("agent_role", "agent_id", "task_id", "task_name")
 Handler = Callable[[Any, BaseEvent], Any]
 
 
-class CrewAIEventsBus:
+class EventsBus:
     """Thread-safe, isinstance-dispatched event bus.
 
     Handler failures are logged and isolated: one broken listener never
@@ -287,25 +287,25 @@ class CrewAIEventsBus:
                 self._handlers = saved
 
 
-EventBus = CrewAIEventsBus
+EventBus = EventsBus
 
-crewai_event_bus = CrewAIEventsBus()
+event_bus = EventsBus()
 
 
 class BaseEventListener:
     """Subclass and override setup_listeners() to attach handlers.
 
     Instantiating a listener registers it on the global bus, matching the
-    crewAI behavior kasal relies on; crewai_event_bus.register(listener)
+    crewAI behavior kasal relies on; event_bus.register(listener)
     re-runs setup_listeners and is idempotent for kasal's listeners.
     """
 
     verbose: bool = False
 
     def __init__(self) -> None:
-        self.setup_listeners(crewai_event_bus)
+        self.setup_listeners(event_bus)
 
-    def setup_listeners(self, crewai_event_bus: CrewAIEventsBus) -> None:
+    def setup_listeners(self, event_bus: EventsBus) -> None:
         raise NotImplementedError(
             f"{type(self).__name__} must implement setup_listeners()"
         )

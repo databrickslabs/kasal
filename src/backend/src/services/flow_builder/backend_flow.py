@@ -18,10 +18,10 @@ from pydantic import BaseModel, Field
 
 from src.core.logger import LoggerManager
 from src.repositories.flow_repository import FlowRepository
-from kasal_engine.core import Agent, Task, Crew
-from kasal_engine.llm import LLM
-from kasal_engine.core import Process
-from kasal_engine.flow import Flow as CrewAIFlow
+from src.services.execution.runtime import Agent, Task, Crew
+from src.core.llm.transport import LLM
+from src.services.execution.runtime import Process
+from src.services.flow_builder.runtime import Flow as CrewAIFlow
 from src.core.llm_manager import LLMManager
 
 # Import the refactored modules

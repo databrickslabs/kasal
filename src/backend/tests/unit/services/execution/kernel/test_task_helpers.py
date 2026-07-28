@@ -5,8 +5,8 @@ from unittest.mock import Mock, AsyncMock, patch, MagicMock, call
 from typing import Optional, Type, List, Dict, Any
 import json
 
-from kasal_engine.core import Agent, Task
-from kasal_engine.core import TaskOutput
+from src.services.execution.runtime import Agent, Task
+from src.services.execution.runtime import TaskOutput
 from src.services.tools.base import BaseTool
 from pydantic import BaseModel, create_model
 

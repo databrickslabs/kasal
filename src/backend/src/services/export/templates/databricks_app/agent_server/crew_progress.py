@@ -12,7 +12,7 @@ from agent_server import progress
 
 try:
     from crewai.events import (
-        crewai_event_bus,
+        event_bus,
         CrewKickoffStartedEvent,
         TaskStartedEvent,
         AgentExecutionStartedEvent,
@@ -36,7 +36,7 @@ def _short(text: object, limit: int = 60) -> str:
 if _AVAILABLE:
 
     class _ProgressListener(BaseEventListener):
-        def setup_listeners(self, bus):  # noqa: ANN001 — bus is crewai_event_bus
+        def setup_listeners(self, bus):  # noqa: ANN001 — bus is event_bus
             @bus.on(CrewKickoffStartedEvent)
             def _on_crew(source, event):  # noqa: ANN001, ARG001
                 progress.report("Starting…")

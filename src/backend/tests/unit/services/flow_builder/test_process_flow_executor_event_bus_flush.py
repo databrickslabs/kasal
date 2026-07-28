@@ -16,7 +16,7 @@ from unittest.mock import MagicMock, patch, AsyncMock
 # ---------------------------------------------------------------------------
 
 def _mock_event_bus(flush_return=True, flush_side_effect=None):
-    """Create a mock crewai_event_bus with configurable flush behaviour."""
+    """Create a mock event_bus with configurable flush behaviour."""
     bus = MagicMock()
     bus.flush = MagicMock(return_value=flush_return)
     if flush_side_effect:
@@ -35,9 +35,9 @@ class TestPostSuccessFlush:
         """Event bus flush is called with 30s timeout after successful execution."""
         mock_bus = _mock_event_bus(flush_return=True)
 
-        with patch.dict("sys.modules", {"kasal_engine.events": MagicMock(crewai_event_bus=mock_bus)}):
+        with patch.dict("sys.modules", {"src.services.execution.events": MagicMock(event_bus=mock_bus)}):
             # Simulate the post-success flush logic directly
-            from kasal_engine.events import crewai_event_bus as _event_bus
+            from src.services.execution.events import event_bus as _event_bus
             flushed = _event_bus.flush(timeout=30.0)
 
             assert flushed is True
@@ -47,8 +47,8 @@ class TestPostSuccessFlush:
         """When flush returns False (timeout), a warning is logged."""
         mock_bus = _mock_event_bus(flush_return=False)
 
-        with patch.dict("sys.modules", {"kasal_engine.events": MagicMock(crewai_event_bus=mock_bus)}):
-            from kasal_engine.events import crewai_event_bus as _event_bus
+        with patch.dict("sys.modules", {"src.services.execution.events": MagicMock(event_bus=mock_bus)}):
+            from src.services.execution.events import event_bus as _event_bus
             flushed = _event_bus.flush(timeout=30.0)
 
             assert flushed is False
@@ -77,12 +77,12 @@ class TestErrorPathFlush:
         """Event bus flush is called with 10s timeout on error path."""
         mock_bus = _mock_event_bus(flush_return=True)
 
-        with patch.dict("sys.modules", {"kasal_engine.events": MagicMock(crewai_event_bus=mock_bus)}):
+        with patch.dict("sys.modules", {"src.services.execution.events": MagicMock(event_bus=mock_bus)}):
             # Simulate error-path flush
             try:
                 raise RuntimeError("Flow execution error")
             except Exception:
-                from kasal_engine.events import crewai_event_bus as _event_bus
+                from src.services.execution.events import event_bus as _event_bus
                 _event_bus.flush(timeout=10.0)
 
                 _event_bus.flush.assert_called_once_with(timeout=10.0)
@@ -91,13 +91,13 @@ class TestErrorPathFlush:
         """Flush exception on error path is silenced (pass)."""
         mock_bus = _mock_event_bus(flush_side_effect=RuntimeError("double fault"))
 
-        with patch.dict("sys.modules", {"kasal_engine.events": MagicMock(crewai_event_bus=mock_bus)}):
+        with patch.dict("sys.modules", {"src.services.execution.events": MagicMock(event_bus=mock_bus)}):
             # Simulate: except block tries flush, flush fails, should be silenced
             try:
                 raise RuntimeError("Flow execution error")
             except Exception:
                 try:
-                    from kasal_engine.events import crewai_event_bus as _event_bus
+                    from src.services.execution.events import event_bus as _event_bus
                     _event_bus.flush(timeout=10.0)
                 except Exception:
                     pass  # This matches the actual code pattern
@@ -114,10 +114,10 @@ class TestCleanupFlush:
         """Final cleanup flush uses 15s timeout."""
         mock_bus = _mock_event_bus(flush_return=True)
 
-        with patch.dict("sys.modules", {"kasal_engine.events": MagicMock(crewai_event_bus=mock_bus)}):
+        with patch.dict("sys.modules", {"src.services.execution.events": MagicMock(event_bus=mock_bus)}):
             # Simulate the finally cleanup flush
             try:
-                from kasal_engine.events import crewai_event_bus as _cleanup_event_bus
+                from src.services.execution.events import event_bus as _cleanup_event_bus
                 _cleanup_event_bus.flush(timeout=15.0)
 
                 _cleanup_event_bus.flush.assert_called_once_with(timeout=15.0)
@@ -128,10 +128,10 @@ class TestCleanupFlush:
         """Exception during cleanup flush is caught and does not halt cleanup."""
         mock_bus = _mock_event_bus(flush_side_effect=RuntimeError("cleanup flush error"))
 
-        with patch.dict("sys.modules", {"kasal_engine.events": MagicMock(crewai_event_bus=mock_bus)}):
+        with patch.dict("sys.modules", {"src.services.execution.events": MagicMock(event_bus=mock_bus)}):
             # Simulate the try/except pattern in the finally block
             try:
-                from kasal_engine.events import crewai_event_bus as _cleanup_event_bus
+                from src.services.execution.events import event_bus as _cleanup_event_bus
                 _cleanup_event_bus.flush(timeout=15.0)
             except Exception as eb_flush_err:
                 # Code logs warning but continues cleanup

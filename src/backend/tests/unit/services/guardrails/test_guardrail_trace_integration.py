@@ -15,19 +15,19 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
     InMemorySpanExporter,
 )
 
-from kasal_engine.core.task import Task
-from kasal_engine.core.types import TaskOutput
+from src.services.execution.runtime.task import Task
+from src.services.execution.runtime.types import TaskOutput
 
 from src.services.otel_tracing.event_bridge import OTelEventBridge
 
 
 @pytest.fixture
 def bus():
-    from kasal_engine.events import crewai_event_bus
+    from src.services.execution.events import event_bus
 
-    snapshot = {k: list(v) for k, v in crewai_event_bus._handlers.items()}
-    yield crewai_event_bus
-    crewai_event_bus._handlers = snapshot
+    snapshot = {k: list(v) for k, v in event_bus._handlers.items()}
+    yield event_bus
+    event_bus._handlers = snapshot
 
 
 @pytest.fixture
@@ -104,7 +104,7 @@ class TestGuardrailSpans:
 
     def test_bridge_subscribes_to_guardrail_events(self, bus, spans):
         """The migration's dangling subscriptions must resolve now."""
-        from kasal_engine.events import LLMGuardrailStartedEvent
+        from src.services.execution.events import LLMGuardrailStartedEvent
 
         assert any(
             handlers

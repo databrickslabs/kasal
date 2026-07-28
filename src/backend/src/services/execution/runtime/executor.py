@@ -3,7 +3,7 @@
 Not a datamodel component: helpers shared by Agent/Task/Crew. The LLM
 contract is duck-typed — anything with
 ``call(messages, tools=..., available_functions=..., from_task=..., from_agent=...) -> str``
-works (the kasal_engine.llm subsystem provides the real one; tests use fakes).
+works (the src.core.llm.transport subsystem provides the real one; tests use fakes).
 Tool usage is emitted on the engine event bus, so kasal's tracing sees
 ToolUsageStarted/Finished/Error exactly as with crewAI.
 """
@@ -18,8 +18,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from ..events.bus import crewai_event_bus
-from ..events.types import (
+from src.services.execution.events.bus import event_bus
+from src.services.execution.events.types import (
     ToolUsageErrorEvent,
     ToolUsageFinishedEvent,
     ToolUsageStartedEvent,
@@ -117,7 +117,7 @@ def wrap_tool(tool: BaseTool, agent: Any = None, task: Any = None) -> Callable[.
             "task_id": str(task.id) if getattr(task, "id", None) else None,
         }
         started_at = datetime.now(timezone.utc)
-        crewai_event_bus.emit(tool, ToolUsageStartedEvent(**common))
+        event_bus.emit(tool, ToolUsageStartedEvent(**common))
         try:
             for pre_hook in list(_TOOL_PRE_HOOKS):
                 try:
@@ -140,9 +140,9 @@ def wrap_tool(tool: BaseTool, agent: Any = None, task: Any = None) -> Callable[.
                     if replaced is not None:
                         output = replaced
         except Exception as e:
-            crewai_event_bus.emit(tool, ToolUsageErrorEvent(error=str(e), **common))
+            event_bus.emit(tool, ToolUsageErrorEvent(error=str(e), **common))
             raise
-        crewai_event_bus.emit(
+        event_bus.emit(
             tool,
             ToolUsageFinishedEvent(
                 started_at=started_at,

@@ -49,7 +49,7 @@ from src.services.execution.config_adapter import normalize_config, normalize_fl
 from src.services.agent_builder.crew_preparation import CrewPreparation
 
 # Import CrewAI components
-from kasal_engine.core import Crew
+from src.services.execution.runtime import Crew
 
 # Import logger manager
 from src.core.logger import LoggerManager

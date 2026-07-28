@@ -551,7 +551,7 @@ class CrewMemoryService:
             return crew_kwargs
 
         try:
-            from kasal_engine.memory import Memory
+            from src.services.memory.engine import Memory
         except ImportError as exc:
             logger.error("CrewAI unified Memory class unavailable: %s", exc)
             logger.warning("Falling back to memory=False")

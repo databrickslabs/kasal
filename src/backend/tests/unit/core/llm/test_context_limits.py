@@ -4,7 +4,7 @@ A missed phrase is not cosmetic: the run hard-fails where it could have compacte
 and continued, so a phrase learned in one place has to reach every consumer.
 """
 
-from kasal_engine.llm import CONTEXT_LIMIT_ERRORS
+from src.core.llm.transport import CONTEXT_LIMIT_ERRORS
 from src.core.llm.context_limits import (
     _KASAL_CONTEXT_LIMIT_PHRASES,
     extend_engine_context_limit_phrases,

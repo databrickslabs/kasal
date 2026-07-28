@@ -139,7 +139,7 @@ class TestTaskConfig:
                         expected_output += "\n\nThe output should be formatted using Markdown."
                     
                     # Import Task and create instance - this will use any existing patch
-                    from kasal_engine.core import Task
+                    from src.services.execution.runtime import Task
                     mock_task = Task(
                         description=description,
                         expected_output=expected_output,
@@ -299,7 +299,7 @@ class TestTaskConfig:
     @pytest.mark.asyncio
     async def test_configure_task_success(self, task_config_class, mock_task_data, mock_agent):
         """Test successful task configuration."""
-        with patch('kasal_engine.core.Task') as mock_task_class:
+        with patch('src.services.execution.runtime.Task') as mock_task_class:
             mock_task = Mock()
             mock_task_class.return_value = mock_task
 
@@ -317,7 +317,7 @@ class TestTaskConfig:
     async def test_configure_task_no_agent_provided(self, task_config_class, mock_task_data, mock_agent):
         """Test task configuration without agent provided - should resolve agent."""
         with patch.object(task_config_class, '_resolve_agent_for_task', new_callable=AsyncMock) as mock_resolve, \
-             patch('kasal_engine.core.Task') as mock_task_class:
+             patch('src.services.execution.runtime.Task') as mock_task_class:
             
             mock_resolve.return_value = mock_agent
             mock_task = Mock()
@@ -341,7 +341,7 @@ class TestTaskConfig:
     @pytest.mark.asyncio
     async def test_configure_task_with_markdown(self, task_config_class, mock_task_data_markdown, mock_agent):
         """Test task configuration with markdown enabled."""
-        with patch('kasal_engine.core.Task') as mock_task_class:
+        with patch('src.services.execution.runtime.Task') as mock_task_class:
             mock_task = Mock()
             mock_task_class.return_value = mock_task
 
@@ -357,7 +357,7 @@ class TestTaskConfig:
     @pytest.mark.asyncio
     async def test_configure_task_with_advanced_properties(self, task_config_class, mock_task_data_markdown, mock_agent):
         """Test task configuration with advanced properties."""
-        with patch('kasal_engine.core.Task') as mock_task_class:
+        with patch('src.services.execution.runtime.Task') as mock_task_class:
             mock_task = Mock()
             mock_task_class.return_value = mock_task
 
@@ -370,7 +370,7 @@ class TestTaskConfig:
     @pytest.mark.asyncio
     async def test_configure_task_with_callback(self, task_config_class, mock_task_data, mock_agent, mock_task_output_callback):
         """Test task configuration with callback."""
-        with patch('kasal_engine.core.Task') as mock_task_class:
+        with patch('src.services.execution.runtime.Task') as mock_task_class:
             mock_task = Mock()
             mock_task_class.return_value = mock_task
 
@@ -384,7 +384,7 @@ class TestTaskConfig:
     @pytest.mark.asyncio
     async def test_configure_task_with_callback_and_process_output_handler(self, task_config_class, mock_task_data, mock_agent, mock_task_output_callback):
         """Test task configuration with callback and process output handler."""
-        with patch('kasal_engine.core.Task') as mock_task_class:
+        with patch('src.services.execution.runtime.Task') as mock_task_class:
             mock_task = Mock()
             mock_task.process = Mock()  # Mock process attribute
             mock_task_class.return_value = mock_task
@@ -399,7 +399,7 @@ class TestTaskConfig:
     @pytest.mark.asyncio
     async def test_configure_task_with_callback_no_process_attribute(self, task_config_class, mock_task_data, mock_agent, mock_task_output_callback):
         """Test task configuration with callback when task has no process attribute."""
-        with patch('kasal_engine.core.Task') as mock_task_class:
+        with patch('src.services.execution.runtime.Task') as mock_task_class:
             mock_task = Mock()
             # Remove process attribute
             if hasattr(mock_task, 'process'):
@@ -429,7 +429,7 @@ class TestTaskConfig:
         if hasattr(mock_task_data, 'expected_output'):
             delattr(mock_task_data, 'expected_output')
 
-        with patch('kasal_engine.core.Task') as mock_task_class:
+        with patch('src.services.execution.runtime.Task') as mock_task_class:
             mock_task = Mock()
             mock_task_class.return_value = mock_task
 
@@ -454,7 +454,7 @@ class TestTaskConfig:
         mock_task_data.human_input = False
         mock_task_data.tools = None
 
-        with patch('kasal_engine.core.Task') as mock_task_class:
+        with patch('src.services.execution.runtime.Task') as mock_task_class:
             mock_task = Mock()
             mock_task_class.return_value = mock_task
 
@@ -491,7 +491,7 @@ class TestTaskConfig:
         mock_task_data.human_input = False
         mock_task_data.tools = None
 
-        with patch('kasal_engine.core.Task') as mock_task_class:
+        with patch('src.services.execution.runtime.Task') as mock_task_class:
             mock_task_class.side_effect = Exception("Task creation error")
 
             result = await task_config_class.configure_task(mock_task_data, mock_agent)
@@ -779,7 +779,7 @@ class TestTaskConfig:
     async def test_configure_task_with_tools_integration(self, task_config_class, mock_task_data_with_tools, mock_agent):
         """Test full task configuration integration with tools."""
         with patch.object(task_config_class, '_configure_task_tools', new_callable=AsyncMock) as mock_configure_tools, \
-             patch('kasal_engine.core.Task') as mock_task_class:
+             patch('src.services.execution.runtime.Task') as mock_task_class:
             
             mock_configure_tools.return_value = None
             mock_task = Mock()
@@ -922,7 +922,7 @@ class TestTaskConfigGuardrails:
             captured.update(kwargs)
             return mock_task
 
-        with patch('kasal_engine.core.Task', side_effect=_ctor), \
+        with patch('src.services.execution.runtime.Task', side_effect=_ctor), \
              patch('src.services.guardrails.guardrail_factory.GuardrailFactory') as mock_factory, \
              patch('src.services.execution.kernel.task_builder.GuardrailWrapper') as mock_wrapper_class, \
              patch('builtins.open', create=True), \
@@ -958,8 +958,8 @@ class TestTaskConfigGuardrails:
             captured.update(kwargs)
             return mock_task
 
-        with patch('kasal_engine.core.Task', side_effect=_ctor), \
-             patch('kasal_engine.core.LLMGuardrail') as mock_llm_guardrail_class, \
+        with patch('src.services.execution.runtime.Task', side_effect=_ctor), \
+             patch('src.services.execution.runtime.LLMGuardrail') as mock_llm_guardrail_class, \
              patch('src.core.llm_manager.LLMManager.configure_kasal_llm', new_callable=AsyncMock, return_value=Mock()) as mock_configure_llm, \
              patch('src.utils.user_context.UserContext.get_group_context', return_value=mock_gc):
 
@@ -995,10 +995,10 @@ class TestTaskConfigGuardrails:
             captured.update(kwargs)
             return mock_task
 
-        with patch('kasal_engine.core.Task', side_effect=_ctor), \
+        with patch('src.services.execution.runtime.Task', side_effect=_ctor), \
              patch('src.services.guardrails.guardrail_factory.GuardrailFactory') as mock_factory, \
              patch('src.services.execution.kernel.task_builder.GuardrailWrapper') as mock_wrapper_class, \
-             patch('kasal_engine.core.LLMGuardrail') as mock_llm_guardrail_class, \
+             patch('src.services.execution.runtime.LLMGuardrail') as mock_llm_guardrail_class, \
              patch('src.core.llm_manager.LLMManager.configure_kasal_llm', new_callable=AsyncMock, return_value=Mock()), \
              patch('src.utils.user_context.UserContext.get_group_context', return_value=mock_gc), \
              patch('builtins.open', create=True), \
@@ -1022,7 +1022,7 @@ class TestTaskConfigGuardrails:
         """Test task creation continues when guardrail creation fails."""
         from src.services.flow_builder.modules.task_adapter import TaskConfig
 
-        with patch('kasal_engine.core.Task') as mock_task_class, \
+        with patch('src.services.execution.runtime.Task') as mock_task_class, \
              patch('src.services.guardrails.guardrail_factory.GuardrailFactory') as mock_factory:
 
             mock_task = Mock()
@@ -1043,7 +1043,7 @@ class TestTaskConfigGuardrails:
         """Test task creation continues when guardrail setup raises exception."""
         from src.services.flow_builder.modules.task_adapter import TaskConfig
 
-        with patch('kasal_engine.core.Task') as mock_task_class, \
+        with patch('src.services.execution.runtime.Task') as mock_task_class, \
              patch('src.services.guardrails.guardrail_factory.GuardrailFactory') as mock_factory:
 
             mock_task = Mock()
@@ -1067,8 +1067,8 @@ class TestTaskConfigGuardrails:
         mock_gc = Mock()
         mock_gc.primary_group_id = "test-group"
 
-        with patch('kasal_engine.core.Task') as mock_task_class, \
-             patch('kasal_engine.core.LLMGuardrail') as mock_llm_guardrail_class, \
+        with patch('src.services.execution.runtime.Task') as mock_task_class, \
+             patch('src.services.execution.runtime.LLMGuardrail') as mock_llm_guardrail_class, \
              patch('src.core.llm_manager.LLMManager.configure_kasal_llm', new_callable=AsyncMock, return_value=Mock()), \
              patch('src.utils.user_context.UserContext.get_group_context', return_value=mock_gc):
 
@@ -1106,7 +1106,7 @@ class TestTaskConfigGuardrails:
         mock_task_data.llm_guardrail = None
         mock_task_data.config = {}
 
-        with patch('kasal_engine.core.Task') as mock_task_class:
+        with patch('src.services.execution.runtime.Task') as mock_task_class:
             mock_task = Mock()
             mock_task_class.return_value = mock_task
 
@@ -1130,7 +1130,7 @@ class TestTaskConfigGuardrails:
         """
         from src.services.flow_builder.modules.task_adapter import TaskConfig
 
-        with patch('kasal_engine.core.Task') as mock_task_class:
+        with patch('src.services.execution.runtime.Task') as mock_task_class:
             mock_task = Mock()
             mock_task.description = "Test description"
             mock_task_class.return_value = mock_task

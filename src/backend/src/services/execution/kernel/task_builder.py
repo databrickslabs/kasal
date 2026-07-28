@@ -242,7 +242,7 @@ async def _apply_llm_guardrail(task_args, task_config, agent, config, task_key):
     )
 
     try:
-        from kasal_engine.core import LLMGuardrail
+        from src.services.execution.runtime import LLMGuardrail
 
         if isinstance(llm_guardrail_config, dict):
             description = llm_guardrail_config.get(

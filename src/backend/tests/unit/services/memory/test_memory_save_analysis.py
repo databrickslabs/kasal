@@ -6,7 +6,7 @@ these tests pin the labelling pass: it runs, it is skipped when the caller
 already knows better, and it never turns a save into a failure.
 """
 
-from kasal_engine.memory import Memory
+from src.services.memory.engine import Memory
 
 
 class _FakeLLM:

@@ -10,7 +10,7 @@ trimming while still overflowing the request.
 
 import pytest
 
-from kasal_engine.llm import LLM, LLM_CONTEXT_WINDOW_SIZES
+from src.core.llm.transport import LLM, LLM_CONTEXT_WINDOW_SIZES
 
 
 @pytest.fixture

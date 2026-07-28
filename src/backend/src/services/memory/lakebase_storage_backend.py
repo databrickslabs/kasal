@@ -21,7 +21,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from kasal_engine.memory import MemoryRecord, ScopeInfo
+from src.services.memory.engine import MemoryRecord, ScopeInfo
 from sqlalchemy import text
 
 from src.core.logger import LoggerManager

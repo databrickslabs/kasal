@@ -1,4 +1,4 @@
-"""kasal_engine.memory — generated from the kasal_engine datamodel.
+"""src.services.memory.engine — generated from the kasal_engine datamodel.
 
 Generated from the kasal_engine datamodel — do not edit by hand."""
 

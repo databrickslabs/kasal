@@ -1,4 +1,4 @@
-"""kasal_engine.flow — generated from the kasal_engine datamodel.
+"""src.services.flow_builder.runtime — generated from the kasal_engine datamodel.
 
 Generated from the kasal_engine datamodel — do not edit by hand."""
 

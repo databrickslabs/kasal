@@ -1,4 +1,4 @@
-"""Bridge between ``kasal_engine.memory.Memory`` and Kasal's storage backends.
+"""Bridge between ``src.services.memory.engine.Memory`` and Kasal's storage backends.
 
 ``Memory.recall`` speaks the engine ``StorageBackend`` protocol —
 ``search(query: str, limit, scope, score_threshold)`` — while the real
@@ -28,8 +28,8 @@ import time
 from collections import OrderedDict
 from typing import Any
 
-from kasal_engine.memory import MemoryRecord, ScopeInfo
-from kasal_engine.memory.memory import StorageBackend
+from src.services.memory.engine import MemoryRecord, ScopeInfo
+from src.services.memory.engine.memory import StorageBackend
 
 logger = logging.getLogger(__name__)
 

@@ -2,7 +2,7 @@
 
 A tool whose config carries ``requires_approval: true`` (or an ``approval``
 dict) gets stamped with ``_approval_policy`` by the ToolFactory. The engine
-pre-hook installed here (via ``kasal_engine.core.register_tool_hooks``)
+pre-hook installed here (via ``src.services.execution.runtime.register_tool_hooks``)
 intercepts the call in ``wrap_tool`` — the single choke point all three
 execution paths share — and:
 
@@ -25,7 +25,7 @@ import os
 import time
 from typing import Any, Dict, Optional
 
-from kasal_engine.core import ToolExecutionBlockedError, register_tool_hooks, unregister_tool_hooks
+from src.services.execution.runtime import ToolExecutionBlockedError, register_tool_hooks, unregister_tool_hooks
 
 from src.utils.user_context import GroupContext
 

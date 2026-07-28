@@ -62,11 +62,11 @@ def _run_with_prepare_false(crew_config):
                 {
                     "src.services.execution.subprocess_bootstrap": mock_logging_config,
                     "crewai": MagicMock(),
-                    "kasal_engine.llm": MagicMock(LLM_CONTEXT_WINDOW_SIZES={}),
-                    "kasal_engine.events": MagicMock(),
+                    "src.core.llm.transport": MagicMock(LLM_CONTEXT_WINDOW_SIZES={}),
+                    "src.services.execution.events": MagicMock(),
                     "crewai.utilities": MagicMock(),
                     "crewai.utilities.exceptions": MagicMock(),
-                    "kasal_engine.llm": MagicMock(
+                    "src.core.llm.transport": MagicMock(
                         CONTEXT_LIMIT_ERRORS=[]
                     ),
                 },

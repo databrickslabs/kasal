@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from kasal_engine.events import LLMCallCompletedEvent, LLMCallType
+from src.services.execution.events import LLMCallCompletedEvent, LLMCallType
 from src.core.llm import usage_telemetry
 
 
@@ -97,11 +97,11 @@ class TestHandler:
 
 class TestRegistration:
     def test_registers_on_the_engine_bus_once(self):
-        from kasal_engine.events.bus import crewai_event_bus
+        from src.services.execution.events.bus import event_bus
 
         usage_telemetry._registered = False
         try:
-            with patch.object(crewai_event_bus, "register_handler") as reg:
+            with patch.object(event_bus, "register_handler") as reg:
                 usage_telemetry.register_usage_telemetry()
                 usage_telemetry.register_usage_telemetry()
             assert reg.call_count == 1

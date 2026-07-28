@@ -17,8 +17,8 @@ from typing import Any, Literal
 
 from pydantic import UUID4, BaseModel, ConfigDict, Field
 
-from ..events.bus import crewai_event_bus
-from ..events.types import (
+from src.services.execution.events.bus import event_bus
+from src.services.execution.events.types import (
     AgentExecutionCompletedEvent,
     AgentExecutionStartedEvent,
     LiteAgentExecutionCompletedEvent,
@@ -108,14 +108,14 @@ class Agent(BaseAgent):
         if effective_tools is None:
             effective_tools = task.tools or self.tools
 
-        crewai_event_bus.emit(
+        event_bus.emit(
             self,
             AgentExecutionStartedEvent(
                 agent=self, task=task, tools=effective_tools, task_prompt=prompt
             ),
         )
         raw = run_agent(self, prompt, effective_tools, task=task)
-        crewai_event_bus.emit(
+        event_bus.emit(
             self, AgentExecutionCompletedEvent(agent=self, task=task, output=raw)
         )
         return raw
@@ -146,7 +146,7 @@ class Agent(BaseAgent):
             chat = list(messages)
             user_content = chat[-1]["content"] if chat else ""
 
-        crewai_event_bus.emit(
+        event_bus.emit(
             self,
             LiteAgentExecutionStartedEvent(
                 agent_info=agent_info, tools=self.tools, messages=messages
@@ -165,12 +165,12 @@ class Agent(BaseAgent):
                 else None
             )
         except Exception as e:
-            crewai_event_bus.emit(
+            event_bus.emit(
                 self,
                 LiteAgentExecutionErrorEvent(agent_info=agent_info, error=str(e)),
             )
             raise
-        crewai_event_bus.emit(
+        event_bus.emit(
             self,
             LiteAgentExecutionCompletedEvent(agent_info=agent_info, output=raw),
         )

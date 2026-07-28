@@ -1,7 +1,7 @@
 """
 LLM handlers — endpoint-specific subclasses of the engine's LLM class.
 
-Each handler subclasses ``kasal_engine.llm.LLM`` and adds what one serving
+Each handler subclasses ``src.core.llm.transport.LLM`` and adds what one serving
 endpoint needs, on the path the request actually takes, rather than patching a
 shared HTTP layer. Every file here is named for the endpoint or protocol it
 serves, never for a model: models come and go from the catalogue, and a module

@@ -88,8 +88,8 @@ def _make_task_data(**kwargs):
 
 def _make_agent():
     """Create a real CrewAI Agent that passes pydantic validation."""
-    from kasal_engine.core import Agent
-    from kasal_engine.llm import LLM
+    from src.services.execution.runtime import Agent
+    from src.core.llm.transport import LLM
     from unittest.mock import patch
 
     with patch("crewai.agent.Agent._setup_agent_executor"):
@@ -98,7 +98,7 @@ def _make_agent():
             agent.role = "Test Agent"
             agent.tools = []
             # Make it pass pydantic isinstance check by making it look like BaseAgent
-            from kasal_engine.core import BaseAgent
+            from src.services.execution.runtime import BaseAgent
             agent.__class__ = BaseAgent
             return agent
 
@@ -109,7 +109,7 @@ def _make_real_task_with_mock_agent():
     We can't create real CrewAI Task/Agent objects without API keys,
     so we use mocks with the right attributes and class hierarchy.
     """
-    from kasal_engine.core import BaseAgent
+    from src.services.execution.runtime import BaseAgent
 
     agent = MagicMock(spec=BaseAgent)
     agent.role = "Tester"
@@ -136,7 +136,7 @@ def _make_real_task_with_mock_agent():
 
 def _make_task_with_real_class(description="Test desc", agent=None):
     """Create a MagicMock Task but with real attribute-setting behavior."""
-    from kasal_engine.core import BaseAgent
+    from src.services.execution.runtime import BaseAgent
 
     if agent is None:
         agent = MagicMock(spec=BaseAgent)
@@ -179,7 +179,7 @@ class TestConfigureTask:
         task, agent = _make_real_task_with_mock_agent()
 
         with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
-             patch("kasal_engine.core.Task", return_value=task):
+             patch("src.services.execution.runtime.Task", return_value=task):
             result = await TaskConfig.configure_task(task_data, agent=agent)
 
         assert result is task
@@ -191,7 +191,7 @@ class TestConfigureTask:
         callback = MagicMock()
 
         with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
-             patch("kasal_engine.core.Task", return_value=task):
+             patch("src.services.execution.runtime.Task", return_value=task):
             result = await TaskConfig.configure_task(task_data, agent=agent, task_output_callback=callback)
 
         assert task.callback == callback
@@ -208,7 +208,7 @@ class TestConfigureTask:
             return task
 
         with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
-             patch("kasal_engine.core.Task", side_effect=mock_task_ctor):
+             patch("src.services.execution.runtime.Task", side_effect=mock_task_ctor):
             result = await TaskConfig.configure_task(task_data, agent=agent)
 
         # Unified to the crew path's wording ("markdown syntax").
@@ -226,7 +226,7 @@ class TestConfigureTask:
             return task
 
         with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
-             patch("kasal_engine.core.Task", side_effect=mock_task_ctor):
+             patch("src.services.execution.runtime.Task", side_effect=mock_task_ctor):
             await TaskConfig.configure_task(task_data, agent=agent)
 
         assert captured_kwargs.get("async_execution") is True
@@ -243,7 +243,7 @@ class TestConfigureTask:
             return task
 
         with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
-             patch("kasal_engine.core.Task", side_effect=mock_task_ctor):
+             patch("src.services.execution.runtime.Task", side_effect=mock_task_ctor):
             await TaskConfig.configure_task(task_data, agent=agent)
 
         assert captured_kwargs.get("human_input") is True
@@ -261,7 +261,7 @@ class TestConfigureTask:
             return task
 
         with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
-             patch("kasal_engine.core.Task", side_effect=mock_task_ctor), \
+             patch("src.services.execution.runtime.Task", side_effect=mock_task_ctor), \
              patch("src.services.guardrails.guardrail_factory.GuardrailFactory") as MockGF:
             MockGF.create_guardrail.return_value = MagicMock()
 
@@ -290,7 +290,7 @@ class TestConfigureTask:
             return MagicMock()
 
         with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
-             patch("kasal_engine.core.Task", return_value=task), \
+             patch("src.services.execution.runtime.Task", return_value=task), \
              patch("src.services.guardrails.guardrail_factory.GuardrailFactory") as MockGF, \
              patch("src.services.guardrails.wrapper.GuardrailWrapper", return_value=MagicMock()):
             MockGF.create_guardrail.side_effect = _capture
@@ -318,7 +318,7 @@ class TestConfigureTask:
             return MagicMock()
 
         with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
-             patch("kasal_engine.core.Task", return_value=task), \
+             patch("src.services.execution.runtime.Task", return_value=task), \
              patch("src.services.guardrails.guardrail_factory.GuardrailFactory") as MockGF, \
              patch("src.services.guardrails.wrapper.GuardrailWrapper", return_value=MagicMock()):
             MockGF.create_guardrail.side_effect = _capture
@@ -334,7 +334,7 @@ class TestConfigureTask:
         task, agent = _make_real_task_with_mock_agent()
 
         with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
-             patch("kasal_engine.core.Task", return_value=task), \
+             patch("src.services.execution.runtime.Task", return_value=task), \
              patch("src.services.guardrails.guardrail_factory.GuardrailFactory") as MockGF:
             MockGF.create_guardrail.return_value = None
 
@@ -348,7 +348,7 @@ class TestConfigureTask:
         task, agent = _make_real_task_with_mock_agent()
 
         with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
-             patch("kasal_engine.core.Task", return_value=task), \
+             patch("src.services.execution.runtime.Task", return_value=task), \
              patch("src.services.guardrails.guardrail_factory.GuardrailFactory", side_effect=ImportError("no module")):
             result = await TaskConfig.configure_task(task_data, agent=agent)
 
@@ -372,8 +372,8 @@ class TestConfigureTask:
             return task
 
         with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
-             patch("kasal_engine.core.Task", side_effect=mock_task_ctor), \
-             patch("kasal_engine.core.LLMGuardrail") as MockLLMG, \
+             patch("src.services.execution.runtime.Task", side_effect=mock_task_ctor), \
+             patch("src.services.execution.runtime.LLMGuardrail") as MockLLMG, \
              patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()), \
              patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_gc):
             MockLLMG.return_value = MagicMock()
@@ -399,8 +399,8 @@ class TestConfigureTask:
         mock_gc.primary_group_id = "test-group"
 
         with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
-             patch("kasal_engine.core.Task", return_value=task), \
-             patch("kasal_engine.core.LLMGuardrail") as MockLLMG, \
+             patch("src.services.execution.runtime.Task", return_value=task), \
+             patch("src.services.execution.runtime.LLMGuardrail") as MockLLMG, \
              patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()), \
              patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_gc):
             mock_llm_guardrail = MagicMock()
@@ -422,8 +422,8 @@ class TestConfigureTask:
         mock_configure_llm = AsyncMock(return_value=MagicMock())
 
         with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
-             patch("kasal_engine.core.Task", return_value=task), \
-             patch("kasal_engine.core.LLMGuardrail") as MockLLMG, \
+             patch("src.services.execution.runtime.Task", return_value=task), \
+             patch("src.services.execution.runtime.LLMGuardrail") as MockLLMG, \
              patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new=mock_configure_llm), \
              patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_gc):
             MockLLMG.return_value = MagicMock()
@@ -473,8 +473,8 @@ class TestConfigureTask:
             return task
 
         with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
-             patch("kasal_engine.core.Task", side_effect=mock_task_ctor), \
-             patch("kasal_engine.core.LLMGuardrail"), \
+             patch("src.services.execution.runtime.Task", side_effect=mock_task_ctor), \
+             patch("src.services.execution.runtime.LLMGuardrail"), \
              patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()), \
              patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_gc):
             await TaskConfig.configure_task(task_data, agent=agent)
@@ -494,8 +494,8 @@ class TestConfigureTask:
         mock_gc.primary_group_id = "test-group"
 
         with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
-             patch("kasal_engine.core.Task", return_value=task), \
-             patch("kasal_engine.core.LLMGuardrail", side_effect=ImportError("no crewai")), \
+             patch("src.services.execution.runtime.Task", return_value=task), \
+             patch("src.services.execution.runtime.LLMGuardrail", side_effect=ImportError("no crewai")), \
              patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()), \
              patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_gc):
             result = await TaskConfig.configure_task(task_data, agent=agent)

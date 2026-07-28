@@ -8,7 +8,7 @@ from typing import Dict, Optional
 
 from src.core.logger import LoggerManager
 from src.utils.user_context import GroupContext
-from kasal_engine.core import Task
+from src.services.execution.runtime import Task
 
 from src.services.tools.tool_factory import ToolFactory
 # Single source of truth for per-tool override resolution (shared with the crew
@@ -74,7 +74,7 @@ class TaskConfig:
                 spec, agent, [], config={'group_id': group_id} if group_id else None
             )
 
-            from kasal_engine.core import Task
+            from src.services.execution.runtime import Task
             task = Task(**task_args)
 
             # Flow execution output callback (separate from any guardrail).

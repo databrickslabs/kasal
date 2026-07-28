@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from kasal_engine.memory import MemoryRecord
+from src.services.memory.engine import MemoryRecord
 
 from src.services.memory.lakebase_storage_backend import (
     LakebaseStorageBackend,

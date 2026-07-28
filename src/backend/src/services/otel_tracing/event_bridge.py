@@ -316,7 +316,7 @@ class OTelEventBridge:
         Imports event classes directly from crewai.events (no callback layer dependency).
 
         Args:
-            event_bus: The crewai_event_bus instance.
+            event_bus: The event_bus instance.
 
         Returns:
             Number of event types registered.
@@ -327,66 +327,66 @@ class OTelEventBridge:
         # Each tuple: (module_path, class_name)
         _EVENT_CLASSES = [
             # Crew lifecycle
-            ("kasal_engine.events", "CrewKickoffStartedEvent"),
-            ("kasal_engine.events", "CrewKickoffCompletedEvent"),
+            ("src.services.execution.events", "CrewKickoffStartedEvent"),
+            ("src.services.execution.events", "CrewKickoffCompletedEvent"),
             # Agent execution
-            ("kasal_engine.events", "AgentExecutionStartedEvent"),
-            ("kasal_engine.events", "AgentExecutionCompletedEvent"),
+            ("src.services.execution.events", "AgentExecutionStartedEvent"),
+            ("src.services.execution.events", "AgentExecutionCompletedEvent"),
             # Task lifecycle
-            ("kasal_engine.events", "TaskStartedEvent"),
-            ("kasal_engine.events", "TaskCompletedEvent"),
-            ("kasal_engine.events", "TaskFailedEvent"),
+            ("src.services.execution.events", "TaskStartedEvent"),
+            ("src.services.execution.events", "TaskCompletedEvent"),
+            ("src.services.execution.events", "TaskFailedEvent"),
             # Tool usage
-            ("kasal_engine.events", "ToolUsageStartedEvent"),
-            ("kasal_engine.events", "ToolUsageFinishedEvent"),
-            ("kasal_engine.events", "ToolUsageErrorEvent"),
+            ("src.services.execution.events", "ToolUsageStartedEvent"),
+            ("src.services.execution.events", "ToolUsageFinishedEvent"),
+            ("src.services.execution.events", "ToolUsageErrorEvent"),
             # LLM calls
-            ("kasal_engine.events", "LLMCallStartedEvent"),
-            ("kasal_engine.events", "LLMCallCompletedEvent"),
-            ("kasal_engine.events", "LLMCallFailedEvent"),
-            ("kasal_engine.events", "LLMStreamChunkEvent"),
+            ("src.services.execution.events", "LLMCallStartedEvent"),
+            ("src.services.execution.events", "LLMCallCompletedEvent"),
+            ("src.services.execution.events", "LLMCallFailedEvent"),
+            ("src.services.execution.events", "LLMStreamChunkEvent"),
             # Memory
-            ("kasal_engine.events", "MemorySaveStartedEvent"),
-            ("kasal_engine.events", "MemorySaveCompletedEvent"),
-            ("kasal_engine.events", "MemorySaveFailedEvent"),
-            ("kasal_engine.events", "MemoryQueryStartedEvent"),
-            ("kasal_engine.events", "MemoryQueryCompletedEvent"),
-            ("kasal_engine.events", "MemoryQueryFailedEvent"),
-            ("kasal_engine.events", "MemoryRetrievalCompletedEvent"),
-            ("kasal_engine.events", "MemoryRetrievalFailedEvent"),
+            ("src.services.execution.events", "MemorySaveStartedEvent"),
+            ("src.services.execution.events", "MemorySaveCompletedEvent"),
+            ("src.services.execution.events", "MemorySaveFailedEvent"),
+            ("src.services.execution.events", "MemoryQueryStartedEvent"),
+            ("src.services.execution.events", "MemoryQueryCompletedEvent"),
+            ("src.services.execution.events", "MemoryQueryFailedEvent"),
+            ("src.services.execution.events", "MemoryRetrievalCompletedEvent"),
+            ("src.services.execution.events", "MemoryRetrievalFailedEvent"),
             # Knowledge
-            ("kasal_engine.events", "KnowledgeRetrievalStartedEvent"),
-            ("kasal_engine.events", "KnowledgeRetrievalCompletedEvent"),
+            ("src.services.execution.events", "KnowledgeRetrievalStartedEvent"),
+            ("src.services.execution.events", "KnowledgeRetrievalCompletedEvent"),
             # Reasoning
-            ("kasal_engine.events", "AgentReasoningStartedEvent"),
-            ("kasal_engine.events", "AgentReasoningCompletedEvent"),
-            ("kasal_engine.events", "AgentReasoningFailedEvent"),
+            ("src.services.execution.events", "AgentReasoningStartedEvent"),
+            ("src.services.execution.events", "AgentReasoningCompletedEvent"),
+            ("src.services.execution.events", "AgentReasoningFailedEvent"),
             # Guardrails
-            ("kasal_engine.events", "LLMGuardrailStartedEvent"),
-            ("kasal_engine.events", "LLMGuardrailCompletedEvent"),
-            ("kasal_engine.events", "LLMGuardrailFailedEvent"),
+            ("src.services.execution.events", "LLMGuardrailStartedEvent"),
+            ("src.services.execution.events", "LLMGuardrailCompletedEvent"),
+            ("src.services.execution.events", "LLMGuardrailFailedEvent"),
             # Flow. No FlowCreatedEvent: the engine's Flow has no "created"
             # lifecycle point (only kickoff start/finish), so subscribing to one
             # would be permanently dead wiring — which is exactly how flow spans
             # went missing in the first place.
-            ("kasal_engine.events", "FlowStartedEvent"),
-            ("kasal_engine.events", "FlowFinishedEvent"),
+            ("src.services.execution.events", "FlowStartedEvent"),
+            ("src.services.execution.events", "FlowFinishedEvent"),
             # MCP
-            ("kasal_engine.events", "MCPConnectionStartedEvent"),
-            ("kasal_engine.events", "MCPConnectionCompletedEvent"),
-            ("kasal_engine.events", "MCPToolExecutionStartedEvent"),
-            ("kasal_engine.events", "MCPToolExecutionCompletedEvent"),
+            ("src.services.execution.events", "MCPConnectionStartedEvent"),
+            ("src.services.execution.events", "MCPConnectionCompletedEvent"),
+            ("src.services.execution.events", "MCPToolExecutionStartedEvent"),
+            ("src.services.execution.events", "MCPToolExecutionCompletedEvent"),
             # HITL
-            ("kasal_engine.events", "HumanFeedbackRequestedEvent"),
-            ("kasal_engine.events", "HumanFeedbackReceivedEvent"),
+            ("src.services.execution.events", "HumanFeedbackRequestedEvent"),
+            ("src.services.execution.events", "HumanFeedbackReceivedEvent"),
             # A2UI surface composition. Emitted for every outcome, including the
             # gates that decline — a chat turn that produced no surface is the
             # case people ask about, and it left no trace at all.
-            ("kasal_engine.events", "A2UISurfaceEvent"),
+            ("src.services.execution.events", "A2UISurfaceEvent"),
             # Context compaction. Lossy, and its absence from this list is how
             # a whole event type stays invisible: the map below is not enough,
             # the bridge only ever sees what it SUBSCRIBES to here.
-            ("kasal_engine.events", "ContextCompactionEvent"),
+            ("src.services.execution.events", "ContextCompactionEvent"),
         ]
 
         import importlib
@@ -541,7 +541,7 @@ class OTelEventBridge:
             # pending background memory save still needs.
             if not is_run_level:
                 try:
-                    from kasal_engine.events import set_event_context
+                    from src.services.execution.events import set_event_context
                     set_event_context(
                         agent_role=agent_name or None,
                         agent_id=getattr(event, "agent_id", None)

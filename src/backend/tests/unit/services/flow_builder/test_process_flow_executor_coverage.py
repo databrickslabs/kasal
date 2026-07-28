@@ -96,8 +96,8 @@ def _deep_run_extended(
     mock_otel_provider = MagicMock()
     mock_otel_provider.get_tracer = MagicMock(return_value=MagicMock())
     crewai_events_mod = MagicMock()
-    crewai_events_mod.crewai_event_bus = mock_event_bus
-    sys_modules_patches = {"kasal_engine.events": crewai_events_mod}
+    crewai_events_mod.event_bus = mock_event_bus
+    sys_modules_patches = {"src.services.execution.events": crewai_events_mod}
     mock_mlflow_result = MagicMock()
     mock_mlflow_result.tracing_ready = mlflow_tracing_ready
     mock_mlflow_result.error = mlflow_error
@@ -201,7 +201,7 @@ class TestSignalHandlerChildNSPCov:
             with patch("asyncio.new_event_loop", return_value=ml):
              with patch("asyncio.set_event_loop"):
               with patch("asyncio.all_tasks", return_value=set()):
-               with patch.dict("sys.modules", {"kasal_engine.events": MagicMock(crewai_event_bus=MagicMock(flush=MagicMock(return_value=True)))}):
+               with patch.dict("sys.modules", {"src.services.execution.events": MagicMock(event_bus=MagicMock(flush=MagicMock(return_value=True)))}):
                 with patch("src.services.execution.logs.writer_task.LogWriterTask.stop_writer", new_callable=AsyncMock):
                  with patch("src.services.otel_tracing.shutdown_provider", MagicMock()):
                   with patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()):
@@ -315,7 +315,7 @@ class TestCleanupEventBusFlushCov:
             with patch("asyncio.new_event_loop", return_value=ml):
              with patch("asyncio.set_event_loop"):
               with patch("asyncio.all_tasks", return_value=set()):
-               with patch.dict("sys.modules", {"kasal_engine.events": MagicMock(crewai_event_bus=mock_bus)}):
+               with patch.dict("sys.modules", {"src.services.execution.events": MagicMock(event_bus=mock_bus)}):
                 with patch("src.services.execution.logs.writer_task.LogWriterTask.stop_writer", new_callable=AsyncMock):
                  with patch("src.services.otel_tracing.shutdown_provider", MagicMock()):
                   with patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()):
@@ -342,7 +342,7 @@ class TestOuterCleanupExceptionCov:
             with patch("asyncio.new_event_loop", return_value=ml):
              with patch("asyncio.set_event_loop"):
               with patch("asyncio.all_tasks", return_value=set()):
-               with patch.dict("sys.modules", {"kasal_engine.events": MagicMock(crewai_event_bus=MagicMock(flush=MagicMock(return_value=True)))}):
+               with patch.dict("sys.modules", {"src.services.execution.events": MagicMock(event_bus=MagicMock(flush=MagicMock(return_value=True)))}):
                 with patch("src.services.otel_tracing.shutdown_provider", MagicMock()):
                  with patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()):
                   r = run_flow_in_process("cleanup_exc", {"k": "v"})
@@ -369,7 +369,7 @@ class TestOuterCleanupExceptionCov:
             with patch("asyncio.new_event_loop", return_value=ml):
              with patch("asyncio.set_event_loop"):
               with patch("asyncio.all_tasks", return_value=set()):
-               with patch.dict("sys.modules", {"kasal_engine.events": MagicMock(crewai_event_bus=MagicMock(flush=MagicMock(return_value=True)))}):
+               with patch.dict("sys.modules", {"src.services.execution.events": MagicMock(event_bus=MagicMock(flush=MagicMock(return_value=True)))}):
                 with patch("src.services.otel_tracing.shutdown_provider", MagicMock()):
                  with patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()):
                   r = run_flow_in_process("cleanup_logger_exc", {"k": "v"})
@@ -398,7 +398,7 @@ class TestStdoutCaptureBarExceptCov:
             with patch("asyncio.new_event_loop", return_value=ml):
              with patch("asyncio.set_event_loop"):
               with patch("asyncio.all_tasks", return_value=set()):
-               with patch.dict("sys.modules", {"kasal_engine.events": MagicMock(crewai_event_bus=MagicMock(flush=MagicMock(return_value=True)))}):
+               with patch.dict("sys.modules", {"src.services.execution.events": MagicMock(event_bus=MagicMock(flush=MagicMock(return_value=True)))}):
                 with patch("src.services.execution.logs.writer_task.LogWriterTask.stop_writer", new_callable=AsyncMock):
                  with patch("src.services.otel_tracing.shutdown_provider", MagicMock()):
                   with patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()):
@@ -429,7 +429,7 @@ class TestFinalPsutilCleanupCov:
             with patch("asyncio.new_event_loop", return_value=ml):
              with patch("asyncio.set_event_loop"):
               with patch("asyncio.all_tasks", return_value=set()):
-               with patch.dict("sys.modules", {"kasal_engine.events": MagicMock(crewai_event_bus=MagicMock(flush=MagicMock(return_value=True))), "psutil": None}):
+               with patch.dict("sys.modules", {"src.services.execution.events": MagicMock(event_bus=MagicMock(flush=MagicMock(return_value=True))), "psutil": None}):
                 with patch("src.services.execution.logs.writer_task.LogWriterTask.stop_writer", new_callable=AsyncMock):
                  with patch("src.services.otel_tracing.shutdown_provider", MagicMock()):
                   with patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()):
@@ -450,7 +450,7 @@ class TestFinalPsutilCleanupCov:
             with patch("asyncio.new_event_loop", return_value=ml):
              with patch("asyncio.set_event_loop"):
               with patch("asyncio.all_tasks", return_value=set()):
-               with patch.dict("sys.modules", {"kasal_engine.events": MagicMock(crewai_event_bus=MagicMock(flush=MagicMock(return_value=True))), "psutil": mock_psutil}):
+               with patch.dict("sys.modules", {"src.services.execution.events": MagicMock(event_bus=MagicMock(flush=MagicMock(return_value=True))), "psutil": mock_psutil}):
                 with patch("src.services.execution.logs.writer_task.LogWriterTask.stop_writer", new_callable=AsyncMock):
                  with patch("src.services.otel_tracing.shutdown_provider", MagicMock()):
                   with patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()):

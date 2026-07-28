@@ -205,7 +205,7 @@ class TestCreateAgentLLMConfig:
              patch("src.services.mcp.service.MCPService"), \
              patch("src.core.unit_of_work.UnitOfWork"), \
              patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls, \
-             patch("kasal_engine.llm.LLM") as mock_llm_cls:
+             patch("src.core.llm.transport.LLM") as mock_llm_cls:
 
             mock_configured = MagicMock()
             mock_configured.model = "gpt-4o"
@@ -720,7 +720,7 @@ class TestCreateAgentLLMConfigExtended:
              patch("src.services.mcp.service.MCPService"), \
              patch("src.core.unit_of_work.UnitOfWork"), \
              patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls, \
-             patch("kasal_engine.llm.LLM") as mock_llm_cls:
+             patch("src.core.llm.transport.LLM") as mock_llm_cls:
 
             mock_configured = MagicMock()
             mock_configured.model = "gpt-4o"
@@ -757,7 +757,7 @@ class TestCreateAgentLLMConfigExtended:
              patch("src.services.mcp.service.MCPService"), \
              patch("src.core.unit_of_work.UnitOfWork"), \
              patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls, \
-             patch("kasal_engine.llm.LLM") as mock_llm_cls:
+             patch("src.core.llm.transport.LLM") as mock_llm_cls:
 
             mock_configured = MagicMock()
             mock_configured.model = "gpt-4o"
@@ -865,7 +865,7 @@ class TestCreateAgentLLMConfigExtended:
              patch("src.services.mcp.service.MCPService"), \
              patch("src.core.unit_of_work.UnitOfWork"), \
              patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls, \
-             patch("kasal_engine.llm.LLM") as mock_llm_cls:
+             patch("src.core.llm.transport.LLM") as mock_llm_cls:
 
             # Return a configured_llm without 'model' attribute
             mock_configured = MagicMock(spec=[])  # no attributes

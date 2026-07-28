@@ -23,8 +23,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
-from ..events.bus import crewai_event_bus
-from ..events.types import (
+from src.services.execution.events.bus import event_bus
+from src.services.execution.events.types import (
     LLMCallCompletedEvent,
     LLMCallFailedEvent,
     LLMCallStartedEvent,
@@ -166,7 +166,7 @@ class BaseLLM(BaseModel):
             #
             # NOT swallowed: BaseException (KeyboardInterrupt, SystemExit,
             # asyncio.CancelledError), so cancelling an execution still stops it.
-            from ..core.executor import ToolExecutionBlockedError
+            from src.services.execution.runtime.executor import ToolExecutionBlockedError
 
             if isinstance(e, ToolExecutionBlockedError):
                 return f"Tool call blocked: {e}"
@@ -235,7 +235,7 @@ class BaseLLM(BaseModel):
         from_task: Any = None,
         from_agent: Any = None,
     ) -> None:
-        crewai_event_bus.emit(
+        event_bus.emit(
             self,
             LLMCallStartedEvent(
                 model=self.model,
@@ -256,7 +256,7 @@ class BaseLLM(BaseModel):
         from_task: Any = None,
         from_agent: Any = None,
     ) -> None:
-        crewai_event_bus.emit(
+        event_bus.emit(
             self,
             LLMCallCompletedEvent(
                 model=self.model,
@@ -272,7 +272,7 @@ class BaseLLM(BaseModel):
     def _emit_call_failed_event(
         self, error: str, from_task: Any = None, from_agent: Any = None
     ) -> None:
-        crewai_event_bus.emit(
+        event_bus.emit(
             self,
             LLMCallFailedEvent(
                 model=self.model, error=error, from_task=from_task, from_agent=from_agent

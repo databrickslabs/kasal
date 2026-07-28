@@ -172,10 +172,10 @@ async def maintain_session_summary(
         # Same event the tool-loop trim emits, so BOTH kinds of compaction show
         # up as one row type in the trace instead of only the chat log knowing.
         try:
-            from kasal_engine.events.bus import crewai_event_bus
-            from kasal_engine.events.types import ContextCompactionEvent
+            from src.services.execution.events.bus import event_bus
+            from src.services.execution.events.types import ContextCompactionEvent
 
-            crewai_event_bus.emit(
+            event_bus.emit(
                 None,
                 ContextCompactionEvent(
                     model=model,

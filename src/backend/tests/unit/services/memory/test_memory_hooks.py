@@ -5,7 +5,7 @@ import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from kasal_engine.memory import MemoryRecord
+from src.services.memory.engine import MemoryRecord
 from src.services.memory.hooks import (
     MEMORY_BLOCK_HEADER,
     build_memory_preamble,
@@ -165,7 +165,7 @@ class TestTaskOutputPersistence:
         return SimpleNamespace(memory=memory, tasks=[task]), task
 
     def test_persists_completed_task_output(self):
-        from kasal_engine.events import TaskCompletedEvent, crewai_event_bus
+        from src.services.execution.events import TaskCompletedEvent, event_bus
 
         done = threading.Event()
         memory = MagicMock()
@@ -174,7 +174,7 @@ class TestTaskOutputPersistence:
 
         unregister = register_task_output_persistence(crew)
         try:
-            crewai_event_bus.emit(
+            event_bus.emit(
                 task,
                 TaskCompletedEvent(
                     output=SimpleNamespace(raw="42 facts found", agent="Researcher"),
@@ -189,7 +189,7 @@ class TestTaskOutputPersistence:
         assert memory.remember.call_args.kwargs["agent_role"] == "Researcher"
 
     def test_foreign_task_is_ignored(self):
-        from kasal_engine.events import TaskCompletedEvent, crewai_event_bus
+        from src.services.execution.events import TaskCompletedEvent, event_bus
 
         memory = MagicMock()
         crew, _task = self._crew(memory)
@@ -197,7 +197,7 @@ class TestTaskOutputPersistence:
 
         unregister = register_task_output_persistence(crew)
         try:
-            crewai_event_bus.emit(
+            event_bus.emit(
                 foreign,
                 TaskCompletedEvent(
                     output=SimpleNamespace(raw="leak", agent="X"), task=foreign

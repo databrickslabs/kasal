@@ -2,7 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 
-from kasal_engine.memory import MemoryRecord
+from src.services.memory.engine import MemoryRecord
 from src.services.memory.local_storage_backend import LocalMemoryStorage
 
 

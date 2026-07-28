@@ -9,7 +9,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 from contextlib import asynccontextmanager
 
-from kasal_engine.core import Agent, Task
+from src.services.execution.runtime import Agent, Task
 
 from src.services.agent_builder.task_adapter import create_task
 

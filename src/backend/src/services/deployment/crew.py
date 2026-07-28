@@ -485,7 +485,7 @@ class CrewAIModelWrapper(mlflow.pyfunc.PythonModel):
         import pandas as pd
         import json
         import time
-        from kasal_engine.core import Agent, Crew, Task, Process
+        from src.services.execution.runtime import Agent, Crew, Task, Process
 
         results = []
 
@@ -533,7 +533,7 @@ class CrewAIModelWrapper(mlflow.pyfunc.PythonModel):
         Returns:
             Configured Crew instance
         """
-        from kasal_engine.core import Agent, Crew, Task, Process
+        from src.services.execution.runtime import Agent, Crew, Task, Process
 
         # Create agents
         agents = []

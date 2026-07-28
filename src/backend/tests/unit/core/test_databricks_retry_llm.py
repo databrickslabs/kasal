@@ -142,7 +142,7 @@ class TestEngineToolCallsWithContent:
         from types import SimpleNamespace
         from unittest.mock import PropertyMock
 
-        from kasal_engine.llm import OpenAICompletion
+        from src.core.llm.transport import OpenAICompletion
 
         llm = OpenAICompletion(model="gpt-4o")
 

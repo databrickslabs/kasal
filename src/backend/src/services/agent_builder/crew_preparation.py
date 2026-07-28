@@ -10,7 +10,7 @@ import logging
 import re
 import os
 from datetime import datetime
-from kasal_engine.core import Agent, Crew, Task, Process
+from src.services.execution.runtime import Agent, Crew, Task, Process
 from src.core.logger import LoggerManager
 from src.services.agent_builder.task_adapter import create_task, is_data_missing
 from src.services.agent_builder.agent_adapter import create_agent
@@ -832,7 +832,7 @@ class CrewPreparation:
 
                     # Add a minimal completion task that waits for all async tasks
                     # This satisfies CrewAI's validation while enabling true parallel execution
-                    from kasal_engine.core import Task as CrewAITask
+                    from src.services.execution.runtime import Task as CrewAITask
 
                     # Use the last async task's agent for the completion task
                     completion_agent = async_tasks[-1].agent

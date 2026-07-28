@@ -1138,7 +1138,7 @@ class TestCreateDynamicFlowPersistence:
         mock_persist.return_value = lambda cls: cls
 
         with patch.multiple(MODULE, **p):
-            with patch("kasal_engine.flow.persist", mock_persist):
+            with patch("src.services.flow_builder.runtime.persist", mock_persist):
                 flow = await FlowBuilder._create_dynamic_flow(
                     sp, [], [], {}, {"t1": task1},
                     flow_config={
@@ -1164,7 +1164,7 @@ class TestCreateDynamicFlowPersistence:
         sp = [("starting_point_0", ["t1"], [task1], "Crew1", {})]
 
         with patch.multiple(MODULE, **p):
-            with patch.dict("sys.modules", {"kasal_engine.flow": None}):
+            with patch.dict("sys.modules", {"src.services.flow_builder.runtime": None}):
                 flow = await FlowBuilder._create_dynamic_flow(
                     sp, [], [], {}, {"t1": task1},
                     flow_config={
@@ -1190,7 +1190,7 @@ class TestCreateDynamicFlowPersistence:
         mock_persist = MagicMock(side_effect=RuntimeError("persist boom"))
 
         with patch.multiple(MODULE, **p):
-            with patch("kasal_engine.flow.persist", mock_persist):
+            with patch("src.services.flow_builder.runtime.persist", mock_persist):
                 flow = await FlowBuilder._create_dynamic_flow(
                     sp, [], [], {}, {"t1": task1},
                     flow_config={
@@ -1865,7 +1865,7 @@ class TestRouteListeners:
             "conditionField": "success",
         }
 
-        with patch.multiple(MODULE, **p), patch("kasal_engine.core.Task", MagicMock(return_value=MagicMock())):
+        with patch.multiple(MODULE, **p), patch("src.services.execution.runtime.Task", MagicMock(return_value=MagicMock())):
             flow = await FlowBuilder._create_dynamic_flow(
                 sp, [], [router_cfg], {},
                 {"t1": task1, "t2a": task2a, "t2b": task2b},

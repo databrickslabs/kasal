@@ -15,8 +15,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
-from kasal_engine.events import crewai_event_bus
-from kasal_engine.events.types import CrewKickoffCompletedEvent, TaskCompletedEvent
+from src.services.execution.events import event_bus
+from src.services.execution.events.types import CrewKickoffCompletedEvent, TaskCompletedEvent
 
 from src.services.tools.async_bridge import run_async_with_context
 
@@ -39,7 +39,7 @@ class CrewTaskCheckpointRecorder:
         self._index_by_task = {id(task): i for i, task in enumerate(crew.tasks)}
 
     def register(self, event_bus=None) -> "CrewTaskCheckpointRecorder":
-        bus = event_bus or crewai_event_bus
+        bus = event_bus or event_bus
         bus.register_handler(TaskCompletedEvent, self._on_task_completed)
         bus.register_handler(CrewKickoffCompletedEvent, self._on_crew_completed)
         logger.info(

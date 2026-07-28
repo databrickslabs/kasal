@@ -79,8 +79,8 @@ def _emit_surface_event(
     try:
         import time
 
-        from kasal_engine.events.bus import crewai_event_bus
-        from kasal_engine.events.types import A2UISurfaceEvent
+        from src.services.execution.events.bus import event_bus
+        from src.services.execution.events.types import A2UISurfaceEvent
 
         components = None
         if isinstance(surface, dict):
@@ -88,7 +88,7 @@ def _emit_surface_event(
             if isinstance(declared, (list, tuple)):
                 components = len(declared)
 
-        crewai_event_bus.emit(
+        event_bus.emit(
             None,
             A2UISurfaceEvent(
                 outcome=outcome,

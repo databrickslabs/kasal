@@ -445,21 +445,21 @@ class LightAgentService:
                 # the DB on refresh). Both are matched by agent id so a concurrent
                 # light run's tools never bleed into this run's timeline.
                 import json
-                from kasal_engine.events import crewai_event_bus
-                from kasal_engine.events import ToolUsageStartedEvent, ToolUsageFinishedEvent, ToolUsageErrorEvent
+                from src.services.execution.events import event_bus
+                from src.services.execution.events import ToolUsageStartedEvent, ToolUsageFinishedEvent, ToolUsageErrorEvent
                 # ``Agent.kickoff_async`` runs as a CrewAI "LiteAgent" and emits these
                 # lifecycle events on the SAME bus — they fire on every run, even one
                 # that calls no tools, which is what gives the chat a trace when the
                 # answer is pure prose (the tool handlers above never fire then).
-                from kasal_engine.events import LiteAgentExecutionStartedEvent, LiteAgentExecutionCompletedEvent, LiteAgentExecutionErrorEvent
-                from kasal_engine.events import LLMCallStartedEvent, LLMCallCompletedEvent, LLMCallFailedEvent
-                from kasal_engine.events import LLMStreamChunkEvent
+                from src.services.execution.events import LiteAgentExecutionStartedEvent, LiteAgentExecutionCompletedEvent, LiteAgentExecutionErrorEvent
+                from src.services.execution.events import LLMCallStartedEvent, LLMCallCompletedEvent, LLMCallFailedEvent
+                from src.services.execution.events import LLMStreamChunkEvent
                 # Memory recall/persist events — emitted by the unified Memory with
                 # source=<the Memory> (no agent_id), so they're matched by identity
                 # (source is _agent_memory). These give the chat trace the same
                 # "Memory Read / Memory Context Retrieved / Memory Write" rows the
                 # crew/flow OTel timeline shows — homogeneous across paths.
-                from kasal_engine.events import MemoryQueryCompletedEvent, MemoryRetrievalCompletedEvent, MemorySaveCompletedEvent
+                from src.services.execution.events import MemoryQueryCompletedEvent, MemoryRetrievalCompletedEvent, MemorySaveCompletedEvent
 
                 _agent_id = str(getattr(agent, "id", "") or "")
                 # Mutable holder so the (sync, possibly worker-thread) started/completed
@@ -849,19 +849,19 @@ class LightAgentService:
                     except Exception as h_err:  # noqa: BLE001
                         logger.debug(f"[light_agent] llm-chunk forward skipped: {h_err}")
 
-                crewai_event_bus.register_handler(LLMStreamChunkEvent, _on_llm_chunk)
-                crewai_event_bus.register_handler(ToolUsageStartedEvent, _on_tool_started)
-                crewai_event_bus.register_handler(ToolUsageFinishedEvent, _on_tool_finished)
-                crewai_event_bus.register_handler(ToolUsageErrorEvent, _on_tool_error)
-                crewai_event_bus.register_handler(LLMCallStartedEvent, _on_llm_started)
-                crewai_event_bus.register_handler(LLMCallCompletedEvent, _on_llm_completed)
-                crewai_event_bus.register_handler(LLMCallFailedEvent, _on_llm_failed)
-                crewai_event_bus.register_handler(MemoryQueryCompletedEvent, _on_memory_query)
-                crewai_event_bus.register_handler(MemoryRetrievalCompletedEvent, _on_memory_retrieval)
-                crewai_event_bus.register_handler(MemorySaveCompletedEvent, _on_memory_save)
-                crewai_event_bus.register_handler(LiteAgentExecutionStartedEvent, _on_agent_started)
-                crewai_event_bus.register_handler(LiteAgentExecutionCompletedEvent, _on_agent_completed)
-                crewai_event_bus.register_handler(LiteAgentExecutionErrorEvent, _on_agent_error)
+                event_bus.register_handler(LLMStreamChunkEvent, _on_llm_chunk)
+                event_bus.register_handler(ToolUsageStartedEvent, _on_tool_started)
+                event_bus.register_handler(ToolUsageFinishedEvent, _on_tool_finished)
+                event_bus.register_handler(ToolUsageErrorEvent, _on_tool_error)
+                event_bus.register_handler(LLMCallStartedEvent, _on_llm_started)
+                event_bus.register_handler(LLMCallCompletedEvent, _on_llm_completed)
+                event_bus.register_handler(LLMCallFailedEvent, _on_llm_failed)
+                event_bus.register_handler(MemoryQueryCompletedEvent, _on_memory_query)
+                event_bus.register_handler(MemoryRetrievalCompletedEvent, _on_memory_retrieval)
+                event_bus.register_handler(MemorySaveCompletedEvent, _on_memory_save)
+                event_bus.register_handler(LiteAgentExecutionStartedEvent, _on_agent_started)
+                event_bus.register_handler(LiteAgentExecutionCompletedEvent, _on_agent_completed)
+                event_bus.register_handler(LiteAgentExecutionErrorEvent, _on_agent_error)
 
                 # Tool-approval gates: tools stamped with an approval policy
                 # (requires_approval in tool config) pause before executing and
@@ -925,19 +925,19 @@ class LightAgentService:
                             pass
                     # Always unregister so handlers never leak on the global bus.
                     try:
-                        crewai_event_bus.off(LLMStreamChunkEvent, _on_llm_chunk)
-                        crewai_event_bus.off(ToolUsageStartedEvent, _on_tool_started)
-                        crewai_event_bus.off(ToolUsageFinishedEvent, _on_tool_finished)
-                        crewai_event_bus.off(ToolUsageErrorEvent, _on_tool_error)
-                        crewai_event_bus.off(LLMCallStartedEvent, _on_llm_started)
-                        crewai_event_bus.off(LLMCallCompletedEvent, _on_llm_completed)
-                        crewai_event_bus.off(LLMCallFailedEvent, _on_llm_failed)
-                        crewai_event_bus.off(MemoryQueryCompletedEvent, _on_memory_query)
-                        crewai_event_bus.off(MemoryRetrievalCompletedEvent, _on_memory_retrieval)
-                        crewai_event_bus.off(MemorySaveCompletedEvent, _on_memory_save)
-                        crewai_event_bus.off(LiteAgentExecutionStartedEvent, _on_agent_started)
-                        crewai_event_bus.off(LiteAgentExecutionCompletedEvent, _on_agent_completed)
-                        crewai_event_bus.off(LiteAgentExecutionErrorEvent, _on_agent_error)
+                        event_bus.off(LLMStreamChunkEvent, _on_llm_chunk)
+                        event_bus.off(ToolUsageStartedEvent, _on_tool_started)
+                        event_bus.off(ToolUsageFinishedEvent, _on_tool_finished)
+                        event_bus.off(ToolUsageErrorEvent, _on_tool_error)
+                        event_bus.off(LLMCallStartedEvent, _on_llm_started)
+                        event_bus.off(LLMCallCompletedEvent, _on_llm_completed)
+                        event_bus.off(LLMCallFailedEvent, _on_llm_failed)
+                        event_bus.off(MemoryQueryCompletedEvent, _on_memory_query)
+                        event_bus.off(MemoryRetrievalCompletedEvent, _on_memory_retrieval)
+                        event_bus.off(MemorySaveCompletedEvent, _on_memory_save)
+                        event_bus.off(LiteAgentExecutionStartedEvent, _on_agent_started)
+                        event_bus.off(LiteAgentExecutionCompletedEvent, _on_agent_completed)
+                        event_bus.off(LiteAgentExecutionErrorEvent, _on_agent_error)
                     except Exception as off_err:  # noqa: BLE001
                         logger.debug(f"[light_agent] handler unregister skipped: {off_err}")
                 answer = getattr(kicked, "raw", None)

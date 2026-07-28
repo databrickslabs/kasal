@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from kasal_engine.core import Process
+from src.services.execution.runtime import Process
 
 from src.services.execution.config.manager_config_builder import ManagerConfigBuilder
 

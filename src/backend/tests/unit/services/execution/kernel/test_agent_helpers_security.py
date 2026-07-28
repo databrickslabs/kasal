@@ -148,7 +148,7 @@ class TestCreateAgentSecurityPreamble:
     ):
         """Every kwarg passed to Agent() must be an actual field on the
         installed CrewAI Agent — otherwise Pydantic silently drops it."""
-        from kasal_engine.core import Agent as RealAgent
+        from src.services.execution.runtime import Agent as RealAgent
 
         kwargs = await _run_create_agent(base_agent_config, mock_config, mock_tools, None)
         unknown = set(kwargs) - set(RealAgent.model_fields)
@@ -226,8 +226,8 @@ class TestCreateAgentSecurityPreamble:
     ):
         """End-to-end: a real engine Agent built from the kwargs renders a
         system prompt that actually contains the preamble."""
-        from kasal_engine.core import Agent as RealAgent
-        from kasal_engine.core.executor import build_messages
+        from src.services.execution.runtime import Agent as RealAgent
+        from src.services.execution.runtime.executor import build_messages
 
         kwargs = await _run_create_agent(base_agent_config, mock_config, mock_tools, None)
         kwargs = {**kwargs, "tools": [], "llm": "gpt-4o"}  # real Agent needs serializable llm

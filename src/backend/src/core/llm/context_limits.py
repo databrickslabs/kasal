@@ -17,7 +17,7 @@ with ours for free.
 import logging
 from typing import Final
 
-from kasal_engine.llm import CONTEXT_LIMIT_ERRORS
+from src.core.llm.transport import CONTEXT_LIMIT_ERRORS
 
 logger = logging.getLogger(__name__)
 

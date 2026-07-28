@@ -9,7 +9,7 @@ import os
 import re
 from typing import Dict, Any, Optional, Tuple, List
 
-from kasal_engine.core import Agent
+from src.services.execution.runtime import Agent
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.logger import LoggerManager

@@ -2,7 +2,7 @@
 
 Layering — who owns what, and why a thing lives where it does:
 
-``kasal_engine.llm``      The transport. An OpenAI-compatible client plus the
+``src.core.llm.transport``      The transport. An OpenAI-compatible client plus the
                           protocol-level behaviour every model shares: tool-call
                           loops, streaming, context-window trimming, usage
                           accounting, structured output, LLM events. Model- and

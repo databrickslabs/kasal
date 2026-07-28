@@ -5,9 +5,9 @@ from unittest.mock import patch
 
 import pytest
 
-from kasal_engine.core.types import Process, TaskOutput
-from kasal_engine.events.bus import CrewAIEventsBus
-from kasal_engine.events.types import CrewKickoffCompletedEvent, TaskCompletedEvent
+from src.services.execution.runtime.types import Process, TaskOutput
+from src.services.execution.events.bus import EventsBus
+from src.services.execution.events.types import CrewKickoffCompletedEvent, TaskCompletedEvent
 
 from src.services.execution.checkpoint import (
     CrewTaskCheckpointRecorder,
@@ -121,7 +121,7 @@ class TestRecorderCrewCompleted:
 class TestRecorderRegistration:
     def test_register_hooks_both_events(self):
         crew = make_crew(2)
-        bus = CrewAIEventsBus()
+        bus = EventsBus()
         recorder = CrewTaskCheckpointRecorder("job-1", crew)
         persisted = []
 

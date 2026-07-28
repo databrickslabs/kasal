@@ -128,14 +128,14 @@ Do NOT add telemetry to non-Databricks calls (e.g., PowerBI API, external APIs).
 
 | Layer | Owns |
 |---|---|
-| `kasal_engine/llm/` | Transport. OpenAI-compatible client, tool-call loop, streaming, context-window trim **and** output clamp, usage accounting, structured output, LLM events. Model- and tenant-agnostic. |
+| `src/core/llm/transport/` | Transport. OpenAI-compatible client, tool-call loop, streaming, context-window trim **and** output clamp, usage accounting, structured output, LLM events. Model- and tenant-agnostic. |
 | `src/core/llm/` | Configuration. Model-catalogue lookup, per-tenant credentials, endpoint URLs, per-endpoint parameter rules, usage telemetry, embeddings, context-limit phrases. |
 | `src/core/llm/handlers/` | Endpoint policy. Engine-LLM subclasses: retry/backoff + fallback + message sanitization (`DatabricksRetryLLM`), Responses API (`DatabricksResponsesLLM`), self-hosted vLLM (`VLLMFunctionCallingLLM`). Named for the endpoint or protocol, never for a model. |
 | `LLMManager` | The public facade (`llm_manager.py`). 38+ call sites use `completion`; keep it stable. |
 
 Two rules, both learned the hard way:
-- **litellm is not on the LLM path.** The engine drives endpoints with the OpenAI
-  SDK. Anything configured on the `litellm` module (`drop_params`, callbacks,
+- **litellm is not on the LLM path.** The transport drives endpoints with the
+  OpenAI SDK. Anything configured on the `litellm` module (`drop_params`, callbacks,
   caching, `register_model`, monkey patches) affects only
   `LLMManager.completion_with_usage`. Params set when building an LLM ARE sent —
   there is no drop-params safety net.

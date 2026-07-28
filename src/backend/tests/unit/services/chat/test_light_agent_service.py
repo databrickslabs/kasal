@@ -84,7 +84,7 @@ async def test_attach_memory_returns_the_memory_it_built():
     chat had no recall or persistence while crews — which never read
     agent.memory — worked fine.
     """
-    from kasal_engine.core.agent import Agent
+    from src.services.execution.runtime.agent import Agent
 
     agent = Agent(role="Assistant", goal="g", backstory="b")   # the REAL class
     p_service, p_cfg, p_emb, p_mbc, mem_service = _patches()
@@ -102,7 +102,7 @@ async def test_attach_memory_returns_the_memory_it_built():
 async def test_engine_agent_cannot_hold_a_memory_attribute():
     """Pins the constraint the bug hinged on, so a future 'just set it on the
     agent' change fails loudly here instead of silently losing memory."""
-    from kasal_engine.core.agent import Agent
+    from src.services.execution.runtime.agent import Agent
 
     agent = Agent(role="Assistant", goal="g", backstory="b")
     with pytest.raises(ValueError):

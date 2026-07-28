@@ -19,8 +19,8 @@ from typing import Any, ClassVar
 
 from pydantic import BaseModel, Field
 
-from ..events.bus import crewai_event_bus
-from ..events.types import (
+from src.services.execution.events.bus import event_bus
+from src.services.execution.events.types import (
     LLMGuardrailCompletedEvent,
     LLMGuardrailFailedEvent,
     LLMGuardrailStartedEvent,
@@ -126,11 +126,11 @@ class Task(BaseModel):
                 f"Task {self.description[:50]!r} has no agent assigned and none was provided."
             )
         self.start_time = datetime.datetime.now(datetime.timezone.utc)
-        crewai_event_bus.emit(self, TaskStartedEvent(context=context, task=self))
+        event_bus.emit(self, TaskStartedEvent(context=context, task=self))
         try:
             return self._execute_core(executing_agent, context, tools)
         except Exception as e:
-            crewai_event_bus.emit(self, TaskFailedEvent(error=str(e), task=self))
+            event_bus.emit(self, TaskFailedEvent(error=str(e), task=self))
             raise
 
     def _execute_core(
@@ -187,7 +187,7 @@ class Task(BaseModel):
             )
         if self.callback:
             self.callback(output)
-        crewai_event_bus.emit(self, TaskCompletedEvent(output=output, task=self))
+        event_bus.emit(self, TaskCompletedEvent(output=output, task=self))
         return output
 
     def execute_async(
@@ -301,7 +301,7 @@ class Task(BaseModel):
         for guardrail in guardrails:
             label = self._guardrail_label(guardrail)
             for attempt in range(retries + 1):
-                crewai_event_bus.emit(
+                event_bus.emit(
                     self,
                     LLMGuardrailStartedEvent(
                         guardrail=label,
@@ -312,7 +312,7 @@ class Task(BaseModel):
                     ),
                 )
                 ok, result = guardrail(output)
-                crewai_event_bus.emit(
+                event_bus.emit(
                     self,
                     LLMGuardrailCompletedEvent(
                         guardrail=label,
@@ -332,7 +332,7 @@ class Task(BaseModel):
                         output = output.model_copy(update={"raw": result})
                     break
                 if attempt == retries:
-                    crewai_event_bus.emit(
+                    event_bus.emit(
                         self,
                         LLMGuardrailFailedEvent(
                             guardrail=label,

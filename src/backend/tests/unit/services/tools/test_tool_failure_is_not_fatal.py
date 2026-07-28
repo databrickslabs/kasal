@@ -18,7 +18,7 @@ import urllib.error
 
 import pytest
 
-from kasal_engine.llm import LLM
+from src.core.llm.transport import LLM
 
 
 @pytest.fixture
@@ -94,7 +94,7 @@ class TestWhatStillPropagates:
 
     def test_blocked_calls_keep_their_own_wording(self, llm):
         """Denied approval is a policy decision, not a tool malfunction."""
-        from kasal_engine.core.executor import ToolExecutionBlockedError
+        from src.services.execution.runtime.executor import ToolExecutionBlockedError
 
         def blocked(**_kwargs):
             raise ToolExecutionBlockedError("approval denied by user")

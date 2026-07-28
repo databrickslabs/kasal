@@ -1,4 +1,4 @@
-"""kasal_engine.llm — generated from the kasal_engine datamodel.
+"""src.core.llm.transport — generated from the kasal_engine datamodel.
 
 Generated from the kasal_engine datamodel — do not edit by hand."""
 

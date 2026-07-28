@@ -32,7 +32,7 @@ import time
 import litellm
 from litellm import CustomLogger
 
-from kasal_engine.llm import LLM
+from src.core.llm.transport import LLM
 from src.schemas.model_provider import ModelProvider
 
 # Dedicated executor for blocking LLM calls. ``asyncio.to_thread`` shares the
@@ -103,7 +103,7 @@ def set_subprocess_user_token(token: str) -> None:
 # This causes CrewAI to not summarize when needed, leading to empty responses from
 # models like Qwen that silently fail when context is too large.
 try:
-    from kasal_engine.llm import LLM_CONTEXT_WINDOW_SIZES
+    from src.core.llm.transport import LLM_CONTEXT_WINDOW_SIZES
     from src.seeds.model_configs import MODEL_CONFIGS
 
     # The litellm model-id prefix each provider is called with — must match the

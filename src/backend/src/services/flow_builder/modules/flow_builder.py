@@ -14,9 +14,9 @@ The FlowBuilder class coordinates these modules to construct complete CrewAI flo
 """
 import logging
 from typing import Dict, List, Optional, Any, Union
-from kasal_engine.flow import Flow as CrewAIFlow
-from kasal_engine.flow import start, listen, router, and_, or_
-from kasal_engine.core import Crew, Task, Process
+from src.services.flow_builder.runtime import Flow as CrewAIFlow
+from src.services.flow_builder.runtime import start, listen, router, and_, or_
+from src.services.execution.runtime import Crew, Task, Process
 from pydantic import BaseModel
 
 # The @persist decorator is available since CrewAI 0.98.0
@@ -1336,7 +1336,7 @@ class FlowBuilder:
 
                             if len(async_tasks) > 1:
                                 # Auto-create a lightweight completion task that waits for all async tasks
-                                from kasal_engine.core import Task as CrewTask
+                                from src.services.execution.runtime import Task as CrewTask
 
                                 completion_agent = async_tasks[-1].agent
                                 completion_task = CrewTask(
@@ -1443,7 +1443,7 @@ class FlowBuilder:
         # This enables checkpoint/resume functionality via CrewAI's flow persistence
         if persistence_enabled:
             try:
-                from kasal_engine.flow import persist
+                from src.services.flow_builder.runtime import persist
                 # Persist flow state into Kasal's OWN database (SQLite in dev,
                 # Lakebase/Postgres in prod) instead of CrewAI's default stray SQLite
                 # file, so checkpoints survive restarts and are queryable by the app.

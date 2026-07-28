@@ -2,7 +2,7 @@ import pytest
 import json
 from unittest.mock import MagicMock, patch, Mock
 from typing import Dict, Any
-from kasal_engine.core import TaskOutput
+from src.services.execution.runtime import TaskOutput
 
 from src.services.guardrails.demo.company_count_guardrail import CompanyCountGuardrail
 

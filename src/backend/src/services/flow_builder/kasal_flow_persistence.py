@@ -22,7 +22,7 @@ import threading
 import time
 from typing import Any, Callable, Optional
 
-from kasal_engine.flow import FlowPersistence
+from src.services.flow_builder.runtime import FlowPersistence
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)

@@ -18,8 +18,8 @@ import pytest
 
 # Importing llm_manager runs the registration at module scope.
 import src.core.llm_manager  # noqa: F401
-from kasal_engine.llm import LLM_CONTEXT_WINDOW_SIZES
-from kasal_engine.llm.constants import DEFAULT_CONTEXT_WINDOW_SIZE
+from src.core.llm.transport import LLM_CONTEXT_WINDOW_SIZES
+from src.core.llm.transport.constants import DEFAULT_CONTEXT_WINDOW_SIZE
 from src.seeds.model_configs import DEFAULT_MODELS
 
 

@@ -96,20 +96,34 @@ services/
 - All work here is async; Databricks calls need User-Agent telemetry
   (`src/backend/CLAUDE.md`).
 
-## `kasal_engine` is a LIBRARY, not this layer
+## The agent runtime lives here now
 
-`kasal_engine/` at the backend root is the vendored agent library — `Agent`,
-`Task`, `Crew`, `Flow`, the LLM transport, the event bus, `BaseTool`, memory
-primitives. It is the dependency that replaced crewai. Services import it
-freely; it imports nothing from `src`.
+There is no `kasal_engine` package. What was a 6,594-line library sitting beside
+`src/` is first-party code in the tree that uses it:
 
-Two consequences people get wrong:
-- **Never stub `kasal_engine.*` into `sys.modules` in a test.** It is real code
-  here. Stubbing it shadows working modules, and anything imported inside that
-  window stays cached holding MagicMocks — which breaks unrelated suites sharing
-  the xdist worker. (This cost a day; see the path-move commit.)
-- A tool subclassing `BaseTool` or a memory backend implementing
-  `StorageBackend` is a LIBRARY dependency and belongs in services, not here.
+| was | is |
+|---|---|
+| `kasal_engine/core/` | `services/execution/runtime/` — Agent, Task, Crew, the tool-call loop |
+| `kasal_engine/events/` | `services/execution/events/` — the run event bus |
+| `kasal_engine/llm/` | `src/core/llm/transport/` — under the config layer that drives it |
+| `kasal_engine/tools/base.py` | `services/tools/base.py` — beside its 38 subclasses |
+| `kasal_engine/memory/` | `services/memory/engine/` |
+| `kasal_engine/flow/` | `services/flow_builder/runtime/` |
+
+**The direction of dependency is now a convention, not a fact.** It used to be
+structural: that package could not import `src` because it shipped separately.
+It can now. It must not. `runtime/` and `events/` are called BY the app — the
+moment one of them reaches for a repository, a session or a `GroupContext`, the
+agent loop stops being runnable from anywhere that is not a full Kasal process,
+and every import graph in this directory develops a cycle.
+
+Two more things that outlived the package:
+- **`crewai_event_bus` is now `event_bus`** (and `CrewAIEventsBus` is
+  `EventsBus`). No alias was left behind.
+- **Never stub these modules into `sys.modules` in a test.** That was a habit
+  from when `crewai` was an absent third-party dependency; it now shadows working
+  first-party code, and anything imported inside the stub window stays cached
+  holding MagicMocks, which breaks unrelated suites on the same xdist worker.
 
 ## Related
 - `src/docs/crewai-engine-refactor-proposal.md` — the earlier refactor record

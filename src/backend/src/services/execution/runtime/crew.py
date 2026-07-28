@@ -11,7 +11,7 @@ Engine notes:
 - memory/embedder/knowledge_sources/planning fields are accepted and carried
   (kasal configures them) but wiring is the memory subsystem's job.
 - token_usage aggregates from any agent LLM exposing get_usage_metrics();
-  the kasal_engine.llm subsystem provides that.
+  the src.core.llm.transport subsystem provides that.
 - stream/prompt_to_print_output/tracing are accepted for compatibility and
   inert here.
 """
@@ -26,8 +26,8 @@ from typing import Any
 
 from pydantic import UUID4, BaseModel, ConfigDict, Field, PrivateAttr
 
-from ..events.bus import crewai_event_bus
-from ..events.types import CrewKickoffCompletedEvent, CrewKickoffStartedEvent
+from src.services.execution.events.bus import event_bus
+from src.services.execution.events.types import CrewKickoffCompletedEvent, CrewKickoffStartedEvent
 from .agent import Agent, BaseAgent
 from .executor import delegation_tools, interpolate_text
 from .task import Task
@@ -126,7 +126,7 @@ class Crew(BaseModel):
         # match when the resume run uses the same inputs as the original.
         self._seeded_outputs = self._load_checkpoint(from_checkpoint)
 
-        crewai_event_bus.emit(
+        event_bus.emit(
             self, CrewKickoffStartedEvent(crew_name=self.name, inputs=inputs)
         )
         try:
@@ -154,7 +154,7 @@ class Crew(BaseModel):
             tasks_output=task_outputs,
             token_usage=usage,
         )
-        crewai_event_bus.emit(
+        event_bus.emit(
             self,
             CrewKickoffCompletedEvent(
                 crew_name=self.name,

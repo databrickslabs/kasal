@@ -16,8 +16,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, PrivateAttr
 
-from ..events.bus import crewai_event_bus
-from ..events.types import ContextCompactionEvent, LLMCallType, LLMStreamChunkEvent
+from src.services.execution.events.bus import event_bus
+from src.services.execution.events.types import ContextCompactionEvent, LLMCallType, LLMStreamChunkEvent
 from .base import BaseLLM
 from .constants import CONTEXT_WINDOW_USAGE_RATIO, LLM_CONTEXT_WINDOW_SIZES
 from .exceptions import (
@@ -98,7 +98,7 @@ class OpenAICompletion(BaseLLM):
                 from openai import OpenAI
             except ImportError as e:
                 raise ImportError(
-                    "kasal_engine.llm.OpenAICompletion requires the 'openai' "
+                    "src.core.llm.transport.OpenAICompletion requires the 'openai' "
                     "package: pip install openai"
                 ) from e
             self._client = OpenAI(
@@ -503,7 +503,7 @@ class OpenAICompletion(BaseLLM):
         """Announce a compaction on the event bus. Never raises — observability
         must not be able to fail a run."""
         try:
-            crewai_event_bus.emit(
+            event_bus.emit(
                 self,
                 ContextCompactionEvent(
                     model=self.model,
@@ -612,7 +612,7 @@ class OpenAICompletion(BaseLLM):
             text = getattr(delta, "content", None)
             if text:
                 chunks.append(text)
-                crewai_event_bus.emit(
+                event_bus.emit(
                     self,
                     LLMStreamChunkEvent(
                         model=self.model, chunk=text, chunk_index=chunk_index

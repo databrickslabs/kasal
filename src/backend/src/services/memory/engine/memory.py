@@ -33,8 +33,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
-from ..events.bus import crewai_event_bus
-from ..events.types import (
+from src.services.execution.events.bus import event_bus
+from src.services.execution.events.types import (
     MemoryQueryCompletedEvent,
     MemoryQueryFailedEvent,
     MemoryQueryStartedEvent,
@@ -379,7 +379,7 @@ class Memory(BaseModel):
     ) -> list[MemoryRecord]:
         start = time.perf_counter()
         for content in contents:
-            crewai_event_bus.emit(
+            event_bus.emit(
                 self,
                 MemorySaveStartedEvent(
                     value=content, metadata=metadata, agent_role=agent_role,
@@ -433,7 +433,7 @@ class Memory(BaseModel):
             saved = self.storage.save(records)
         except Exception as e:
             for record in records:
-                crewai_event_bus.emit(
+                event_bus.emit(
                     self,
                     MemorySaveFailedEvent(
                         value=record.content, metadata=record.metadata,
@@ -444,7 +444,7 @@ class Memory(BaseModel):
             raise
         elapsed_ms = (time.perf_counter() - start) * 1000
         for record in saved:
-            crewai_event_bus.emit(
+            event_bus.emit(
                 self,
                 MemorySaveCompletedEvent(
                     value=record.content,
@@ -474,7 +474,7 @@ class Memory(BaseModel):
         score_threshold: float | None = None,
     ) -> list[MemoryRecord]:
         start = time.perf_counter()
-        crewai_event_bus.emit(
+        event_bus.emit(
             self,
             MemoryQueryStartedEvent(
                 query=query, limit=limit, score_threshold=score_threshold,
@@ -487,7 +487,7 @@ class Memory(BaseModel):
                 score_threshold=score_threshold,
             )
         except Exception as e:
-            crewai_event_bus.emit(
+            event_bus.emit(
                 self,
                 MemoryQueryFailedEvent(
                     query=query, limit=limit, score_threshold=score_threshold,
@@ -495,7 +495,7 @@ class Memory(BaseModel):
                 ),
             )
             raise
-        crewai_event_bus.emit(
+        event_bus.emit(
             self,
             MemoryQueryCompletedEvent(
                 query=query,

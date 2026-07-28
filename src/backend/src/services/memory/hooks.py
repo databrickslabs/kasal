@@ -1,4 +1,4 @@
-"""Recall/persist hooks that wire ``kasal_engine.memory.Memory`` into runs.
+"""Recall/persist hooks that wire ``src.services.memory.engine.Memory`` into runs.
 
 The engine carries ``Crew.memory``/``Agent.memory`` but its execution loop does
 not consult them — recall and persistence are the app layer's job (these
@@ -148,7 +148,7 @@ def remember_async(
 
     try:
         # copy_context: the caller's ambient event attribution (agent/task set
-        # via kasal_engine.events.event_context) rides into the writer thread,
+        # via src.services.execution.events.event_context) rides into the writer thread,
         # so MemorySave* events land under the right task in the trace.
         ctx = contextvars.copy_context()
         future = _WRITE_POOL.submit(ctx.run, _write)
@@ -203,7 +203,7 @@ def inject_task_memory(memory: Any, tasks: list[Any]) -> int:
 def _task_event_context(task: Any):
     """Scoped ambient event attribution for ``task`` (no-op fallback)."""
     try:
-        from kasal_engine.events import event_context
+        from src.services.execution.events import event_context
 
         agent = getattr(task, "agent", None)
         return event_context(
@@ -297,7 +297,7 @@ def register_task_output_persistence(crew: Any) -> Any:
     if mem is None:
         return lambda: None
     try:
-        from kasal_engine.events import TaskCompletedEvent, crewai_event_bus
+        from src.services.execution.events import TaskCompletedEvent, event_bus
     except ImportError:  # pragma: no cover - engine always present in app
         return lambda: None
 
@@ -314,11 +314,11 @@ def register_task_output_persistence(crew: Any) -> Any:
         except Exception as exc:  # noqa: BLE001 — never disturb the run
             logger.debug("Task memory persistence skipped: %s", exc)
 
-    crewai_event_bus.register_handler(TaskCompletedEvent, _on_task_completed)
+    event_bus.register_handler(TaskCompletedEvent, _on_task_completed)
 
     def _unregister() -> None:
         try:
-            crewai_event_bus.off(TaskCompletedEvent, _on_task_completed)
+            event_bus.off(TaskCompletedEvent, _on_task_completed)
         except Exception as exc:  # noqa: BLE001
             logger.debug("Task memory handler unregister skipped: %s", exc)
 

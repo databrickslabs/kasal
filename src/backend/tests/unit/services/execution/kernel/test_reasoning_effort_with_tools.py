@@ -22,7 +22,7 @@ value has to be stated explicitly whenever tools are present.
 """
 import pytest
 
-from kasal_engine.llm.completion import OpenAICompletion
+from src.core.llm.transport.completion import OpenAICompletion
 
 
 TOOLS = [

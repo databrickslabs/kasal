@@ -127,7 +127,7 @@ class TestCrewAIPatchingWarnings:
                    return_value=(sys.stdout, sys.stderr, MagicMock(getvalue=MagicMock(return_value="")))), \
              patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"), \
              patch("src.services.mlflow.tracing.cleanup_async_db_connections"), \
-             patch("kasal_engine.llm.LLM_CONTEXT_WINDOW_SIZES",
+             patch("src.core.llm.transport.LLM_CONTEXT_WINDOW_SIZES",
                    side_effect=ImportError("no crewai.llm")), \
              patch("psutil.Process") as mock_psutil:
             mock_psutil.return_value.children.return_value = []
@@ -152,15 +152,15 @@ class TestCrewAIPatchingWarnings:
             mock_psutil.return_value.children.return_value = []
             # Force the context_window_exceeding_exception import to fail
             import sys as _sys
-            original = _sys.modules.get("kasal_engine.llm")
-            _sys.modules["kasal_engine.llm"] = None
+            original = _sys.modules.get("src.core.llm.transport")
+            _sys.modules["src.core.llm.transport"] = None
             try:
                 result = run_crew_in_process("exec-ctx-warn", config)
             finally:
                 if original is None:
-                    _sys.modules.pop("kasal_engine.llm", None)
+                    _sys.modules.pop("src.core.llm.transport", None)
                 else:
-                    _sys.modules["kasal_engine.llm"] = original
+                    _sys.modules["src.core.llm.transport"] = original
 
         assert result["status"] == "FAILED"
 

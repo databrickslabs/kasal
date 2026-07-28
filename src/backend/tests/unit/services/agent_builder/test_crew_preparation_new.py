@@ -841,7 +841,7 @@ class TestCreateTasks:
 
         with patch("src.services.agent_builder.task_adapter.create_task", new_callable=AsyncMock) as mock_ct, \
              patch("src.services.agent_builder.crew_preparation.Task") as mock_task_cls_module, \
-             patch("kasal_engine.core.Task") as mock_task_cls_crewai:
+             patch("src.services.execution.runtime.Task") as mock_task_cls_crewai:
             mock_ct.side_effect = [task1, task2]
             completion_task = MagicMock()
             mock_task_cls_module.return_value = completion_task

@@ -6,7 +6,7 @@ Handles manager LLM and manager agent configuration for hierarchical processes.
 
 from typing import Dict, Any, Optional
 import logging
-from kasal_engine.core import Process
+from src.services.execution.runtime import Process
 
 from src.core.logger import LoggerManager
 from src.core.llm_manager import LLMManager

@@ -20,7 +20,7 @@ import os
 import re
 from typing import Any, Dict, List, Optional
 
-from kasal_engine.core import Agent
+from src.services.execution.runtime import Agent
 
 from src.core.logger import LoggerManager
 from src.services.execution.kernel.agent_security import inject_security_preamble
@@ -55,7 +55,7 @@ _ADDITIONAL_AGENT_PARAMS = [
 DEFAULT_REASONING_EFFORT = 'low'
 
 #: Seconds one agent may spend inside a single LLM call chain before the engine
-#: stops it (``kasal_engine.llm.completion._execution_budget``). 0 disables it.
+#: stops it (``src.core.llm.transport.completion._execution_budget``). 0 disables it.
 #:
 #: The round cap alone was not enough. An agent searching for something its
 #: knowledge base does not contain rephrases the query every round; with
@@ -76,7 +76,7 @@ def _apply_reasoning_effort(llm: Any, spec: Dict[str, Any], label: str = "") -> 
 
     Kasal's reasoning control (sidebar "Reasoning" → effort) is a THINKING BUDGET,
     not a planner: the engine has no plan/replan loop. ``reasoning_effort`` is
-    emitted by ``kasal_engine.llm.completion`` as ``reasoning_effort`` on Chat
+    emitted by ``src.core.llm.transport.completion`` as ``reasoning_effort`` on Chat
     Completions and as ``reasoning: {"effort": ...}`` on the Responses API.
 
     Capability-gated: models that do not accept the parameter would 400 on strict

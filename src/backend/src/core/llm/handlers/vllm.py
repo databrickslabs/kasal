@@ -8,7 +8,7 @@ reasons.
 
 import os
 
-from kasal_engine.llm import LLM
+from src.core.llm.transport import LLM
 
 class VLLMFunctionCallingLLM(LLM):
     """LLM subclass for self-hosted vLLM endpoints.

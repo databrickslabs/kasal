@@ -227,7 +227,7 @@ class TestProcessStartingPoints:
 
         with patch('src.services.flow_builder.modules.agent_adapter.AgentConfig') as mock_agent_config, \
              patch('src.services.flow_builder.modules.task_adapter.TaskConfig') as mock_task_config, \
-             patch('kasal_engine.core.Task') as mock_crewai_task:
+             patch('src.services.execution.runtime.Task') as mock_crewai_task:
             mock_agent_obj = MagicMock()
             mock_agent_config.configure_agent_and_tools = AsyncMock(return_value=mock_agent_obj)
 
@@ -293,7 +293,7 @@ class TestProcessStartingPoints:
 
         with patch('src.services.flow_builder.modules.agent_adapter.AgentConfig') as mock_agent_config, \
              patch('src.services.flow_builder.modules.task_adapter.TaskConfig') as mock_task_config, \
-             patch('kasal_engine.core.Task') as mock_crewai_task:
+             patch('src.services.execution.runtime.Task') as mock_crewai_task:
             mock_agent_obj = MagicMock()
             mock_agent_config.configure_agent_and_tools = AsyncMock(return_value=mock_agent_obj)
 

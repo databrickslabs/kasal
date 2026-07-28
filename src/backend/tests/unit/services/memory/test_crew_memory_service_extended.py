@@ -517,7 +517,7 @@ class TestConfigureCrewMemoryComponents:
         mock_memory_instance = MagicMock()
         mock_crewai_mem.Memory = MagicMock(return_value=mock_memory_instance)
         return {
-            "kasal_engine.memory": mock_crewai_mem,
+            "src.services.memory.engine": mock_crewai_mem,
         }
 
     def test_disables_memory_when_default_no_embedder(self):
@@ -584,7 +584,7 @@ class TestConfigureCrewMemoryComponents:
         memory_config = self._make_memory_config("databricks")
 
         # Simulate ImportError by setting crewai.memory to None
-        with patch.dict("sys.modules", {"kasal_engine.memory": None}):
+        with patch.dict("sys.modules", {"src.services.memory.engine": None}):
             result = service.configure_crew_memory_components(
                 crew_kwargs, memory_config, storage=MagicMock(), crew_id="crew_1"
             )
@@ -598,7 +598,7 @@ class TestConfigureCrewMemoryComponents:
         mock_storage = MagicMock()
 
         mocks = self._crewai_memory_mocks()
-        mocks["kasal_engine.memory"].Memory.side_effect = RuntimeError("Memory build failed")
+        mocks["src.services.memory.engine"].Memory.side_effect = RuntimeError("Memory build failed")
         with patch.dict("sys.modules", mocks):
             result = service.configure_crew_memory_components(
                 crew_kwargs, memory_config, storage=mock_storage, crew_id="crew_1"

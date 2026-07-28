@@ -368,7 +368,7 @@ class TestCrewPreparation:
 
         with patch('src.services.agent_builder.task_adapter.create_task', side_effect=[mock_task1, mock_task2]) as mock_create:
             # Patch crewai.Task since the code does 'from crewai import Task as CrewAITask'
-            with patch('kasal_engine.core.Task') as mock_task_class:
+            with patch('src.services.execution.runtime.Task') as mock_task_class:
                 mock_completion_task = MagicMock()
                 mock_task_class.return_value = mock_completion_task
 

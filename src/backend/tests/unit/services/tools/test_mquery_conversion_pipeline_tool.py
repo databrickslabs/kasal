@@ -1689,7 +1689,7 @@ class TestLlmGenerateInsertSql:
         from unittest.mock import patch as _patch
         rows = [{"id": 1, "name": "Alice"}]
 
-        with _patch("kasal_engine.llm.LLM", side_effect=Exception("LLM unavailable")):
+        with _patch("src.core.llm.transport.LLM", side_effect=Exception("LLM unavailable")):
             create_sql, insert_sqls = self._run(self.tool._llm_generate_insert_sql(
                 "T1", "main.default.t1", ["id", "name"], rows, {}
             ))
@@ -1700,7 +1700,7 @@ class TestLlmGenerateInsertSql:
 
     def test_fallback_generates_create_table(self):
         rows = [{"col1": "text", "col2": 42}]
-        with patch("kasal_engine.llm.LLM", side_effect=Exception("no LLM")):
+        with patch("src.core.llm.transport.LLM", side_effect=Exception("no LLM")):
             create_sql, _inserts = self._run(self.tool._llm_generate_insert_sql(
                 "T2", "main.default.t2", ["col1", "col2"], rows, {}
             ))
@@ -1710,7 +1710,7 @@ class TestLlmGenerateInsertSql:
 
     def test_batch_insert_generated_for_rows(self):
         rows = [{"col1": "A", "col2": 1}, {"col1": "B", "col2": 2}]
-        with patch("kasal_engine.llm.LLM", side_effect=Exception("no LLM")):
+        with patch("src.core.llm.transport.LLM", side_effect=Exception("no LLM")):
             create_sql, insert_sqls = self._run(self.tool._llm_generate_insert_sql(
                 "T3", "main.default.t3", ["col1", "col2"], rows, {}
             ))
@@ -1720,7 +1720,7 @@ class TestLlmGenerateInsertSql:
 
     def test_integer_values_escaped_properly(self):
         rows = [{"num_col": 42}]
-        with patch("kasal_engine.llm.LLM", side_effect=Exception("no LLM")):
+        with patch("src.core.llm.transport.LLM", side_effect=Exception("no LLM")):
             _create, insert_sqls = self._run(self.tool._llm_generate_insert_sql(
                 "T4", "main.default.t4", ["num_col"], rows, {}
             ))
@@ -1730,7 +1730,7 @@ class TestLlmGenerateInsertSql:
 
     def test_null_values_escaped(self):
         rows = [{"col1": None}]
-        with patch("kasal_engine.llm.LLM", side_effect=Exception("no LLM")):
+        with patch("src.core.llm.transport.LLM", side_effect=Exception("no LLM")):
             _create, insert_sqls = self._run(self.tool._llm_generate_insert_sql(
                 "T5", "main.default.t5", ["col1"], rows, {}
             ))
@@ -1741,7 +1741,7 @@ class TestLlmGenerateInsertSql:
     def test_boolean_values_escaped(self):
         rows = [{"flag": "true"}]
         # Force col type to BOOLEAN by making _infer_schema_types return it
-        with patch("kasal_engine.llm.LLM", side_effect=Exception("no LLM")):
+        with patch("src.core.llm.transport.LLM", side_effect=Exception("no LLM")):
             with patch.object(self.tool, "_infer_schema_types", return_value={"flag": "BOOLEAN"}):
                 _create, insert_sqls = self._run(self.tool._llm_generate_insert_sql(
                     "T6", "main.default.t6", ["flag"], rows, {}
@@ -1752,7 +1752,7 @@ class TestLlmGenerateInsertSql:
 
     def test_date_values_escaped(self):
         rows = [{"dt": "2024-01-15"}]
-        with patch("kasal_engine.llm.LLM", side_effect=Exception("no LLM")):
+        with patch("src.core.llm.transport.LLM", side_effect=Exception("no LLM")):
             with patch.object(self.tool, "_infer_schema_types", return_value={"dt": "DATE"}):
                 _create, insert_sqls = self._run(self.tool._llm_generate_insert_sql(
                     "T7", "main.default.t7", ["dt"], rows, {}
@@ -1763,7 +1763,7 @@ class TestLlmGenerateInsertSql:
 
     def test_timestamp_values_escaped(self):
         rows = [{"ts": "2024-01-15 12:00:00"}]
-        with patch("kasal_engine.llm.LLM", side_effect=Exception("no LLM")):
+        with patch("src.core.llm.transport.LLM", side_effect=Exception("no LLM")):
             with patch.object(self.tool, "_infer_schema_types", return_value={"ts": "TIMESTAMP"}):
                 _create, insert_sqls = self._run(self.tool._llm_generate_insert_sql(
                     "T8", "main.default.t8", ["ts"], rows, {}
@@ -1780,7 +1780,7 @@ class TestLlmGenerateInsertSql:
         mock_llm = MagicMock()
         mock_llm.call.return_value = create_response
 
-        with patch("kasal_engine.llm.LLM", return_value=mock_llm):
+        with patch("src.core.llm.transport.LLM", return_value=mock_llm):
             create_sql, _inserts = self._run(self.tool._llm_generate_insert_sql(
                 "T9", "main.default.t9", ["col1"], rows,
                 {"llm_model": "test-model", "llm_workspace_url": "https://example.com", "llm_token": "tok"}

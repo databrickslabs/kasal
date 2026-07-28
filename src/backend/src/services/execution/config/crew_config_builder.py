@@ -10,7 +10,7 @@ Handles:
 
 from typing import Dict, Any, List, Optional
 import logging
-from kasal_engine.core import Process
+from src.services.execution.runtime import Process
 
 from src.core.logger import LoggerManager
 

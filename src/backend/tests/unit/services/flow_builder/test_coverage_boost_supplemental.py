@@ -658,7 +658,7 @@ class TestTaskConfigSupplemental:
             # No expected_output attribute
         )
 
-        from kasal_engine.core import BaseAgent
+        from src.services.execution.runtime import BaseAgent
         mock_agent = MagicMock(spec=BaseAgent)
         mock_agent.role = "Tester"
         mock_agent.tools = []
@@ -692,7 +692,7 @@ class TestTaskConfigSupplemental:
             markdown=False,
         )
 
-        from kasal_engine.core import BaseAgent
+        from src.services.execution.runtime import BaseAgent
         mock_agent = MagicMock(spec=BaseAgent)
         mock_agent.role = "Tester"
         mock_agent.tools = []

@@ -9,7 +9,7 @@ now carries process="parallel" and the engine opts the independent tasks in.
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from kasal_engine.core import Process
+from src.services.execution.runtime import Process
 from src.services.execution.config_adapter import adapt_config
 from src.services.execution.config.crew_config_builder import CrewConfigBuilder
 from src.services.agent_builder.crew_preparation import CrewPreparation
