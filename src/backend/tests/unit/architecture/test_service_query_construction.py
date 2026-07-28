@@ -40,6 +40,14 @@ _EXEMPT = (
     # Shipped verbatim into exported apps, which have no repository layer at all.
     # The other linters skip this tree too (see pyproject.toml).
     "services/export/templates/",
+    # The engine's own flow-state checkpoint store: raw sqlite3 against a file
+    # under db_storage_path(), not the application database. It matches only
+    # because `connection.execute(...)` trips the "conn" heuristic.
+    "services/flow_builder/runtime/persistence.py",
+    # Schema bootstrap for the knowledge tables — information_schema probes plus
+    # CREATE TABLE / CREATE INDEX. Same category as the lakebase DDL above: there
+    # is no repository for CREATE TABLE.
+    "services/knowledge/embedding_session.py",
 )
 
 #: Files that already build queries. Shrink this; never add to it.
@@ -52,8 +60,6 @@ _BASELINE = {
     "services/flow_builder/flow_execution_runner.py",
     "services/flow_builder/flow_service.py",
     "services/flow_builder/process_executor.py",
-    "services/flow_builder/runtime/persistence.py",
-    "services/knowledge/embedding_session.py",
     "services/tools/databricks_dashboard_creator_tool.py",
     "services/tools/metric_view_validator_tool.py",
     "services/trace/broadcast.py",
