@@ -15,6 +15,7 @@ import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import StorageIcon from '@mui/icons-material/Storage';
 import TimelineIcon from '@mui/icons-material/Timeline';
 import CompressIcon from '@mui/icons-material/Compress';
+import DashboardIcon from '@mui/icons-material/Dashboard';
 
 // Import Trace type from the store
 import { Trace } from '../../store/runStatus';
@@ -178,12 +179,22 @@ export const EVENT_PROCESSORS: Record<string, EventProcessor> = {
 
     const modelName = (metadata?.model as string) || '';
     const messageCount = metadata?.message_count as number | undefined;
-    const promptLen = (metadata?.prompt as string)?.length || 0;
+    // `prompt_chars` is the TRUE length, recorded when the list response trimmed
+    // the copy it shipped. Reading length off the trimmed string would report
+    // the preview size — "(2,000 chars)" for a 34,000-char prompt is not a
+    // smaller truth, it is a wrong one.
+    const promptLen = (metadata?.prompt_chars as number)
+      ?? ((metadata?.prompt as string)?.length || 0);
 
-    // Memory bookkeeping, not the agent reasoning: the memory layer asks the
-    // LLM to label the record it is saving, after the task has finished. Named
-    // so the row does not read as work the task is still doing.
-    const label = isMemoryLabelling(metadata) ? 'Memory Labelling' : 'LLM Request';
+    // Whose call this is. Both of these fire AFTER the task finished, so an
+    // unlabelled row reads as the agent still working: the memory layer tagging
+    // the record it just saved, and A2UI composing the answer into a surface.
+    const attempt = metadata?.attempt as number | undefined;
+    const label = metadata?.llm_purpose === 'a2ui_compose'
+      ? `A2UI Compose Request${attempt ? ` #${attempt}` : ''}`
+      : isMemoryLabelling(metadata)
+        ? 'Memory Labelling'
+        : 'LLM Request';
 
     let description = label;
     if (modelName) {
@@ -230,8 +241,11 @@ export const EVENT_PROCESSORS: Record<string, EventProcessor> = {
     let outputLen = 0;
     const metadata = parseTraceMetadata(trace);
 
-    // Check metadata for output_length from backend
-    if (metadata?.output_length) {
+    // Check metadata for the true size (output_length from the backend, or
+    // content_chars recorded when the list response trimmed this row).
+    if (metadata?.content_chars) {
+      outputLen = metadata.content_chars as number;
+    } else if (metadata?.output_length) {
       outputLen = metadata.output_length as number;
     } else {
       // Calculate from output
@@ -244,7 +258,12 @@ export const EVENT_PROCESSORS: Record<string, EventProcessor> = {
       }
     }
 
-    const label = isMemoryLabelling(metadata) ? 'Memory Labels' : 'LLM Response';
+    const attempt = metadata?.attempt as number | undefined;
+    const label = metadata?.llm_purpose === 'a2ui_compose'
+      ? `A2UI Compose Response${attempt ? ` #${attempt}` : ''}`
+      : isMemoryLabelling(metadata)
+        ? 'Memory Labels'
+        : 'LLM Response';
     const description = outputLen > 0
       ? `${label} (${outputLen.toLocaleString()} chars)`
       : label;
@@ -586,6 +605,51 @@ export const EVENT_PROCESSORS: Record<string, EventProcessor> = {
     return { type: 'context_compaction', description };
   },
 
+  // A2UI surface composition. Recorded for EVERY outcome, so the row must say
+  // which one: a skipped surface is the case people actually ask about ("why did
+  // I not get a presentation?"), and every skip used to be silent.
+  a2ui_surface: (trace: Trace): ProcessedEvent => {
+    const metadata = parseTraceMetadata(trace);
+    const extra = extractExtraData(trace);
+    const field = (name: string): unknown => metadata?.[name] ?? extra?.[name];
+
+    const outcome = String(field('outcome') || 'composed');
+    const kind = field('surface_kind');
+    const components = field('component_count');
+
+    // Composition is a real LLM round-trip (often several) — carry its measured
+    // time so the row does not read as 0 ms, which is what a single-row group
+    // derives from timestamps alone.
+    const durationMs = typeof field('duration_ms') === 'number'
+      ? (field('duration_ms') as number)
+      : undefined;
+
+    if (outcome === 'composed') {
+      let description = kind ? `A2UI Surface — ${kind}` : 'A2UI Surface';
+      if (typeof components === 'number') {
+        description += ` (${components} component${components === 1 ? '' : 's'})`;
+      }
+      return { type: 'a2ui_surface', description, durationMs };
+    }
+
+    // Named so the gate is readable at a glance in the timeline; the full
+    // sentence is on the row's `reason`, in the output dialog.
+    const SKIP_LABEL: Record<string, string> = {
+      disabled: 'A2UI disabled for this workspace',
+      no_text: 'no answer text to render',
+      no_rich_intent: 'no rich surface implied',
+      composer_unavailable: 'composer LLM unavailable',
+      compose_failed: 'composer failed',
+      conversation_fallback: 'composer returned prose',
+      no_data_component: 'surface had no data component',
+    };
+    return {
+      type: 'a2ui_skipped',
+      description: `A2UI Skipped — ${SKIP_LABEL[outcome] || outcome}`,
+      durationMs,
+    };
+  },
+
   // Crew Execution (instrumentor root span) — skip, bridge handles crew_started/completed
   crew_execution: (): ProcessedEvent | null => {
     return null;
@@ -613,7 +677,17 @@ export function processTraceEvent(trace: Trace): ProcessedEvent | null {
   // is viewable, instead of falling to the generic non-clickable Title-Case row.
   if (trace.event_type.endsWith('_run')) {
     if (trace.event_type === 'response_run') {
-      return { type: 'llm_response', description: 'Final Response' };
+      // Dropped, not renamed. It is the agent-completion echo of the answer the
+      // llm_response row above already carries IN FULL — this copy is a 280-char
+      // preview (light_agent_service._on_agent_completed) — and it was labelled
+      // "Final Response" while A2UI composition still runs after it, so it was
+      // neither final nor the whole answer. The OTel bridge drops the crew
+      // path's equivalent (AgentExecutionCompletedEvent) for the same reason,
+      // which is why a crew trace ends at "LLM Response" and chat did not.
+      //
+      // The row stays in the DB: ChatMode's own step list renders `_run` rows
+      // live and on refresh, and that is where a one-line preview belongs.
+      return null;
     }
     const toolName = extractToolName(trace);
     return { type: 'tool_result', description: `${toolName} (output)` };
@@ -677,6 +751,10 @@ export const ICON_CONFIG: Record<string, IconConfig> = {
   // Compaction is LOSSY — warning-coloured on purpose. A run that
   // compacts repeatedly is losing tool results it may still need.
   context_compaction: { Component: CompressIcon, color: 'warning' },
+  // A composed surface is a deliverable; a skipped one is information, not a
+  // fault — muted rather than warning-coloured.
+  a2ui_surface: { Component: DashboardIcon, color: 'success' },
+  a2ui_skipped: { Component: DashboardIcon, color: 'action' },
 };
 
 /**
@@ -719,6 +797,8 @@ export const CLICKABLE_TYPES = new Set([
   'memory_context',
   'memory_backend_error',
   'context_compaction',
+  'a2ui_surface',
+  'a2ui_skipped',
 ]);
 
 /**

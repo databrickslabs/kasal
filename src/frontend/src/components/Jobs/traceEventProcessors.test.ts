@@ -289,16 +289,16 @@ describe('processTraceEvent', () => {
     expect(isEventClickable(result!.type, !!trace.output)).toBe(true);
   });
 
-  it('maps response_run to a clickable "Final Response" (llm_response)', () => {
+  it('drops response_run — the llm_response row already carries that answer', () => {
+    // It used to render as "Final Response": a 280-char preview of the answer
+    // the llm_response row holds in full, and not final at all (A2UI
+    // composition runs after it). See the light-agent answer row tests below.
     const trace = makeTrace({
       event_type: 'response_run',
       output: { tool_name: 'Response', content: 'the answer' },
     });
-    const result = processTraceEvent(trace);
-    expect(result).not.toBeNull();
-    expect(result!.type).toBe('llm_response');
-    expect(result!.description).toBe('Final Response');
-    expect(isEventClickable(result!.type, !!trace.output)).toBe(true);
+
+    expect(processTraceEvent(trace)).toBeNull();
   });
 });
 
@@ -444,5 +444,84 @@ describe('memory-labelling LLM rows', () => {
 
     expect(request?.description).toBe('LLM Request — some-model (2,549 chars)');
     expect(response?.description).toBe('LLM Response (1,398 chars)');
+  });
+});
+
+// ============================================================================
+// A2UI composition rows
+// ============================================================================
+
+describe('a2ui_surface rows', () => {
+  it('names the surface and carries its measured time', () => {
+    // The row is its own group in the timeline, so a duration derived from
+    // timestamps is always 0 ms — composition's real cost is on the row.
+    const result = EVENT_PROCESSORS.a2ui_surface(makeTrace({
+      event_type: 'a2ui_surface',
+      trace_metadata: {
+        outcome: 'composed',
+        surface_kind: 'presentation',
+        component_count: 48,
+        duration_ms: 50881.39,
+      },
+    }));
+
+    expect(result?.description).toBe('A2UI Surface — presentation (48 components)');
+    expect(result?.durationMs).toBe(50881.39);
+  });
+
+  it('says which gate declined, in words', () => {
+    const result = EVENT_PROCESSORS.a2ui_surface(makeTrace({
+      event_type: 'a2ui_surface',
+      trace_metadata: { outcome: 'no_data_component', surface_kind: 'dashboard' },
+    }));
+
+    expect(result?.type).toBe('a2ui_skipped');
+    expect(result?.description).toBe('A2UI Skipped — surface had no data component');
+  });
+
+  it("pairs each composer call as a request and a response", () => {
+    // One row per call could only report one length, so "A2UI Compose (2,474
+    // chars)" left the reader guessing whether that was sent or received — and
+    // with three calls in a row, which was which.
+    const request = EVENT_PROCESSORS.llm_call(makeTrace({
+      event_type: 'llm_call',
+      trace_metadata: {
+        llm_purpose: 'a2ui_compose',
+        attempt: 2,
+        model: 'some-model',
+        prompt: 'p'.repeat(10560),
+      },
+    }));
+    const response = EVENT_PROCESSORS.llm_response(makeTrace({
+      event_type: 'llm_response',
+      output: { content: 'x'.repeat(2474) },
+      trace_metadata: { llm_purpose: 'a2ui_compose', attempt: 2 },
+    }));
+
+    expect(request?.description).toBe('A2UI Compose Request #2 — some-model (10,560 chars)');
+    expect(response?.description).toBe('A2UI Compose Response #2 (2,474 chars)');
+  });
+});
+
+describe('the light-agent answer row', () => {
+  it('is not repeated as a truncated "Final Response"', () => {
+    // response_run is the agent-completion echo of the same answer: a 280-char
+    // preview of what llm_response already carries in full, labelled "Final"
+    // while A2UI composition still runs after it.
+    const result = processTraceEvent(makeTrace({
+      event_type: 'response_run',
+      output: { tool_name: 'Response', content: 'a 280-char preview…' },
+    }));
+
+    expect(result).toBeNull();
+  });
+
+  it('leaves the real answer row alone', () => {
+    const result = processTraceEvent(makeTrace({
+      event_type: 'llm_response',
+      output: { content: 'x'.repeat(4578) },
+    }));
+
+    expect(result?.description).toBe('LLM Response (4,578 chars)');
   });
 });
