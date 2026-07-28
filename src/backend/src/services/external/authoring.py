@@ -81,6 +81,8 @@ async def create_crew(
 
     crew_id = await _save_to_catalogue(
         name=name or _name_from_prompt(prompt),
+        agents=[a for a in agents if isinstance(a, dict)],
+        tasks=[x for x in tasks if isinstance(x, dict)],
         agent_ids=agent_ids,
         task_ids=task_ids,
         group_context=caller.group_context,
@@ -117,25 +119,100 @@ def _name_from_prompt(prompt: str) -> str:
     return (name[:1].upper() + name[1:]) if name else "Untitled crew"
 
 
+#: Canvas layout. Agents on the left, tasks to their right, one row each.
+_AGENT_X, _TASK_X, _ROW_Y, _ROW_STEP = 100.0, 520.0, 100.0, 200.0
+
+
+def _build_canvas(agents: List[dict], tasks: List[dict]) -> tuple:
+    """Nodes and edges for the generated agents and tasks.
+
+    NOT optional, which is what an earlier version of this got wrong. The canvas
+    renders from ``crew.nodes`` — the loader walks it looking for ``agentNode``
+    and ``taskNode`` — so a crew saved with an empty list appears in the
+    catalogue and then loads NOTHING when opened. "It still runs and publishes"
+    was no comfort: the crew could not be opened at all.
+
+    The layout is a plain grid. Positions belong to whoever rearranges them
+    later; a readable starting arrangement simply beats every node stacked at
+    the origin.
+    """
+    from src.schemas.crew import Edge, Node
+
+    nodes: List[Any] = []
+    agent_node_by_id: Dict[str, str] = {}
+
+    for index, agent in enumerate(agents):
+        agent_id = str(agent.get("id") or "")
+        node_id = f"agent-{agent_id}"
+        agent_node_by_id[agent_id] = node_id
+        nodes.append(
+            Node(
+                id=node_id,
+                type="agentNode",
+                position={"x": _AGENT_X, "y": _ROW_Y + index * _ROW_STEP},
+                data={
+                    "label": agent.get("name") or agent.get("role") or "Agent",
+                    "name": agent.get("name"),
+                    "role": agent.get("role"),
+                    "goal": agent.get("goal"),
+                    "backstory": agent.get("backstory"),
+                    "llm": agent.get("llm"),
+                    "tools": agent.get("tools") or [],
+                    "agentId": agent_id,
+                },
+            )
+        )
+
+    edges: List[Any] = []
+    for index, task in enumerate(tasks):
+        task_id = str(task.get("id") or "")
+        node_id = f"task-{task_id}"
+        nodes.append(
+            Node(
+                id=node_id,
+                type="taskNode",
+                position={"x": _TASK_X, "y": _ROW_Y + index * _ROW_STEP},
+                data={
+                    "label": task.get("name") or "Task",
+                    "name": task.get("name"),
+                    "description": task.get("description"),
+                    "expected_output": task.get("expected_output"),
+                    "tools": task.get("tools") or [],
+                    "taskId": task_id,
+                },
+            )
+        )
+
+        # Wire the task to the agent generation assigned it, so the loaded
+        # canvas shows the assignment rather than a set of orphaned nodes.
+        source = agent_node_by_id.get(str(task.get("agent_id") or ""))
+        if source:
+            edges.append(Edge(id=f"{source}-{node_id}", source=source, target=node_id))
+
+    return nodes, edges
+
+
 async def _save_to_catalogue(
     name: str,
+    agents: List[dict],
+    tasks: List[dict],
     agent_ids: List[str],
     task_ids: List[str],
     group_context: Any,
     session: Any,
 ) -> Optional[str]:
-    """Create the Crew row that makes the generated agents and tasks a CREW.
-
-    Best-effort about the canvas: nodes and edges are the UI's layout, and a
-    crew with none still opens, runs and publishes. Failing the whole call for
-    want of node positions would be the wrong trade.
-    """
+    """Create the Crew row that makes the generated agents and tasks a CREW."""
     from src.schemas.crew import CrewCreate
     from src.services.catalog.crews import CrewService
 
+    nodes, edges = _build_canvas(agents, tasks)
     crew = await CrewService(session).create_with_group(
         CrewCreate(
-            name=name, agent_ids=agent_ids, task_ids=task_ids, nodes=[], edges=[]
+            name=name,
+            agent_ids=agent_ids,
+            task_ids=task_ids,
+            nodes=nodes,
+            edges=edges,
         ),
         group_context,
     )
