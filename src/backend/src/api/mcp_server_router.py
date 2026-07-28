@@ -126,10 +126,9 @@ async def call_tool(request: ToolCallRequest, caller: CallerDep, session: Sessio
         # for other workspaces.
         raise NotFoundError(str(exc))
     except ExternalAuthError as exc:
-        # Raised mid-call by require_obo_token(): the caller is known, but this
-        # operation needs their Databricks token and they presented none. That
-        # is the auth_required state — reported before any run is created,
-        # rather than as a run that dies inside an agent.
+        # A genuine failure of the Databricks auth chain mid-call — not merely a
+        # missing header, which falls back like everywhere else in Kasal. This
+        # is the auth_required state.
         raise ExternalAuthRequired(exc.detail)
     except TypeError as exc:
         # Wrong/missing arguments for a known tool. A 422 rather than a 500:

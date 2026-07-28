@@ -124,16 +124,18 @@ class TestOnBehalfOf:
     ever could.
     """
 
-    def test_missing_token_is_refused_with_auth_required_semantics(self):
+    def test_a_missing_token_is_not_a_refusal(self):
+        """OBO is PREFERRED, not demanded. CLAUDE.md sets the hierarchy as
+        OBO -> OAuth -> PAT -> env and every other Kasal path follows it; an
+        external surface that refused where the rest of the app falls back
+        would be a second security model. It would also only ever bite in local
+        development, since Databricks Apps always forwards a token."""
         caller = ExternalCaller(
             group_context=_Ctx(["acme_corp"], token=None),
             protocol="mcp",
             identifier="alice@acme-corp.com",
         )
-        with pytest.raises(ExternalAuthError) as exc:
-            caller.require_obo_token()
-        assert exc.value.scheme == "oauth2"
-        assert "on-behalf-of" in str(exc.value).lower()
+        assert caller.obo_token() is None
 
     def test_the_callers_own_token_is_what_is_used(self):
         caller = ExternalCaller(
@@ -141,7 +143,7 @@ class TestOnBehalfOf:
             protocol="a2a",
             identifier="alice@acme-corp.com",
         )
-        assert caller.require_obo_token() == "tok-abc"
+        assert caller.obo_token() == "tok-abc"
         assert caller.access_token == "tok-abc"
 
     @pytest.mark.asyncio
@@ -160,4 +162,4 @@ class TestOnBehalfOf:
             caller = await resolve_caller(
                 protocol="mcp", email="alice@acme-corp.com", access_token="tok-xyz"
             )
-        assert caller.require_obo_token() == "tok-xyz"
+        assert caller.obo_token() == "tok-xyz"

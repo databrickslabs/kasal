@@ -25,12 +25,18 @@ principal. Two reasons, in order:
    read more than that agent ever could. The blast radius of a prompt-injected
    external call would be the SPN's access, not the caller's.
 
-The consequence is that a token is not optional for anything touching
-Databricks, and its absence is an ``auth_required`` answer rather than a run
-that fails halfway with a permissions error. That is what finally gives
-``auth_required`` a producer: it was the one canonical external state with no
-``ExecutionStatus`` behind it, because it describes an invocation that never
-became a run.
+So the caller's token is PREFERRED and is what a run uses when it is present.
+
+It is not, however, demanded. ``src/backend/CLAUDE.md`` sets the hierarchy as
+OBO -> OAuth client credentials -> PAT -> environment, and every other Kasal
+path follows it; an external surface that refused where the rest of the app
+falls back would be a second security model to reason about — the exact thing
+this module's header chain exists to avoid. Concretely it would only ever bite
+in local development, since Databricks Apps always forwards a token in
+production, so the refusal bought nothing and broke `./run.sh`.
+
+``auth_required`` therefore describes a genuine failure of that chain, not the
+absence of one header.
 """
 
 import logging
@@ -86,27 +92,21 @@ class ExternalCaller:
         """The caller's own token. Everything runs on this, per the OBO decision."""
         return getattr(self.group_context, "access_token", None)
 
-    def require_obo_token(self) -> str:
-        """The caller's token, or refuse with ``auth_required``.
+    def obo_token(self) -> Optional[str]:
+        """The caller's token, when they presented one.
 
-        Called before starting work that will reach Databricks. Refusing HERE,
-        rather than letting the run start and fail somewhere inside an agent
-        with a permissions error, is the difference between a caller that knows
-        to present a token and one that sees an inexplicable mid-run failure.
+        Returned rather than demanded. Databricks Apps forwards a token on every
+        request, so in production this is always populated and the run genuinely
+        executes as the caller. Where it is absent — local development, or a
+        deployment fronted differently — the Databricks auth chain takes over
+        exactly as it does for a UI-initiated run (OBO -> OAuth -> PAT -> env).
 
-        ``ask_kasal`` does not call this: a question answered from the model
-        alone needs no workspace access, and demanding a token for it would make
-        the cheapest tool the hardest to call.
+        An earlier version raised here instead. That made the external surface
+        the only part of Kasal that refused where the rest of the app falls
+        back, which is a second security model, and since production always has
+        a token it only ever broke local development.
         """
-        token = self.access_token
-        if not token:
-            raise ExternalAuthError(
-                "This workspace runs external invocations on the caller's own "
-                "Databricks token (on-behalf-of). Present one via "
-                "X-Forwarded-Access-Token or X-Auth-Request-Access-Token.",
-                scheme="oauth2",
-            )
-        return token
+        return self.access_token
 
 
 async def resolve_caller(

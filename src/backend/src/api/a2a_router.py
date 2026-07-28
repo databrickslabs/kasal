@@ -27,7 +27,11 @@ from src.services.external.identity import (
     resolve_caller,
 )
 
+#: Task operations. Mounted under the API prefix like every other router.
 router = APIRouter(tags=["a2a"], responses={404: {"description": "Not found"}})
+
+#: The Agent Card, mounted at the application ROOT — see well_known_router below.
+well_known_router = APIRouter(tags=["a2a"])
 
 logger = logging.getLogger(__name__)
 
@@ -75,9 +79,16 @@ async def get_a2a_caller(
 CallerDep = Annotated[ExternalCaller, Depends(get_a2a_caller)]
 
 
-@router.get("/.well-known/agent.json", response_model=AgentCard)
+@well_known_router.get("/.well-known/agent.json", response_model=AgentCard)
 async def agent_card(request: Request, caller: CallerDep, session: SessionDep):
     """The Agent Card.
+
+    Served at the DOMAIN ROOT, not under the API prefix. A well-known URI is
+    discovery by convention: an A2A client fetches
+    https://host/.well-known/agent.json without being told where to look, so a
+    card at /api/v1/.well-known/agent.json is a card nothing will ever find.
+    This router is therefore included on the app directly rather than with the
+    API prefix.
 
     Requires identity, which is a deliberate deviation from reading the card as
     a fully public document: ``skills[]`` is group-scoped, so an anonymous card
@@ -85,7 +96,13 @@ async def agent_card(request: Request, caller: CallerDep, session: SessionDep):
     For a multi-tenant host, identity-scoped discovery is the only correct
     reading.
     """
-    base_url = str(request.base_url).rstrip("/")
+    # The CARD lives at the domain root, but the task operations it points to
+    # are on the prefixed api_router. The interface URL must therefore carry the
+    # API prefix — a card advertising /a2a/v1 while the endpoints are at
+    # /api/v1/a2a/v1 sends every client straight into a 404.
+    from src.config.settings import settings
+
+    base_url = str(request.base_url).rstrip("/") + settings.API_V1_STR
     return await a2a_card.build_card(caller, base_url=base_url, session=session)
 
 

@@ -747,6 +747,14 @@ async def generic_error_handler(request: Request, exc: Exception) -> JSONRespons
 # Include the main API router
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
+# The A2A Agent Card is a WELL-KNOWN URI: discovery by convention at the domain
+# root. Mounted without the API prefix for that reason — under /api/v1 no A2A
+# client would ever look for it. The task operations themselves stay on the
+# prefixed api_router.
+from src.api.a2a_router import well_known_router as _a2a_well_known_router
+
+app.include_router(_a2a_well_known_router)
+
 
 @app.get("/health")
 async def health():

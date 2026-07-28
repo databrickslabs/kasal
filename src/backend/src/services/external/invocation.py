@@ -31,6 +31,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, Optional
+from uuid import UUID
 
 from src.models.execution_status import ExecutionStatus
 from src.schemas.execution import CrewConfig
@@ -213,21 +214,35 @@ async def start_run(
     re-resolve it, so there is exactly one place that decides whether a caller
     may reach a given crew.
     """
-    # OBO: refuse before creating anything. A run that starts without a token
-    # and dies inside an agent costs the caller a run id and tells them nothing.
-    caller.require_obo_token()
+    # OBO: the run executes as the caller when they presented a token, which
+    # in production they always have. Without one the Databricks auth chain
+    # applies, exactly as for a UI-initiated run.
+    caller.obo_token()
 
     from src.services.catalog.crews import CrewService
     from src.services.execution.service import ExecutionService
 
     crew_service = CrewService(session)
-    crew = await crew_service.get(publication.crew_id)
+    # crew_id is persisted as a string on the publication (it is an external
+    # identifier there), but Crew.id is a UUID column — asyncpg rejects a str
+    # with "'str' object has no attribute 'hex'".
+    try:
+        crew_key = UUID(str(publication.crew_id))
+    except (ValueError, AttributeError, TypeError):
+        crew_key = publication.crew_id
+    crew = await crew_service.get(crew_key)
     if crew is None:
         raise ValueError(f"Published crew {publication.crew_id} no longer exists")
 
+    agents_yaml, tasks_yaml = await _crew_to_yaml(crew, session)
+    if not agents_yaml or not tasks_yaml:
+        raise ValueError(
+            f"Published crew {publication.external_name!r} has no agents or tasks"
+        )
+
     config = CrewConfig(
-        agents_yaml=_nodes_to_yaml(crew, "agent"),
-        tasks_yaml=_nodes_to_yaml(crew, "task"),
+        agents_yaml=agents_yaml,
+        tasks_yaml=tasks_yaml,
         inputs={**(inputs or {}), "external_origin": caller.origin},
         execution_type="crew",
     )
@@ -304,22 +319,55 @@ async def cancel_run(
     return InvocationResult(run_id=run_id, state=ExternalTaskState.CANCELED)
 
 
-def _nodes_to_yaml(crew: Any, node_type: str) -> Dict[str, Any]:
-    """Project a saved crew's nodes into the agents_yaml/tasks_yaml the engine
-    takes.
+async def _crew_to_yaml(crew: Any, session: Any) -> tuple:
+    """A saved crew -> the agents_yaml/tasks_yaml the engine takes.
 
-    Kept here rather than in the adapters because both protocols start crews the
-    same way, and a second copy of this projection is a second way for an
-    external run to differ from a UI-initiated one.
+    Resolved from ``agent_ids``/``task_ids`` rather than from the canvas
+    ``nodes``: nodes are presentation data (positions, edges, UI state) and a
+    crew can be perfectly valid with none, while the id lists are what the crew
+    actually IS.
+
+    The browser builds this same projection client-side before calling
+    /executions. Doing it here rather than in the adapters means an
+    externally-started run is assembled the same way whichever protocol asked —
+    a second copy is a second way for an external run to differ from a UI one.
     """
-    nodes = getattr(crew, "nodes", None) or []
-    out: Dict[str, Any] = {}
-    for node in nodes:
-        data = node.get("data") if isinstance(node, dict) else None
-        if not isinstance(data, dict):
+    from src.services.catalog.agents import AgentService
+    from src.services.catalog.tasks import TaskService
+
+    agent_service = AgentService(session)
+    task_service = TaskService(session)
+
+    agents_yaml: Dict[str, Any] = {}
+    agent_key_by_id: Dict[str, str] = {}
+    for agent_id in getattr(crew, "agent_ids", None) or []:
+        agent = await agent_service.get(str(agent_id))
+        if agent is None:
             continue
-        if (node.get("type") or "").lower() not in (node_type, f"{node_type}node"):
+        key = agent.name or agent.role or str(agent_id)
+        agent_key_by_id[str(agent_id)] = key
+        agents_yaml[key] = {
+            "role": agent.role,
+            "goal": agent.goal,
+            "backstory": agent.backstory,
+            "llm": agent.llm,
+            "tools": getattr(agent, "tools", None) or [],
+        }
+
+    tasks_yaml: Dict[str, Any] = {}
+    for task_id in getattr(crew, "task_ids", None) or []:
+        task = await task_service.get(str(task_id))
+        if task is None:
             continue
-        key = str(data.get("name") or data.get("role") or node.get("id"))
-        out[key] = data
-    return out
+        key = task.name or str(task_id)
+        entry: Dict[str, Any] = {
+            "description": task.description,
+            "expected_output": task.expected_output,
+            "tools": getattr(task, "tools", None) or [],
+        }
+        assigned = agent_key_by_id.get(str(getattr(task, "agent_id", "") or ""))
+        if assigned:
+            entry["agent"] = assigned
+        tasks_yaml[key] = entry
+
+    return agents_yaml, tasks_yaml

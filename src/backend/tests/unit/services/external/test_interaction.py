@@ -133,12 +133,15 @@ class TestRespond:
         assert service.approve.await_args.kwargs["user_token"] == "tok-abc"
 
     @pytest.mark.asyncio
-    async def test_no_token_is_refused_before_anything_is_actioned(self):
+    async def test_without_a_token_the_auth_chain_takes_over(self):
+        """Not a refusal. The approval still lands; the Databricks auth chain
+        resolves credentials exactly as it does for an approval given in the
+        UI. Refusing here would make the external surface the only part of
+        Kasal that demands OBO."""
         service = _hitl_with([_approval()])
         with patch("src.services.hitl.service.HITLService", return_value=service):
-            with pytest.raises(ExternalAuthError):
-                await respond(_caller(token=None), "run-1", "yes")
-        service.approve.assert_not_awaited()
+            assert await respond(_caller(token=None), "run-1", "yes") is True
+        assert service.approve.await_args.kwargs["user_token"] is None
 
     @pytest.mark.asyncio
     async def test_single_pending_gate_needs_no_approval_id(self):

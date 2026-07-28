@@ -812,6 +812,29 @@ async def _ensure_workflow_recipe_trials_table(conn) -> None:
         logger.warning(f"Could not ensure workflow_recipe_trials table: {e}")
 
 
+async def _ensure_crew_publications_table(conn) -> None:
+    """Idempotently create crew_publications (the external-publication registry).
+
+    A brand-new table, so a checkfirst-create reaches already-deployed installs
+    identically on SQLite, PostgreSQL and Lakebase — same reasoning as the
+    tables above, and the Alembic migration carries the same guard.
+
+    Without it the MCP tool list and the A2A Agent Card both fail: they read
+    this table to answer "what has this workspace published", and an unhandled
+    UndefinedTable turns a discovery request into a 500.
+    """
+    try:
+        from src.models.crew_publication import CrewPublication
+
+        def _create_crew_publications_table(sync_conn):
+            CrewPublication.__table__.create(sync_conn, checkfirst=True)
+
+        await conn.run_sync(_create_crew_publications_table)
+        logger.info("Ensured crew_publications table exists")
+    except Exception as e:
+        logger.warning(f"Could not ensure crew_publications table: {e}")
+
+
 async def _ensure_chat_sessions_columns(conn) -> None:
     """Idempotently add the running_job_id + preview_* columns to chat_sessions.
 
@@ -1123,6 +1146,7 @@ async def run_schema_self_heal(conn) -> None:
     await _ensure_chat_sessions_columns(conn)
     await _ensure_workflow_recipes_table(conn)
     await _ensure_workflow_recipe_trials_table(conn)
+    await _ensure_crew_publications_table(conn)
     await _ensure_crew_feedback_table(conn)
     await _ensure_powerbi_extraction_table(conn)
     await _ensure_prompt_optimization_runs_table(conn)

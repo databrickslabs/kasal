@@ -10,7 +10,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from src.api.a2a_router import router
+from src.api.a2a_router import router, well_known_router
 from src.core.exceptions import KasalError
 from src.services.external.identity import ExternalAuthError, ExternalCaller
 
@@ -19,6 +19,10 @@ from src.services.external.identity import ExternalAuthError, ExternalCaller
 def client():
     app = FastAPI()
     app.include_router(router)
+    # The card is on its own router because it is mounted at the DOMAIN ROOT in
+    # main.py, not under the API prefix — a well-known URI is discovery by
+    # convention, and a card under /api/v1 is a card nothing will ever find.
+    app.include_router(well_known_router)
 
     @app.exception_handler(KasalError)
     async def _handle(_request, exc):
@@ -126,8 +130,12 @@ class TestCard:
 
     def test_the_card_is_served_at_the_well_known_path(self):
         """Callers discover an A2A agent by convention, not configuration."""
-        paths = {r.path for r in router.routes}
-        assert "/.well-known/agent.json" in paths
+        assert "/.well-known/agent.json" in {r.path for r in well_known_router.routes}
+
+    def test_the_card_is_not_under_the_api_prefix(self):
+        """It is mounted on the app directly. Under /api/v1 the well-known path
+        is meaningless — no A2A client would look there."""
+        assert "/.well-known/agent.json" not in {r.path for r in router.routes}
 
 
 class TestTaskOperations:

@@ -118,15 +118,15 @@ async def respond(
 ) -> bool:
     """Answer a paused run. True if an approval was actioned.
 
-    Runs on the caller's own token (OBO), because resuming the run continues
-    work under that identity — resuming as anyone else would let an external
-    caller's approval execute with different access than the caller has.
+    Resumes on the caller's own token when they presented one (OBO), because
+    the resumed work continues under that identity. Without one the Databricks
+    auth chain applies, as it does for an approval given through the UI.
 
     ``approval_id`` is optional: with one gate pending, which one is meant is
     unambiguous, and forcing the caller to fetch an id first turns a one-call
     answer into three.
     """
-    token = caller.require_obo_token()
+    token = caller.obo_token()
     group_id = caller.group_context.primary_group_id
     if not group_id:
         return False
