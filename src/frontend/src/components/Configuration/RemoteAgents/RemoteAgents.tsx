@@ -128,10 +128,12 @@ const RemoteAgents: React.FC<Props> = ({ mode = 'workspace' }) => {
       <Stack
         direction="row"
         justifyContent="space-between"
-        alignItems="center"
+        alignItems="flex-start"
+        spacing={2}
         sx={{ mb: 2 }}
       >
-        <Box>
+        {/* The text yields, the actions do not — see SkillsConfiguration. */}
+        <Box sx={{ minWidth: 0 }}>
           <Typography variant="h6">
             {isSystem ? 'Remote Agents (Global)' : 'Remote Agents'}
           </Typography>
@@ -144,12 +146,14 @@ const RemoteAgents: React.FC<Props> = ({ mode = 'workspace' }) => {
         {/* Only the global view registers agents; the workspace view opts in. */}
         {isSystem && (
           <Button
+            size="small"
             startIcon={<AddIcon />}
             variant="contained"
             onClick={() => {
               setEditing(null);
               setDialogOpen(true);
             }}
+            sx={{ flexShrink: 0, whiteSpace: 'nowrap' }}
           >
             Add agent
           </Button>

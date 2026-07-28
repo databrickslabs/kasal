@@ -110,10 +110,13 @@ const SkillsConfiguration: React.FC = () => {
       <Stack
         direction="row"
         justifyContent="space-between"
-        alignItems="center"
+        alignItems="flex-start"
+        spacing={2}
         sx={{ mb: 2 }}
       >
-        <Box>
+        {/* The text yields, the actions do not: letting a two-line description
+            compete for width is what wraps a button label onto two lines. */}
+        <Box sx={{ minWidth: 0 }}>
           <Typography variant="h6">Skills</Typography>
           <Typography variant="body2" color="text.secondary">
             Procedures your agents can follow — &quot;how we run a QBR&quot;, &quot;how we
@@ -121,20 +124,24 @@ const SkillsConfiguration: React.FC = () => {
             works. Attach them to an agent in its Skills section.
           </Typography>
         </Box>
-        <Stack direction="row" spacing={1}>
+        <Stack direction="row" spacing={1} sx={{ flexShrink: 0 }}>
           <Button
+            size="small"
             startIcon={<UploadFileIcon />}
             onClick={() => fileInput.current?.click()}
+            sx={{ whiteSpace: 'nowrap' }}
           >
             Import
           </Button>
           <Button
+            size="small"
             startIcon={<AddIcon />}
             variant="contained"
             onClick={() => {
               setEditing(null);
               setEditorOpen(true);
             }}
+            sx={{ whiteSpace: 'nowrap' }}
           >
             New skill
           </Button>
