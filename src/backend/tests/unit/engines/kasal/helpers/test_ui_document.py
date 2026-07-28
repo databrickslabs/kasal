@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from src.engines.kasal.exporters.ui_document import (
+from src.services.export.ui_document import (
     _balanced_block,
     _coerce_json,
     _find_ui_document,

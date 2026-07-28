@@ -667,10 +667,10 @@ print("MLflow autologging enabled - all executions will be tracked")'''
 
         # Read the actual tool implementations
         tools_code = []
-        # This file is in: engines/kasal/exporters/databricks_notebook_exporter.py
-        # We need to go up to: services/tools/
-        backend_path = Path(__file__).parent.parent  # Go up to crewai directory
-        tools_dir = backend_path / "tools" / "custom"
+        # This file is in: services/export/databricks_notebook_exporter.py
+        # The tool implementations are in: services/tools/ (flat — the custom/
+        # subdirectory went away when tools moved out of the engine).
+        tools_dir = Path(__file__).parent.parent / "tools"
 
         logger.info(f"[Tool Export] Looking for tool files in: {tools_dir}")
         logger.info(f"[Tool Export] Tools directory exists: {tools_dir.exists()}")

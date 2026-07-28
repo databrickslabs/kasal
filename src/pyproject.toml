@@ -106,7 +106,7 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
 
-# NOTE: src/engines/kasal/exporters/templates/ holds a bundled Databricks
+# NOTE: src/services/export/templates/ holds a bundled Databricks
 # agent-app TEMPLATE shipped verbatim to exported projects. Its *.py files
 # contain {{TOKEN}} placeholders (invalid Python until rendered) and import
 # packages (crewai, mlflow.genai) not in this backend's env, so every linter
@@ -115,7 +115,7 @@ packages = ["src"]
 [tool.black]
 line-length = 88
 target-version = ["py311"]
-extend-exclude = "src/engines/kasal/exporters/templates/"
+extend-exclude = "src/services/export/templates/"
 
 [tool.isort]
 profile = "black"
@@ -128,7 +128,7 @@ warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
-exclude = ["src/engines/kasal/exporters/templates/"]
+exclude = ["src/services/export/templates/"]
 
 [tool.ruff]
 line-length = 88
@@ -140,7 +140,7 @@ exclude = [
     ".venv",
     "__pycache__",
     "alembic",
-    "src/engines/kasal/exporters/templates",
+    "src/services/export/templates",
 ]
 
 [tool.pytest.ini_options]

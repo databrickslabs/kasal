@@ -6,7 +6,7 @@ import pytest
 from datetime import datetime, timezone
 from unittest.mock import patch
 
-from src.engines.kasal.exporters.base_exporter import BaseExporter
+from src.services.export.base_exporter import BaseExporter
 
 
 class ConcreteExporter(BaseExporter):

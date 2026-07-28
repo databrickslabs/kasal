@@ -15,7 +15,9 @@ you are editing wins on specifics:
   - `src/backend/src/repositories/CLAUDE.md` — data access
   - `src/backend/src/models/CLAUDE.md` — SQLAlchemy models + migrations
   - `src/backend/src/engines/kasal/CLAUDE.md` — the Kasal native engine (post-refactor)
-  - `src/backend/src/engines/kasal/tools/CLAUDE.md` — custom tools
+  - `src/backend/src/services/` — capabilities usable without a crew run:
+    `tools/`, `memory/`, `guardrails/`, `security/`, `knowledge/`, `export/`,
+    `trace/`
   - `src/frontend/src/api/CLAUDE.md` — frontend service layer
   - `src/frontend/src/components/CLAUDE.md` — React components
   - `src/frontend/src/shared/a2ui/CLAUDE.md` — the A2UI generative-UI system

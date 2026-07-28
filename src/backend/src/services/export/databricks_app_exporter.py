@@ -26,8 +26,8 @@ from .yaml_generator import YAMLGenerator
 TEMPLATE_DIR = Path(__file__).parent / "templates" / "databricks_app"
 # The ONE portable A2UI composer (stdlib-only), shared with the live app and
 # vendored verbatim into every export so generative UI never forks into a second
-# implementation. ``parents[3]`` is ``src/backend/src``.
-SHARED_A2UI_DIR = Path(__file__).parents[3] / "shared" / "a2ui"
+# implementation. ``parents[2]`` is ``src/backend/src``.
+SHARED_A2UI_DIR = Path(__file__).parents[2] / "shared" / "a2ui"
 # The shared frontend A2UI renderer (self-contained React+TS module), vendored
 # verbatim into the export so the deployed UI draws surfaces with the SAME renderer
 # as Kasal chat. It lives IN the template tree (not the frontend source) so it
@@ -38,8 +38,9 @@ SHARED_A2UI_DIR = Path(__file__).parents[3] / "shared" / "a2ui"
 SHARED_A2UI_FRONTEND_DIR = TEMPLATE_DIR / "frontend" / "src" / "a2ui"
 # Standalone tool implementations bundled into the app (no Kasal `src.*` deps).
 BUNDLED_TOOLS_DIR = Path(__file__).parent / "templates" / "_app_bundled_tools"
-# Kasal's runtime custom-tool implementations (some are self-contained).
-CUSTOM_TOOLS_DIR = Path(__file__).parent.parent / "tools" / "custom"
+# Kasal's runtime tool implementations (some are self-contained). Flat since
+# tools moved to services — there is no custom/ subdirectory any more.
+CUSTOM_TOOLS_DIR = Path(__file__).parent.parent / "tools"
 
 # Tools we can faithfully reproduce inside a standalone Databricks App, keyed by
 # the tool's Kasal title (what `config/agents.yaml` carries). Each spec declares:

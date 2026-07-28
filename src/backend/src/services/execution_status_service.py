@@ -113,7 +113,7 @@ class ExecutionStatusService:
                         # Content-gated: a non-A2UI result returns None and is stored
                         # verbatim, and any error leaves the result untouched.
                         try:
-                            from src.engines.kasal.exporters.ui_document import (
+                            from src.services.export.ui_document import (
                                 normalize_ui_document,
                             )
 

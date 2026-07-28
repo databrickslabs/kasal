@@ -4,7 +4,7 @@ Unit tests for code generator.
 
 import pytest
 
-from src.engines.kasal.exporters.code_generator import CodeGenerator
+from src.services.export.code_generator import CodeGenerator
 
 
 class TestCodeGenerator:

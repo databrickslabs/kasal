@@ -17,7 +17,7 @@ import time
 
 import pytest
 
-from src.engines.kasal.exporters.databricks_app_exporter import TEMPLATE_DIR
+from src.services.export.databricks_app_exporter import TEMPLATE_DIR
 
 
 def _purge_agent_server_modules():

@@ -5,7 +5,7 @@ Unit tests for Python project exporter.
 import pytest
 from unittest.mock import AsyncMock, patch
 
-from src.engines.kasal.exporters.python_project_exporter import PythonProjectExporter
+from src.services.export.python_project_exporter import PythonProjectExporter
 
 
 class TestPythonProjectExporter:

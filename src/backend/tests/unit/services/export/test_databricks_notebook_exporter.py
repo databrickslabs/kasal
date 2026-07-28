@@ -6,7 +6,7 @@ import pytest
 import json
 from unittest.mock import AsyncMock, patch, MagicMock
 
-from src.engines.kasal.exporters.databricks_notebook_exporter import DatabricksNotebookExporter
+from src.services.export.databricks_notebook_exporter import DatabricksNotebookExporter
 
 
 class TestDatabricksNotebookExporter:
@@ -675,14 +675,14 @@ class TestExportProducesNonBrokenNotebook:
     def test_validate_code_cells_logs_on_broken_cell(self, exporter):
         """The validation safety net logs an error for a syntactically broken cell."""
         broken = [exporter._create_code_cell("def oops(:\n    pass")]
-        with patch('src.engines.kasal.exporters.databricks_notebook_exporter.logger') as mock_logger:
+        with patch('src.services.export.databricks_notebook_exporter.logger') as mock_logger:
             exporter._validate_code_cells(broken, 'test_crew')
             assert mock_logger.error.called
 
     def test_validate_code_cells_ignores_magics(self, exporter):
         """Notebook magics (%pip) and shell escapes (!) must not trip validation."""
         cell = exporter._create_code_cell("%pip install crewai\n!ls -la\nimport os\nprint(os.getcwd())")
-        with patch('src.engines.kasal.exporters.databricks_notebook_exporter.logger') as mock_logger:
+        with patch('src.services.export.databricks_notebook_exporter.logger') as mock_logger:
             exporter._validate_code_cells([cell], 'test_crew')
             assert not mock_logger.error.called
 

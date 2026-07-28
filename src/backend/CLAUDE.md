@@ -233,7 +233,9 @@ Two rules, both learned the hard way:
 - **Three execution paths** (`engines/kasal/paths/`): `light_agent` (chat, in-process), `crew` (subprocess), `flow` (subprocess).
 - **Kernel** (`engines/kasal/kernel/`): path-agnostic single-source agent/task build logic shared by crew + flow.
 - **Configuration Adapter** (`config_adapter.py`): normalizes frontend configs to engine shape.
-- **Tool Factory** (`engines/kasal/tools/`): extensible tool system (see tools/CLAUDE.md).
+- **Tool Factory** (`services/tools/`): extensible tool system. Tools live in
+  services, not the engine — an agent calls them, but nothing about a tool
+  requires a crew to be running.
 
 See `engines/kasal/CLAUDE.md` for the full path model and the subprocess-boundary rules.
 

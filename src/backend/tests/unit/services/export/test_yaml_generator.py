@@ -5,7 +5,7 @@ Unit tests for YAML generator.
 import pytest
 import yaml
 
-from src.engines.kasal.exporters.yaml_generator import YAMLGenerator
+from src.services.export.yaml_generator import YAMLGenerator
 
 
 class TestYAMLGenerator:

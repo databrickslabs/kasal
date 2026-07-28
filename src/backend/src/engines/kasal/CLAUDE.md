@@ -47,14 +47,11 @@ engines/kasal/
 ├── kernel/                    # path-AGNOSTIC single-source build logic (was common/)
 │                              #   agent_builder, agent_tools, task_builder,
 │                              #   agent_security, model_conversion_handler, a2ui_runner...
-├── memory/                    # unified memory backends + crew_memory_service
+├── memory/                    # memory_hooks ONLY — recall before a task, persist after
 ├── infra/                     # logging_config, trace_management, mlflow_integration, crew_logger
-├── guardrails/                # root=framework; core/=reusable; demo/=data_processing family
+├── guardrails/                # GuardrailWrapper ONLY — the engine's guardrail label
 ├── config/                    # crew/embedder/manager config builders
-├── callbacks/                 # live callbacks only (streaming, execution, volume)
-├── security/                  # scanner pipeline, injection/secret detectors, capability manifest
-├── tools/                     # tool_factory + custom/ (see tools/CLAUDE.md)
-└── exporters/                 # Databricks App / notebook / python-project export + templates
+└── callbacks/                 # live callbacks only (streaming, execution, volume)
 ```
 
 ## Rules
@@ -75,10 +72,11 @@ engines/kasal/
 - **Lakebase in subprocesses**: the spawned interpreter must re-activate Lakebase
   itself (`db.database_router.activate_lakebase_in_subprocess`); it is not
   inherited from the parent's hot-swap.
-- **Guardrails**: build via `GuardrailFactory.create_guardrail`. Add reusable ones
-  under `guardrails/core/`, demo/one-off ones under `guardrails/demo/`. Keep the
-  `guardrails/__init__.py` barrel and `guardrail_factory` type registry in sync.
-- **Memory**: use the unified `memory_backend_factory` + `CrewMemoryService`. See
+- **Guardrails**: build via `GuardrailFactory.create_guardrail` from
+  `src.services.guardrails`. Add reusable ones under `services/guardrails/core/`,
+  demo/one-off ones under `services/guardrails/demo/`. Only `GuardrailWrapper`
+  (the engine's label for a built guardrail) lives here.
+- **Memory**: use `src.services.memory` — `MemoryBackendFactory` + `CrewMemoryService`. See
   `src/backend/CLAUDE.md` for the crew-ID determinism and Vector Search schema
   rules (do not hardcode index columns; never call `.value` on enum-valued
   Pydantic fields).
@@ -89,6 +87,24 @@ engines/kasal/
 - All engine work is async; Databricks calls need User-Agent telemetry
   (`src/backend/CLAUDE.md`).
 
+## What is NOT here any more
+
+Capabilities moved to `src/services/` so they can be used without a crew run —
+by crew generation, a chat turn, or an exported app. The engine keeps
+orchestration: what runs, in what order, wired to what.
+
+| moved to | what |
+|---|---|
+| `services/tools/` | every tool + the tool factory (flat — no `custom/`) |
+| `services/memory/` | backends, vector store, factory, maintenance, crew_memory |
+| `services/guardrails/` | the contract, the registry, and every policy |
+| `services/security/` | injection scanning, secret redaction, capability manifest |
+| `services/knowledge/` | uploads, embedding, and `KnowledgeSearch` |
+| `services/export/` | Databricks App / notebook / python-project export + templates |
+
+The test for which side something belongs on: does it import `kasal_engine`
+(a vendored LIBRARY — that is fine in services, like `BaseTool`), or
+`src.engines.kasal.*` (this orchestration layer — that is not)?
+
 ## Related
-- `tools/CLAUDE.md` — custom tools and the tool factory
 - `src/docs/crewai-engine-refactor-proposal.md` — the full refactor record (§7 = final state)

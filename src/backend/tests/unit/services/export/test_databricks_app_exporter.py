@@ -13,7 +13,7 @@ import re
 import pytest
 import yaml
 
-from src.engines.kasal.exporters.databricks_app_exporter import (
+from src.services.export.databricks_app_exporter import (
     SHARED_A2UI_FRONTEND_DIR,
     TEMPLATE_DIR,
     DatabricksAppExporter,
@@ -1161,7 +1161,7 @@ class TestDatabricksAppA2UI:
     async def test_frontend_renderer_vendored_from_shared(self, exporter, crew_data):
         """The export ships the ONE shared frontend renderer (self-contained, with
         its own lib/ + ui/), byte-identical to live Kasal — not a drifted copy."""
-        from src.engines.kasal.exporters.databricks_app_exporter import (
+        from src.services.export.databricks_app_exporter import (
             SHARED_A2UI_FRONTEND_DIR,
         )
 
