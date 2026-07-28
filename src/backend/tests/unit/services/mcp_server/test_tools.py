@@ -5,7 +5,7 @@ dispatch table cannot drift apart, every tool takes a resolved caller, and
 capability listing goes through the SAME shared call the A2A card will use.
 """
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -64,8 +64,50 @@ class TestAdvertisedSurface:
 class TestDispatch:
     @pytest.mark.asyncio
     async def test_unknown_tool_is_refused(self):
-        with pytest.raises(mcp_server.UnknownToolError):
-            await mcp_server.call_tool(_caller(), "not_a_tool", {})
+        """Unknown means: not a fixed tool AND not a crew published to this
+        caller. Layer-2 tool names ARE publication names, so the publication
+        lookup has to miss too before a name is genuinely unknown."""
+        with patch("src.services.mcp_server.tools.PublicationService") as publications:
+            publications.return_value.resolve_capability = AsyncMock(return_value=None)
+            with pytest.raises(mcp_server.UnknownToolError):
+                await mcp_server.call_tool(_caller(), "not_a_tool", {})
+
+    @pytest.mark.asyncio
+    async def test_a_published_crew_name_is_callable_as_a_tool(self):
+        """Layer-2 dispatch: calling the tool starts the crew behind it."""
+        from src.services.external.invocation import InvocationResult
+        from src.services.external.state import ExternalTaskState
+
+        publication = MagicMock(external_name="acme_report", crew_id="c1")
+        with (
+            patch("src.services.mcp_server.tools.PublicationService") as publications,
+            patch(
+                "src.services.mcp_server.tools.start_run",
+                new=AsyncMock(
+                    return_value=InvocationResult(
+                        run_id="run-9", state=ExternalTaskState.SUBMITTED
+                    )
+                ),
+            ) as start,
+        ):
+            publications.return_value.resolve_capability = AsyncMock(
+                return_value=publication
+            )
+            result = await mcp_server.call_tool(
+                _caller(), "acme_report", {"request": "do it"}
+            )
+
+        assert result == {"run_id": "run-9", "state": "submitted"}
+        assert start.await_args.kwargs["publication"] is publication
+
+    @pytest.mark.asyncio
+    async def test_a_crew_published_to_another_tenant_is_simply_unknown(self):
+        """resolve_capability is group-scoped, so a name from another workspace
+        misses and becomes the same UnknownToolError as a typo."""
+        with patch("src.services.mcp_server.tools.PublicationService") as publications:
+            publications.return_value.resolve_capability = AsyncMock(return_value=None)
+            with pytest.raises(mcp_server.UnknownToolError):
+                await mcp_server.call_tool(_caller(), "someone_elses_crew", {})
 
     @pytest.mark.asyncio
     async def test_dispatch_passes_the_resolved_caller_through(self):

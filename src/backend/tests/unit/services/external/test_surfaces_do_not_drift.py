@@ -120,6 +120,53 @@ class TestOneCapabilityList:
             assert a2a_svc.return_value.list_capabilities.await_count == 1
 
 
+class TestLayerTwoMatchesSkills:
+    """The strongest form of the invariant, now that both surfaces expose one
+    entry PER CREW: the MCP tool list and the A2A card should name the same
+    capabilities, not merely describe them consistently."""
+
+    @pytest.mark.asyncio
+    async def test_per_crew_tools_and_skills_name_the_same_capabilities(self):
+        from src.services.a2a.card import build_card
+        from src.services.mcp_server.server import list_tools
+        from src.services.mcp_server.tools import TOOL_DEFINITIONS
+
+        fixed = {t["name"] for t in TOOL_DEFINITIONS}
+
+        with patch("src.services.mcp_server.tools.PublicationService") as mcp_svc:
+            mcp_svc.return_value.list_capabilities = AsyncMock(
+                return_value=_CAPABILITIES
+            )
+            tools = await list_tools(_caller("mcp"))
+
+        with patch("src.services.a2a.card.PublicationService") as a2a_svc:
+            a2a_svc.return_value.list_capabilities = AsyncMock(
+                return_value=_CAPABILITIES
+            )
+            card = await build_card(_caller("a2a"), base_url="https://x")
+
+        per_crew_tools = sorted({t["name"] for t in tools} - fixed)
+        skills = sorted(s.id for s in card.skills)
+        assert per_crew_tools == skills
+
+    @pytest.mark.asyncio
+    async def test_a_crew_shadowing_a_built_in_tool_is_skipped_not_silent(self):
+        """A crew published as `start_crew` would shadow a control tool. It is
+        dropped with a warning rather than either silently winning (breaking
+        every caller's start_crew) or silently losing."""
+        from src.services.mcp_server.server import list_tools
+
+        clash = PublishedCapability(
+            crew_id="c9", name="start_crew", description="A crew named like a tool."
+        )
+        with patch("src.services.mcp_server.tools.PublicationService") as mcp_svc:
+            mcp_svc.return_value.list_capabilities = AsyncMock(return_value=[clash])
+            tools = await list_tools(_caller("mcp"))
+
+        # Exactly one start_crew — the built-in.
+        assert [t["name"] for t in tools].count("start_crew") == 1
+
+
 class TestOneStateVocabulary:
     @pytest.mark.asyncio
     async def test_a_status_means_the_same_thing_on_both_surfaces(self):

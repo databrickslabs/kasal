@@ -20,7 +20,11 @@ import logging
 from typing import Any, Dict, List
 
 from src.services.external.identity import ExternalCaller
-from src.services.mcp_server.tools import TOOL_DEFINITIONS, TOOL_HANDLERS
+from src.services.mcp_server.tools import (
+    TOOL_DEFINITIONS,
+    TOOL_HANDLERS,
+    UnknownToolError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,18 +34,30 @@ logger = logging.getLogger(__name__)
 PROTOCOL_VERSION = "1.0"
 
 
-def list_tools() -> List[Dict[str, Any]]:
-    """The advertised tool list.
+async def list_tools(
+    caller: ExternalCaller, session: Any = None
+) -> List[Dict[str, Any]]:
+    """The tools this caller may use: the fixed set, plus one per published crew.
 
-    Static in phase 2. Layer-2 (one tool per published crew) will make this
-    caller-dependent, at which point it becomes a projection of
-    ``PublicationService.list_capabilities`` — the same query the A2A card reads.
+    The per-crew tools are Layer-2, and they are the reason discovery works at
+    all. With only the generic set a calling agent sees ``start_crew`` and has to
+    be told out of band which crews exist; with Layer-2 it sees
+    ``analyse_powerbi_model`` and a description of when to use it, which is what
+    an agent actually selects on.
+
+    Caller-dependent because the list is group-scoped, and a projection of
+    ``PublicationService.list_capabilities`` — the SAME query the A2A card's
+    skills[] reads, which is what stops the two surfaces advertising different
+    capabilities.
     """
-    return list(TOOL_DEFINITIONS)
+    from src.services.mcp_server.tools import build_crew_tool_definitions
+
+    tools = list(TOOL_DEFINITIONS)
+    tools.extend(await build_crew_tool_definitions(caller, session=session))
+    return tools
 
 
-class UnknownToolError(Exception):
-    """The caller asked for a tool that is not advertised."""
+__all__ = ["PROTOCOL_VERSION", "UnknownToolError", "call_tool", "list_tools"]
 
 
 async def call_tool(
@@ -58,7 +74,15 @@ async def call_tool(
     """
     handler = TOOL_HANDLERS.get(name)
     if handler is None:
-        raise UnknownToolError(f"Unknown tool: {name}")
+        # Not a fixed tool. It may be a Layer-2 per-crew tool, whose name IS a
+        # published capability — resolved against this caller's own
+        # publications, so an unpublished or another tenant's name is simply
+        # unknown.
+        from src.services.mcp_server.tools import call_crew_tool
+
+        return await call_crew_tool(
+            caller, name=name, arguments=arguments or {}, session=session
+        )
 
     logger.info(
         "[mcp-server] %s called %s (groups=%s)", caller.origin, name, caller.group_ids

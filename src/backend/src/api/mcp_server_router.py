@@ -16,10 +16,12 @@ import logging
 from typing import Annotated, Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, Header
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from src.core.dependencies import SessionDep
 from src.core.exceptions import KasalError, NotFoundError
+from src.services.external import streaming
 from src.services.external.identity import (
     ExternalAuthError,
     ExternalCaller,
@@ -90,27 +92,42 @@ CallerDep = Annotated[ExternalCaller, Depends(get_external_caller)]
 class ToolCallRequest(BaseModel):
     name: str = Field(..., description="The tool to invoke.")
     arguments: Dict[str, Any] = Field(default_factory=dict)
+    stream: bool = Field(
+        default=False,
+        description=(
+            "Stream progress as NDJSON instead of returning one result. The "
+            "response is a chunked application/x-ndjson body, one JSON object "
+            "per line, ending with the terminal frame."
+        ),
+    )
 
 
 @router.get("/tools")
-async def list_tools(caller: CallerDep):
+async def list_tools(caller: CallerDep, session: SessionDep):
     """The tools this caller may use.
 
-    Resolving the caller is not strictly needed to render a static list today,
-    but it is required the moment Layer-2 lands (one tool per published crew,
-    group-scoped). Requiring it now means the endpoint never has to GAIN an auth
-    requirement later — which is the kind of change that gets deployed without
-    every client noticing.
+    Group-scoped: the fixed control tools plus one per crew this caller's
+    workspace has published. Requiring identity was already the case before
+    Layer-2 needed it, precisely so the endpoint never had to GAIN an auth
+    requirement — the kind of change that ships without every client noticing.
     """
     return {
         "protocolVersion": mcp_server.PROTOCOL_VERSION,
-        "tools": mcp_server.list_tools(),
+        "tools": await mcp_server.list_tools(caller, session=session),
     }
 
 
 @router.post("/tools/call")
 async def call_tool(request: ToolCallRequest, caller: CallerDep, session: SessionDep):
-    """Invoke a tool as the resolved caller."""
+    """Invoke a tool as the resolved caller.
+
+    With ``stream: true`` the response is a chunked ``application/x-ndjson``
+    body — one JSON object per line, a frame per state change, ending with the
+    terminal frame. Without it, one JSON result as before.
+
+    Streaming matters most for the tools that start a crew: those take minutes,
+    and the alternative is a caller that either blocks blind or polls in a loop.
+    """
     try:
         result = await mcp_server.call_tool(
             caller=caller,
@@ -137,4 +154,29 @@ async def call_tool(request: ToolCallRequest, caller: CallerDep, session: Sessio
 
         raise UnprocessableEntityError(f"Invalid arguments for {request.name}: {exc}")
 
-    return {"content": result, "isError": False}
+    if not request.stream:
+        return {"content": result, "isError": False}
+
+    run_id = result.get("run_id") if isinstance(result, dict) else None
+    if not run_id:
+        # A tool that produced no run to follow (ask_kasal answers inline, and
+        # list_crews is not a run at all). Emit the single result as one NDJSON
+        # frame so a streaming caller gets the same shape either way.
+        async def _single():
+            import json
+
+            yield (json.dumps(result, default=str) + "\n").encode("utf-8")
+
+        return StreamingResponse(_single(), media_type="application/x-ndjson")
+
+    return StreamingResponse(
+        streaming.to_ndjson(streaming.stream_run(caller, str(run_id), session=session)),
+        media_type="application/x-ndjson",
+        headers={
+            # Chunked and unbuffered: a proxy that buffers turns a live stream
+            # into one delivery at the end, which is indistinguishable from no
+            # streaming at all.
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )

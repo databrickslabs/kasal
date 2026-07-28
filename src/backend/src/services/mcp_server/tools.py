@@ -52,6 +52,15 @@ from src.services.external.publication import PublicationService
 logger = logging.getLogger(__name__)
 
 
+class UnknownToolError(Exception):
+    """The caller asked for a tool that is not advertised.
+
+    Defined here rather than in server.py because server imports this module at
+    module scope; the reverse direction is a circular import. All the adapter's
+    errors living together is the better arrangement anyway.
+    """
+
+
 class UnknownCapabilityError(Exception):
     """The caller named a crew that is not published to it."""
 
@@ -304,3 +313,88 @@ TOOL_HANDLERS = {
     "cancel_run": cancel_run,
     "respond_to_run": respond_to_run,
 }
+
+
+# ---------------------------------------------------------------------------
+# Layer 2 — one tool per published crew.
+#
+# The generic start_crew works, but a calling agent selects on DESCRIPTIONS. A
+# tool called `analyse_powerbi_model` that says when to use it gets chosen; a
+# generic `start_crew` requires the agent to be told out of band which crew
+# names exist. Same rows, better discovery — and exactly symmetric with the A2A
+# card's skills[], which has projected per-crew capabilities from the start.
+# ---------------------------------------------------------------------------
+
+#: Names the fixed tools already occupy. A crew published under one of these
+#: would shadow a control tool, so it is skipped and logged rather than silently
+#: winning or silently losing.
+_RESERVED_NAMES = frozenset(t["name"] for t in TOOL_DEFINITIONS)
+
+
+async def build_crew_tool_definitions(
+    caller: ExternalCaller, session: Any = None
+) -> List[Dict[str, Any]]:
+    """One tool definition per crew this caller may see."""
+    service = PublicationService(session)
+    capabilities = await service.list_capabilities(caller)
+
+    definitions: List[Dict[str, Any]] = []
+    for capability in capabilities:
+        if capability.name in _RESERVED_NAMES:
+            logger.warning(
+                "[mcp-server] published crew %r shadows a built-in tool; skipping",
+                capability.name,
+            )
+            continue
+        definitions.append(
+            {
+                "name": capability.name,
+                "description": (
+                    f"{capability.description}\n\n"
+                    "Starts a crew and returns a run id immediately — crews take "
+                    "minutes, so poll get_run_status."
+                ),
+                "inputSchema": capability.input_schema
+                or {
+                    # No declared input contract, so accept one free-text request.
+                    # Better than an empty schema, which tells a calling agent it
+                    # can pass nothing at all.
+                    "type": "object",
+                    "properties": {
+                        "request": {
+                            "type": "string",
+                            "description": "What you want this crew to do.",
+                        }
+                    },
+                },
+            }
+        )
+    return definitions
+
+
+async def call_crew_tool(
+    caller: ExternalCaller,
+    name: str,
+    arguments: Dict[str, Any],
+    session: Any = None,
+) -> Dict[str, Any]:
+    """Invoke a Layer-2 tool — i.e. start the crew published under ``name``."""
+    service = PublicationService(session)
+    publication = await service.resolve_capability(caller, name)
+    if publication is None:
+        # Genuinely unknown: not a fixed tool, and not a capability published to
+        # this caller. Raised as UnknownToolError so the router answers 404 the
+        # same way it does for a misspelt built-in — a caller must not be able
+        # to distinguish "no such tool" from "another tenant's tool".
+        raise UnknownToolError(f"Unknown tool: {name}")
+
+    logger.info(
+        "[mcp-server] %s called published crew %s (groups=%s)",
+        caller.origin,
+        name,
+        caller.group_ids,
+    )
+    result = await start_run(
+        caller=caller, publication=publication, inputs=arguments, session=session
+    )
+    return result.as_dict()

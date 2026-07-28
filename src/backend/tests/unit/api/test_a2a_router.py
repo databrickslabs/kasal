@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src.api.a2a_router import router, well_known_router
+from src.core.dependencies import get_smart_db_session
 from src.core.exceptions import KasalError
 from src.services.external.identity import ExternalAuthError, ExternalCaller
 
@@ -29,6 +30,12 @@ def client():
         from fastapi.responses import JSONResponse
 
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+    # These routes take a DB session. The minimal test app has no database, and
+    # every one of these tests patches the service layer above it, so the
+    # session is never used — but without an override FastAPI tries to open a
+    # real connection and the endpoint 500s before the test's assertion runs.
+    app.dependency_overrides[get_smart_db_session] = lambda: None
 
     return TestClient(app, raise_server_exceptions=False)
 

@@ -129,6 +129,97 @@ class TestAsk:
             await ask(_caller(), "   ")
 
 
+class TestAskReturnsTheAnswerInline:
+    """ask_kasal's whole contract is "get a direct answer". These pin that it
+    does, because the chat path does not hand the answer back."""
+
+    @pytest.mark.asyncio
+    async def test_a_receipt_only_return_is_backfilled_from_the_run(self):
+        """The chat path returns {"execution_id", "status"} and writes the
+        answer to the execution row. Without the backfill the caller gets
+        {"run_id", "state": "completed"} and no answer at all."""
+        p_run, p_create, _run, _create = _patch_execution(
+            {"execution_id": "x", "status": "COMPLETED"}  # no result key
+        )
+        with (
+            p_run,
+            p_create,
+            patch(
+                "src.services.external.invocation.run_status",
+                new=AsyncMock(
+                    return_value=InvocationResult(
+                        run_id="x",
+                        state=ExternalTaskState.COMPLETED,
+                        output="Kasal is an AI agent workflow platform.",
+                    )
+                ),
+            ),
+        ):
+            result = await ask(_caller(), "what is kasal?")
+
+        assert result.output == "Kasal is an AI agent workflow platform."
+        assert result.state is ExternalTaskState.COMPLETED
+
+    @pytest.mark.asyncio
+    async def test_no_backfill_when_the_answer_is_already_there(self):
+        """One extra read only when it is needed."""
+        p_run, p_create, _run, _create = _patch_execution(
+            {"status": "COMPLETED", "result": "42"}
+        )
+        with (
+            p_run,
+            p_create,
+            patch(
+                "src.services.external.invocation.run_status", new=AsyncMock()
+            ) as reread,
+        ):
+            result = await ask(_caller(), "q")
+
+        assert result.output == "42"
+        reread.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_no_backfill_while_the_run_is_still_going(self):
+        """Only terminal states are re-read; a working run has nothing stored."""
+        p_run, p_create, _run, _create = _patch_execution({"status": "RUNNING"})
+        with (
+            p_run,
+            p_create,
+            patch(
+                "src.services.external.invocation.run_status", new=AsyncMock()
+            ) as reread,
+        ):
+            await ask(_caller(), "q")
+        reread.assert_not_awaited()
+
+
+class TestErrorOnlyAccompaniesFailure:
+    def test_a_completed_run_reports_no_error(self):
+        """The execution row keeps its terminal MESSAGE in the column surfaced
+        as `error`, so a successful run carries "Light agent execution
+        completed" there. Reported as-is, a non-null error beside `completed`
+        reads as a failure to any client."""
+        result = _to_result(
+            "r",
+            {
+                "status": "COMPLETED",
+                "result": "the answer",
+                "error": "Light agent execution completed",
+            },
+        )
+        assert result.state is ExternalTaskState.COMPLETED
+        assert result.error is None
+
+    def test_a_failed_run_keeps_its_error(self):
+        result = _to_result("r", {"status": "FAILED", "error": "the model refused"})
+        assert result.state is ExternalTaskState.FAILED
+        assert result.error == "the model refused"
+
+    def test_a_cancelled_run_reports_no_error(self):
+        result = _to_result("r", {"status": "CANCELLED", "error": "stopped by user"})
+        assert result.error is None
+
+
 class TestResultNormalisation:
     def test_kasal_status_becomes_the_canonical_state(self):
         assert _to_result("r", {"status": "RUNNING"}).state is ExternalTaskState.WORKING

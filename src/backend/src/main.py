@@ -755,6 +755,13 @@ from src.api.a2a_router import well_known_router as _a2a_well_known_router
 
 app.include_router(_a2a_well_known_router)
 
+# The MCP Streamable HTTP transport, at the domain root. A client configured
+# with https://host/mcp POSTs JSON-RPC there; under the API prefix it would 404
+# on initialize and never attempt anything else.
+from src.api.mcp_jsonrpc_router import router as _mcp_jsonrpc_router
+
+app.include_router(_mcp_jsonrpc_router)
+
 
 @app.get("/health")
 async def health():

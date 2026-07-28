@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src.api.mcp_server_router import router
+from src.core.dependencies import get_smart_db_session
 from src.core.exceptions import KasalError
 from src.services.external.identity import ExternalAuthError
 
@@ -26,6 +27,12 @@ def client():
         from fastapi.responses import JSONResponse
 
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+    # These routes take a DB session. The minimal test app has no database, and
+    # every one of these tests patches the service layer above it, so the
+    # session is never used — but without an override FastAPI tries to open a
+    # real connection and the endpoint 500s before the test's assertion runs.
+    app.dependency_overrides[get_smart_db_session] = lambda: None
 
     return TestClient(app, raise_server_exceptions=False)
 
@@ -93,15 +100,26 @@ class TestAuthenticationIsRequired:
 
 class TestResolvedCaller:
     def test_tools_are_listed_for_a_resolved_caller(self, client):
-        with patch(
-            "src.api.mcp_server_router.resolve_caller",
-            new=AsyncMock(return_value=_resolved()),
+        """The fixed control tools are always present.
+
+        The list is no longer static — Layer-2 appends one tool per published
+        crew, so this asserts the fixed set is a SUBSET rather than the whole
+        list. Pinning equality would fail the moment a workspace publishes
+        anything, which is the normal case, not an edge one.
+        """
+        with (
+            patch(
+                "src.api.mcp_server_router.resolve_caller",
+                new=AsyncMock(return_value=_resolved()),
+            ),
+            patch("src.services.mcp_server.tools.PublicationService") as publications,
         ):
+            publications.return_value.list_capabilities = AsyncMock(return_value=[])
             response = client.get("/mcp/v1/tools")
 
         assert response.status_code == 200
         body = response.json()
-        assert {t["name"] for t in body["tools"]} == {
+        assert {t["name"] for t in body["tools"]} >= {
             "ask_kasal",
             "list_crews",
             "start_crew",
@@ -112,11 +130,49 @@ class TestResolvedCaller:
         }
         assert body["protocolVersion"]
 
-    def test_unknown_tool_is_a_404(self, client):
-        with patch(
-            "src.api.mcp_server_router.resolve_caller",
-            new=AsyncMock(return_value=_resolved()),
+    def test_a_published_crew_appears_as_its_own_tool(self, client):
+        """Layer-2. A calling agent selects on descriptions, so a tool named
+        after the crew is what makes it discoverable at all."""
+        from src.schemas.crew_publication import PublishedCapability
+
+        with (
+            patch(
+                "src.api.mcp_server_router.resolve_caller",
+                new=AsyncMock(return_value=_resolved()),
+            ),
+            patch("src.services.mcp_server.tools.PublicationService") as publications,
         ):
+            publications.return_value.list_capabilities = AsyncMock(
+                return_value=[
+                    PublishedCapability(
+                        crew_id="c1",
+                        name="analyse_powerbi_model",
+                        description="Analyse a PowerBI semantic model.",
+                    )
+                ]
+            )
+            response = client.get("/mcp/v1/tools")
+
+        names = {t["name"] for t in response.json()["tools"]}
+        assert "analyse_powerbi_model" in names
+
+    def test_unknown_tool_is_a_404(self, client):
+        """A name that is neither a fixed tool nor a published crew.
+
+        With Layer-2 an unrecognised name is no longer immediately unknown — it
+        is first resolved against this caller's publications, because that is
+        where per-crew tool names live. Only when that also misses is it a 404,
+        and the same 404 covers "another tenant published this name", so the
+        surface cannot be used to enumerate other workspaces' crews.
+        """
+        with (
+            patch(
+                "src.api.mcp_server_router.resolve_caller",
+                new=AsyncMock(return_value=_resolved()),
+            ),
+            patch("src.services.mcp_server.tools.PublicationService") as publications,
+        ):
+            publications.return_value.resolve_capability = AsyncMock(return_value=None)
             response = client.post(
                 "/mcp/v1/tools/call", json={"name": "nope", "arguments": {}}
             )
