@@ -892,8 +892,22 @@ class LightAgentService:
                         )
                         if memory_block:
                             _log("Memory recall: context block injected")
+                    # Attaching a file binds the knowledge tool and scopes it to
+                    # that file, but nothing told the agent the file EXISTS — so
+                    # it answered "please share or upload the report" holding the
+                    # tool that would have read it. Last of the preamble parts,
+                    # closest to the user's message.
+                    from src.engines.kasal.paths.light_agent.attachment_hint import (
+                        build_attachment_hint,
+                    )
+
+                    attachment_hint = build_attachment_hint(agent_spec)
+                    if attachment_hint:
+                        _log("Attached files noted for the agent")
                     preamble_parts = [
-                        part for part in (memory_block, conversation_preamble) if part
+                        part
+                        for part in (memory_block, conversation_preamble, attachment_hint)
+                        if part
                     ]
                     kickoff_prompt = (
                         "\n\n".join(preamble_parts) + f"\n\nCurrent message:\n{prompt}"
