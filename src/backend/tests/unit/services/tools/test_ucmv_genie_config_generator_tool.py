@@ -147,7 +147,7 @@ class TestGenieConfigOverride:
             "example_sqls_json": "[]",
         })
         tool = UCMVGenieConfigGeneratorTool()
-        with patch("src.core.llm_manager.LLMManager.completion", new_callable=AsyncMock) as mock_llm:
+        with patch("src.services.llm.manager.LLMManager.completion", new_callable=AsyncMock) as mock_llm:
             result = tool._run(
                 genie_config_override=override,
                 ucmv_output=SAMPLE_UCMV_OUTPUT,
@@ -211,7 +211,7 @@ class TestErrorCases:
             ".MetricViewValidatorTool._fetch_latest_ucmv_from_db",
             return_value=db_ucmv,
         ), patch.object(tool, "_authenticate", return_value=_mock_auth()), \
-             patch("src.core.llm_manager.LLMManager.completion",
+             patch("src.services.llm.manager.LLMManager.completion",
                    _mock_llm_completion(json.dumps({
                        "text_instructions": "Test instructions",
                        "sample_questions": "Q1",
@@ -302,7 +302,7 @@ class TestJoinSpecsExtraction:
         auth = _mock_auth()
 
         with patch.object(tool, "_authenticate", return_value=auth), \
-             patch("src.core.llm_manager.LLMManager.completion", _mock_llm_completion()):
+             patch("src.services.llm.manager.LLMManager.completion", _mock_llm_completion()):
             result = tool._run(ucmv_output=SAMPLE_UCMV_OUTPUT, catalog="main", schema_name="metrics")
 
         data = json.loads(result)
@@ -346,7 +346,7 @@ class TestDimTableFiltering:
         auth = _mock_auth()
 
         with patch.object(tool, "_authenticate", return_value=auth), \
-             patch("src.core.llm_manager.LLMManager.completion", _mock_llm_completion()):
+             patch("src.services.llm.manager.LLMManager.completion", _mock_llm_completion()):
             result = tool._run(ucmv_output=ucmv, catalog="main", schema_name="metrics")
 
         data = json.loads(result)
@@ -372,7 +372,7 @@ class TestLLMIntegration:
         mock_completion = AsyncMock(return_value=llm_content)
 
         with patch.object(tool, "_authenticate", return_value=auth), \
-             patch("src.core.llm_manager.LLMManager.completion", mock_completion) as mock_llm:
+             patch("src.services.llm.manager.LLMManager.completion", mock_completion) as mock_llm:
             tool._run(ucmv_output=SAMPLE_UCMV_OUTPUT, catalog="main", schema_name="metrics")
 
         mock_llm.assert_called_once()
@@ -387,7 +387,7 @@ class TestLLMIntegration:
 
         from unittest.mock import AsyncMock
         with patch.object(tool, "_authenticate", return_value=auth), \
-             patch("src.core.llm_manager.LLMManager.completion", AsyncMock(side_effect=RuntimeError("LLM unavailable"))):
+             patch("src.services.llm.manager.LLMManager.completion", AsyncMock(side_effect=RuntimeError("LLM unavailable"))):
             result = tool._run(ucmv_output=SAMPLE_UCMV_OUTPUT, catalog="main", schema_name="metrics")
 
         data = json.loads(result)
@@ -404,7 +404,7 @@ class TestLLMIntegration:
         auth = _mock_auth()
 
         with patch.object(tool, "_authenticate", return_value=auth), \
-             patch("src.core.llm_manager.LLMManager.completion", _mock_llm_completion()):
+             patch("src.services.llm.manager.LLMManager.completion", _mock_llm_completion()):
             result = tool._run(ucmv_output=SAMPLE_UCMV_OUTPUT, catalog="main", schema_name="metrics")
 
         data = json.loads(result)
@@ -417,7 +417,7 @@ class TestLLMIntegration:
         auth = _mock_auth()
 
         with patch.object(tool, "_authenticate", return_value=auth), \
-             patch("src.core.llm_manager.LLMManager.completion", _mock_llm_completion()):
+             patch("src.services.llm.manager.LLMManager.completion", _mock_llm_completion()):
             result = tool._run(
                 ucmv_output=SAMPLE_UCMV_OUTPUT,
                 catalog="mycat",

@@ -123,7 +123,7 @@ class TestCodeGuardrail:
         with (
             patch("src.services.execution.runtime.LLMGuardrail") as MockLLMG,
             patch(
-                "src.core.llm_manager.LLMManager.configure_kasal_llm",
+                "src.services.llm.manager.LLMManager.configure_kasal_llm",
                 new_callable=AsyncMock,
                 return_value=MagicMock(),
             ),
@@ -149,7 +149,7 @@ class TestLlmGuardrail:
         with (
             patch("src.services.execution.runtime.LLMGuardrail") as MockLLMG,
             patch(
-                "src.core.llm_manager.LLMManager.configure_kasal_llm",
+                "src.services.llm.manager.LLMManager.configure_kasal_llm",
                 new_callable=AsyncMock,
                 return_value=MagicMock(),
             ),

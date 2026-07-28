@@ -118,7 +118,7 @@ class TestBuildAgentKwargs:
 class TestBuildAgentLlm:
     @pytest.mark.asyncio
     async def test_string_llm_uses_configure_kasal_llm(self):
-        with patch("src.core.llm_manager.LLMManager") as MockLM:
+        with patch("src.services.llm.manager.LLMManager") as MockLM:
             MockLM.configure_kasal_llm = AsyncMock(return_value="LLM")
             out = await build_agent_llm({"llm": "my-model"}, group_id="grp")
             assert out == "LLM"
@@ -126,7 +126,7 @@ class TestBuildAgentLlm:
 
     @pytest.mark.asyncio
     async def test_temperature_converted_0_100_to_0_1(self):
-        with patch("src.core.llm_manager.LLMManager") as MockLM:
+        with patch("src.services.llm.manager.LLMManager") as MockLM:
             MockLM.configure_kasal_llm = AsyncMock(return_value="LLM")
             await build_agent_llm({"llm": "m", "temperature": 50}, group_id="grp")
             MockLM.configure_kasal_llm.assert_awaited_once_with("m", "grp", 0.5)
@@ -137,7 +137,7 @@ class TestBuildAgentLlm:
             pass
 
         fake = FakeLLM()
-        with patch("src.core.llm_manager.LLMManager") as MockLM:
+        with patch("src.services.llm.manager.LLMManager") as MockLM:
             MockLM.configure_kasal_llm = AsyncMock(return_value=fake)
             out = await build_agent_llm(
                 {"llm": {"model": "m2", "top_p": 0.9, "stop": None}}, group_id="grp"
@@ -149,7 +149,7 @@ class TestBuildAgentLlm:
 
     @pytest.mark.asyncio
     async def test_no_llm_uses_default_model_without_temperature(self):
-        with patch("src.core.llm_manager.LLMManager") as MockLM:
+        with patch("src.services.llm.manager.LLMManager") as MockLM:
             MockLM.configure_kasal_llm = AsyncMock(return_value="LLM")
             await build_agent_llm({}, group_id="grp", default_model="databricks-llama-4-maverick")
             MockLM.configure_kasal_llm.assert_awaited_once_with(
@@ -173,7 +173,7 @@ class TestBuildAgentLlm:
 
     @pytest.mark.asyncio
     async def test_configure_failure_falls_back_to_model_string(self):
-        with patch("src.core.llm_manager.LLMManager") as MockLM:
+        with patch("src.services.llm.manager.LLMManager") as MockLM:
             MockLM.configure_kasal_llm = AsyncMock(side_effect=RuntimeError("boom"))
             out = await build_agent_llm({"llm": "fallback-model"}, group_id="grp")
             assert out == "fallback-model"
@@ -192,7 +192,7 @@ class TestReasoningEffortReachesTheLLM:
         spec = {"llm": model}
         spec.update(spec_over)
         fake = _FakeLLM(f"databricks/{model}")
-        with patch("src.core.llm_manager.LLMManager") as MockLM:
+        with patch("src.services.llm.manager.LLMManager") as MockLM:
             MockLM.configure_kasal_llm = AsyncMock(return_value=fake)
             out = await build_agent_llm(spec, group_id="grp", label="A")
         return out
@@ -243,7 +243,7 @@ class TestReasoningEffortReachesTheLLM:
     async def test_string_fallback_llm_is_never_mutated(self):
         """A configuration failure yields a bare model-name string — applying the
         budget must not raise."""
-        with patch("src.core.llm_manager.LLMManager") as MockLM:
+        with patch("src.services.llm.manager.LLMManager") as MockLM:
             MockLM.configure_kasal_llm = AsyncMock(side_effect=RuntimeError("boom"))
             out = await build_agent_llm(
                 {"llm": "databricks-gpt-5-2", "reasoning": True}, group_id="grp"
@@ -272,7 +272,7 @@ class TestBuildAgent:
     @pytest.mark.asyncio
     async def test_builds_llm_kwargs_preamble_construction_and_custom_attrs(self):
         with patch("src.services.execution.kernel.agent_builder.Agent") as MockAgent, \
-             patch("src.core.llm_manager.LLMManager") as MockLM:
+             patch("src.services.llm.manager.LLMManager") as MockLM:
             MockLM.configure_kasal_llm = AsyncMock(return_value="LLM-OBJ")
             MockAgent.return_value = MagicMock()
             spec = {"role": "R", "goal": "G", "backstory": "B", "llm": "m", "temperature": 50}
@@ -297,7 +297,7 @@ class TestBuildAgent:
     @pytest.mark.asyncio
     async def test_no_extra_kwargs_or_custom_attrs(self):
         with patch("src.services.execution.kernel.agent_builder.Agent") as MockAgent, \
-             patch("src.core.llm_manager.LLMManager") as MockLM:
+             patch("src.services.llm.manager.LLMManager") as MockLM:
             MockLM.configure_kasal_llm = AsyncMock(return_value="LLM")
             MockAgent.return_value = MagicMock()
             await build_agent(

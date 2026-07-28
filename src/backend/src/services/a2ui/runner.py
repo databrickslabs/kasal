@@ -360,7 +360,7 @@ async def compose_surface(
     model_name = model or os.getenv("CREW_MODEL") or "databricks-llama-4-maverick"
 
     try:
-        from src.core.llm_manager import LLMManager
+        from src.services.llm.manager import LLMManager
 
         # temperature=0 for deterministic, well-formed JSON. LLMManager injects
         # the Kasal User-Agent header automatically.

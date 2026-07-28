@@ -21,7 +21,7 @@ from src.schemas.task_generation import TaskGenerationRequest
 from src.schemas.task_generation import Agent as TaskGenAgent
 from src.repositories.log_repository import LLMLogRepository
 from src.services.execution.logs.llm_log_service import LLMLogService
-from src.core.llm_manager import LLMManager
+from src.services.llm.manager import LLMManager
 from src.core.sse_manager import sse_manager, SSEEvent
 from src.core.exceptions import KasalError, BadRequestError
 from src.repositories.crew_generator_repository import CrewGeneratorRepository

@@ -261,7 +261,7 @@ class PBIVisualUCMVMapperTool(BaseTool):
 
     def _call_llm(self, prompt: str, model: str) -> str:
         """Call the LLM and return the response text."""
-        from src.core.llm_manager import LLMManager
+        from src.services.llm.manager import LLMManager
         from src.services.tools.async_bridge import run_async_with_context
         from src.utils.telemetry import get_user_agent_header, KasalProduct
 

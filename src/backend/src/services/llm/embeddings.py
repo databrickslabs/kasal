@@ -32,7 +32,7 @@ _CIRCUIT_RESET_SECONDS = 300
 
 def _get_group_id_from_context(required: bool = True) -> Optional[str]:
     """Group id for multi-tenant isolation (see LLMManager._get_group_id_from_context)."""
-    from src.core.llm_manager import LLMManager
+    from src.services.llm.manager import LLMManager
 
     return LLMManager._get_group_id_from_context(required=required)
 

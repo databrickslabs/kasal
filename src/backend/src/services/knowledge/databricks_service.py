@@ -734,7 +734,7 @@ class DatabricksKnowledgeService:
 
             # Generate a dummy query embedding for fetching sources, using the
             # shared knowledge embedder so it matches the ingest/search model.
-            from src.core.llm_manager import LLMManager
+            from src.services.llm.manager import LLMManager
             from src.services.knowledge.embedder import resolve_knowledge_embedder_config
 
             embedder_config = await resolve_knowledge_embedder_config(

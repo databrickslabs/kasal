@@ -278,7 +278,7 @@ CALCULATETABLE(...)
         )
 
         # Call LLM via LLMManager
-        from src.core.llm_manager import LLMManager
+        from src.services.llm.manager import LLMManager
         from src.utils.telemetry import get_user_agent_header, KasalProduct
 
         try:
@@ -613,7 +613,7 @@ Your previous attempt(s) to generate a DAX query failed. Analyze the errors and 
         logger.info("=" * 80)
 
         # Call LLM via LLMManager
-        from src.core.llm_manager import LLMManager
+        from src.services.llm.manager import LLMManager
         from src.utils.telemetry import get_user_agent_header, KasalProduct
 
         try:

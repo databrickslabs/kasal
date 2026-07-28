@@ -4412,7 +4412,7 @@ class TestGenerateDaxWithSelfCorrectionHttpSuccess:
 
         mock_completion = AsyncMock(return_value="EVALUATE\nSUMMARIZECOLUMNS(\n    \"R\", [Revenue]\n)")
 
-        with patch("src.core.llm_manager.LLMManager.completion", mock_completion):
+        with patch("src.services.llm.manager.LLMManager.completion", mock_completion):
             result = self._run(
                 self.tool._generate_dax_with_self_correction("Revenue?", model_context, config, previous)
             )
@@ -4432,7 +4432,7 @@ class TestGenerateDaxWithSelfCorrectionHttpSuccess:
 
         mock_completion = AsyncMock(return_value="EVALUATE\nSUMMARIZECOLUMNS(\n    \"R\", [NonExistentMeasure]\n)")
 
-        with patch("src.core.llm_manager.LLMManager.completion", mock_completion):
+        with patch("src.services.llm.manager.LLMManager.completion", mock_completion):
             result = self._run(
                 self.tool._generate_dax_with_self_correction("Revenue?", model_context, config, previous)
             )

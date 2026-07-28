@@ -8,11 +8,11 @@ outer attempt first paying the SDK's backoff and then ours.
 
 from unittest.mock import patch
 
-from src.core.llm.handlers.databricks_retry_llm import DatabricksRetryLLM
+from src.services.llm.handlers.databricks_retry_llm import DatabricksRetryLLM
 
 
 def _llm(**kwargs):
-    with patch("src.core.llm.handlers.databricks_retry_llm.litellm"):
+    with patch("src.services.llm.handlers.databricks_retry_llm.litellm"):
         return DatabricksRetryLLM(model="databricks/databricks-claude-sonnet-4-6",
                                   api_key="k", **kwargs)
 

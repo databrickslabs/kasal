@@ -971,7 +971,7 @@ class TestResolveFilenamesPaths:
         with patch.dict(
             "sys.modules",
             {
-                "src.core.llm_manager": MagicMock(
+                "src.services.llm.manager": MagicMock(
                     LLMManager=MagicMock(get_embedding=AsyncMock(return_value=None))
                 )
             },
@@ -1004,7 +1004,7 @@ class TestResolveFilenamesPaths:
         with patch.dict(
             "sys.modules",
             {
-                "src.core.llm_manager": MagicMock(
+                "src.services.llm.manager": MagicMock(
                     LLMManager=MagicMock(
                         get_embedding=AsyncMock(return_value=[0.1, 0.2])
                     )
@@ -1036,7 +1036,7 @@ class TestResolveFilenamesPaths:
         with patch.dict(
             "sys.modules",
             {
-                "src.core.llm_manager": MagicMock(
+                "src.services.llm.manager": MagicMock(
                     LLMManager=MagicMock(
                         get_embedding=AsyncMock(return_value=[0.1, 0.2])
                     )
@@ -1079,7 +1079,7 @@ class TestResolveFilenamesPaths:
         with patch.dict(
             "sys.modules",
             {
-                "src.core.llm_manager": MagicMock(
+                "src.services.llm.manager": MagicMock(
                     LLMManager=MagicMock(
                         get_embedding=AsyncMock(return_value=[0.1, 0.2])
                     )

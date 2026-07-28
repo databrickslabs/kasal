@@ -323,7 +323,7 @@ class WorkflowRecipeService:
         allowed to fail a mining sweep or a crew generation.
         """
         try:
-            from src.core.llm_manager import LLMManager
+            from src.services.llm.manager import LLMManager
             from src.services.knowledge.embedder import (
                 resolve_knowledge_embedder_config,
             )

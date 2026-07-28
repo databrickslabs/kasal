@@ -22,7 +22,7 @@ from src.services.execution.runtime import Agent, Task, Crew
 from src.core.llm.transport import LLM
 from src.services.execution.runtime import Process
 from src.services.flow_builder.runtime import Flow as CrewAIFlow
-from src.core.llm_manager import LLMManager
+from src.services.llm.manager import LLMManager
 
 # Import the refactored modules
 from src.services.flow_builder.modules.flow_builder import FlowBuilder

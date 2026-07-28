@@ -33,7 +33,7 @@ def _row(content="chunk text", title="Doc", source="orig.md",
 
 
 def _patch_embedding(value):
-    return patch("src.core.llm_manager.LLMManager.get_embedding", AsyncMock(return_value=value))
+    return patch("src.services.llm.manager.LLMManager.get_embedding", AsyncMock(return_value=value))
 
 
 def _patch_doc_service(search_mock, group_paths=None):
@@ -147,7 +147,7 @@ class TestKnowledgeSearchService:
     async def test_search_returns_empty_on_embedding_exception(self):
         """Embedding generation raising is swallowed -> empty results."""
         svc = _make_service()
-        with patch("src.core.llm_manager.LLMManager.get_embedding",
+        with patch("src.services.llm.manager.LLMManager.get_embedding",
                    AsyncMock(side_effect=RuntimeError("boom"))):
             results = await svc.search("q")
         assert results == []

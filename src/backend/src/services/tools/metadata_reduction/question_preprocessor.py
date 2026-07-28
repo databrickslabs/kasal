@@ -306,7 +306,7 @@ class QuestionPreprocessor:
         import asyncio
 
         async def _call():
-            from src.core.llm_manager import LLMManager
+            from src.services.llm.manager import LLMManager
             from src.utils.telemetry import get_user_agent_header, KasalProduct
 
             measure_hint = ""

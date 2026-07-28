@@ -111,6 +111,6 @@ class TestRegistration:
 
     def test_importing_llm_manager_registers_it(self):
         """The listener must be live in every process that runs an LLM."""
-        import src.core.llm_manager  # noqa: F401
+        import src.services.llm.manager  # noqa: F401
 
         assert usage_telemetry._registered is True

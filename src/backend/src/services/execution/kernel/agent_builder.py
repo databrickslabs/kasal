@@ -155,7 +155,7 @@ async def build_agent_llm(
     (``spec['reasoning_config']['reasoning_effort']``) is stamped onto the built
     LLM for models that natively support it — see ``_apply_reasoning_effort``.
     """
-    from src.core.llm_manager import LLMManager
+    from src.services.llm.manager import LLMManager
 
     llm = None
     try:

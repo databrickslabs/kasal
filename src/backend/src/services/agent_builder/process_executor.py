@@ -435,7 +435,7 @@ def run_crew_in_process(
                 if user_token:
                     UserContext.set_user_token(user_token)
                     # Also set for LiteLLM callback fallback (contextvars don't propagate to callback threads)
-                    from src.core.llm_manager import set_subprocess_user_token
+                    from src.services.llm.manager import set_subprocess_user_token
 
                     set_subprocess_user_token(user_token)
                     subprocess_logger.info(

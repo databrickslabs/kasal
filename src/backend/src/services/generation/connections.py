@@ -15,7 +15,7 @@ from datetime import datetime
 from src.utils.prompt_utils import robust_json_parser
 from src.services.catalog.templates import TemplateService
 from src.schemas.connection import ConnectionRequest, ConnectionResponse
-from src.core.llm_manager import LLMManager
+from src.services.llm.manager import LLMManager
 from src.utils.model_config import DEFAULT_ENGINE_MODEL
 
 # Configure logging

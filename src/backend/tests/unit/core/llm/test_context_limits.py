@@ -56,8 +56,8 @@ class TestHandlerUsesTheSharedList:
         vLLM-phrased overflow is recognised by the Databricks wrapper too."""
         from unittest.mock import patch
 
-        with patch("src.core.llm.handlers.databricks_retry_llm.litellm"):
-            from src.core.llm.handlers.databricks_retry_llm import DatabricksRetryLLM
+        with patch("src.services.llm.handlers.databricks_retry_llm.litellm"):
+            from src.services.llm.handlers.databricks_retry_llm import DatabricksRetryLLM
 
             llm = DatabricksRetryLLM(model="databricks/x", api_key="k")
 

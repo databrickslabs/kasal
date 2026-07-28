@@ -39,7 +39,7 @@ DOCUMENT_COLUMN_POSITIONS = {col: idx for idx, col in enumerate(DOCUMENT_SEARCH_
 
 # Patch targets - local imports require patching at the source module
 SCHEMAS_MODULE = "src.schemas.databricks_index_schemas.DatabricksIndexSchemas"
-LLM_MODULE = "src.core.llm_manager.LLMManager"
+LLM_MODULE = "src.services.llm.manager.LLMManager"
 # search() now queries the pgvector documentation_embeddings table via the
 # DocumentationEmbeddingService instead of the Databricks Vector Search index.
 # Knowledge search reads via DocumentationEmbeddingRepository(model=KnowledgeEmbedding).

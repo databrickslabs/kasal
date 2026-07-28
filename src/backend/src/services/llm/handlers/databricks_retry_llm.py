@@ -216,7 +216,7 @@ class DatabricksRetryLLM(LLM):
         """Lazily load the enabled-model candidate list (once)."""
         if self._fallback_candidates is None:
             try:
-                from src.core.llm_manager import LLMManager
+                from src.services.llm.manager import LLMManager
 
                 self._fallback_candidates = _run_coro_sync(
                     LLMManager.load_fallback_candidates(
@@ -232,7 +232,7 @@ class DatabricksRetryLLM(LLM):
 
     def _select_fallback(self, candidates, reason):
         """Choose the next model for ``reason`` given what's already been tried."""
-        from src.core.llm.handlers.model_fallback import select_fallback
+        from src.services.llm.handlers.model_fallback import select_fallback
 
         current_window = 0
         try:
@@ -276,7 +276,7 @@ class DatabricksRetryLLM(LLM):
             )
             return None
         try:
-            from src.core.llm_manager import LLMManager
+            from src.services.llm.manager import LLMManager
 
             llm = _run_coro_sync(
                 LLMManager.configure_kasal_llm(candidate.name, self._group_id)
@@ -297,7 +297,7 @@ class DatabricksRetryLLM(LLM):
         if not self._group_id:
             return None
         try:
-            from src.core.llm_manager import LLMManager
+            from src.services.llm.manager import LLMManager
 
             llm = await LLMManager.configure_kasal_llm(candidate.name, self._group_id)
             self._disable_nested_fallback(llm)
@@ -745,7 +745,7 @@ class DatabricksRetryLLM(LLM):
         what keeps a run alive when the context-window fallback target (e.g.
         databricks-gemini-2-5-flash) is enabled in config but not served here.
         """
-        from src.core.llm.handlers.model_fallback import classify_llm_error
+        from src.services.llm.handlers.model_fallback import classify_llm_error
 
         reason = classify_llm_error(exc)
         if not reason:
@@ -772,7 +772,7 @@ class DatabricksRetryLLM(LLM):
                 fb_reason = classify_llm_error(fb_exc)
                 if not fb_reason:
                     raise  # a non-swappable error from the fallback → surface it
-                from src.core.llm.handlers.model_fallback import (
+                from src.services.llm.handlers.model_fallback import (
                     ENDPOINT_MISSING,
                     mark_endpoint_missing,
                 )
@@ -791,7 +791,7 @@ class DatabricksRetryLLM(LLM):
 
     async def _amaybe_model_fallback(self, exc, method, call_kwargs):
         """Async variant of _maybe_model_fallback (cascades on swappable failures)."""
-        from src.core.llm.handlers.model_fallback import classify_llm_error
+        from src.services.llm.handlers.model_fallback import classify_llm_error
 
         reason = classify_llm_error(exc)
         if not reason:
@@ -817,7 +817,7 @@ class DatabricksRetryLLM(LLM):
                 fb_reason = classify_llm_error(fb_exc)
                 if not fb_reason:
                     raise
-                from src.core.llm.handlers.model_fallback import (
+                from src.services.llm.handlers.model_fallback import (
                     ENDPOINT_MISSING,
                     mark_endpoint_missing,
                 )

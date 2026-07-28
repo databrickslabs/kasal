@@ -118,7 +118,7 @@ class TestToolLLMBridgeRegression:
         _set_group("grp_tool_bridge")
         try:
             with patch(
-                "src.core.llm_manager.LLMManager.completion",
+                "src.services.llm.manager.LLMManager.completion",
                 AsyncMock(side_effect=_capturing_completion),
             ):
                 result = tool._call_llm("test prompt", "databricks/test-model")

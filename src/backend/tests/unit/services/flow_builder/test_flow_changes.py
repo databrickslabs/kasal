@@ -93,7 +93,7 @@ class TestFlowMethodsNoPlanner:
 
         # Crew IS a module-level import; LLMManager is a lazy import inside the closure
         with patch('src.services.flow_builder.modules.flow_methods.Crew') as mock_crew_class, \
-             patch('src.core.llm_manager.LLMManager') as mock_llm_manager:
+             patch('src.services.llm.manager.LLMManager') as mock_llm_manager:
 
             mock_llm_manager.get_llm = AsyncMock(return_value=mock_planning_llm)
             mock_crew_instance = MagicMock()

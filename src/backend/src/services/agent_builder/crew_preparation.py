@@ -723,7 +723,7 @@ class CrewPreparation:
                 # Scoped to vLLM agents (the VLLMFunctionCallingLLM subclass) so
                 # Databricks/other providers are unaffected. De-dup by tool name.
                 try:
-                    from src.core.llm.handlers.vllm import VLLMFunctionCallingLLM
+                    from src.services.llm.handlers.vllm import VLLMFunctionCallingLLM
 
                     task_tools = getattr(task, "tools", None) or []
                     if task_tools and isinstance(

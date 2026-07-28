@@ -1109,7 +1109,7 @@ class TestCreateTaskGuardrail:
              patch("src.services.databricks.workspace.service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc, \
              patch("src.services.execution.runtime.LLMGuardrail") as mock_llm_g, \
-             patch("src.core.llm_manager.LLMManager.configure_kasal_llm",
+             patch("src.services.llm.manager.LLMManager.configure_kasal_llm",
                    new_callable=AsyncMock) as mock_configure:
 
             mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
@@ -1158,7 +1158,7 @@ class TestCreateTaskGuardrail:
              patch("src.services.databricks.workspace.service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc, \
              patch("src.services.execution.runtime.LLMGuardrail") as mock_llm_g, \
-             patch("src.core.llm_manager.LLMManager.configure_kasal_llm",
+             patch("src.services.llm.manager.LLMManager.configure_kasal_llm",
                    new_callable=AsyncMock) as mock_configure:
 
             mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
@@ -1209,7 +1209,7 @@ class TestCreateTaskGuardrail:
              patch("src.services.databricks.workspace.service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc, \
              patch("src.services.execution.runtime.LLMGuardrail") as mock_llm_g, \
-             patch("src.core.llm_manager.LLMManager.configure_kasal_llm",
+             patch("src.services.llm.manager.LLMManager.configure_kasal_llm",
                    new_callable=AsyncMock) as mock_configure:
 
             mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])

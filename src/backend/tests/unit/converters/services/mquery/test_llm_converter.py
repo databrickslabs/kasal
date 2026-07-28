@@ -78,7 +78,7 @@ async def test_call_llm_no_credentials_returns_error(converter_no_llm):
 @pytest.mark.asyncio
 async def test_call_llm_success(converter_with_llm):
     """_call_llm returns content when LLMManager.completion() succeeds."""
-    with patch("src.core.llm_manager.LLMManager.completion", new_callable=AsyncMock) as mock_completion:
+    with patch("src.services.llm.manager.LLMManager.completion", new_callable=AsyncMock) as mock_completion:
         mock_completion.return_value = '{"success": true, "databricks_sql": "SELECT 1"}'
         result = await converter_with_llm._call_llm("user prompt", "system prompt")
 
@@ -89,7 +89,7 @@ async def test_call_llm_success(converter_with_llm):
 @pytest.mark.asyncio
 async def test_call_llm_http_error_returns_error_dict(converter_with_llm):
     """_call_llm returns error dict when LLMManager.completion() raises."""
-    with patch("src.core.llm_manager.LLMManager.completion", new_callable=AsyncMock) as mock_completion:
+    with patch("src.services.llm.manager.LLMManager.completion", new_callable=AsyncMock) as mock_completion:
         mock_completion.side_effect = Exception("connection refused")
         result = await converter_with_llm._call_llm("prompt", "sys")
 

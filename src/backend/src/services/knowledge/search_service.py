@@ -60,7 +60,7 @@ class KnowledgeSearchService:
         logger.info(f"File paths parameter: {file_paths}")
 
         try:
-            from src.core.llm_manager import LLMManager
+            from src.services.llm.manager import LLMManager
             from src.services.knowledge.documentation_embedding import DocumentationEmbeddingService
 
             # Generate the query embedding with the SAME embedder used at ingest

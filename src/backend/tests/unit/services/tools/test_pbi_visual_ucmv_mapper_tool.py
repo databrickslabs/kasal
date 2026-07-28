@@ -212,7 +212,7 @@ class TestErrorCases:
             ".MetricViewValidatorTool._fetch_latest_ucmv_from_db",
             return_value=db_ucmv,
         ), patch.object(tool, "_authenticate", return_value=_mock_auth()), \
-             patch("src.core.llm_manager.LLMManager.completion",
+             patch("src.services.llm.manager.LLMManager.completion",
                    AsyncMock(return_value=SAMPLE_LLM_RESPONSE)):
             result = tool._run(report_references_json=SAMPLE_REPORT_REFERENCES)
         data = json.loads(result)
@@ -332,7 +332,7 @@ class TestLLMIntegration:
         mock_completion = AsyncMock(return_value=SAMPLE_LLM_RESPONSE)
 
         with patch.object(tool, "_authenticate", return_value=auth), \
-             patch("src.core.llm_manager.LLMManager.completion", mock_completion) as mock_llm:
+             patch("src.services.llm.manager.LLMManager.completion", mock_completion) as mock_llm:
             tool._run(
                 report_references_json=SAMPLE_REPORT_REFERENCES,
                 ucmv_output=SAMPLE_UCMV_OUTPUT,
@@ -349,7 +349,7 @@ class TestLLMIntegration:
         auth = _mock_auth()
 
         with patch.object(tool, "_authenticate", return_value=auth), \
-             patch("src.core.llm_manager.LLMManager.completion", AsyncMock(return_value=SAMPLE_LLM_RESPONSE)):
+             patch("src.services.llm.manager.LLMManager.completion", AsyncMock(return_value=SAMPLE_LLM_RESPONSE)):
             result = tool._run(
                 report_references_json=SAMPLE_REPORT_REFERENCES,
                 ucmv_output=SAMPLE_UCMV_OUTPUT,
@@ -367,7 +367,7 @@ class TestLLMIntegration:
         auth = _mock_auth()
 
         with patch.object(tool, "_authenticate", return_value=auth), \
-             patch("src.core.llm_manager.LLMManager.completion",
+             patch("src.services.llm.manager.LLMManager.completion",
                    AsyncMock(side_effect=RuntimeError("LLM unavailable"))):
             result = tool._run(
                 report_references_json=SAMPLE_REPORT_REFERENCES,

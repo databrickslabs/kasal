@@ -66,8 +66,8 @@ class TestResponseModelIsHonoured:
 class TestSharedWithTheDatabricksWrapper:
     def test_wrapper_delegates_to_the_engine_helper(self):
         """One implementation: the wrapper adapts kwargs, it does not re-parse."""
-        with patch("src.core.llm.handlers.databricks_retry_llm.litellm"):
-            from src.core.llm.handlers.databricks_retry_llm import DatabricksRetryLLM
+        with patch("src.services.llm.handlers.databricks_retry_llm.litellm"):
+            from src.services.llm.handlers.databricks_retry_llm import DatabricksRetryLLM
 
             llm = DatabricksRetryLLM(model="databricks/x", api_key="k")
 
@@ -81,8 +81,8 @@ class TestSharedWithTheDatabricksWrapper:
 
     @pytest.mark.parametrize("result,kwargs", [("x", {}), (_Plan(keep=True), {"response_model": _Plan})])
     def test_adapter_passes_through_when_there_is_nothing_to_parse(self, result, kwargs):
-        with patch("src.core.llm.handlers.databricks_retry_llm.litellm"):
-            from src.core.llm.handlers.databricks_retry_llm import DatabricksRetryLLM
+        with patch("src.services.llm.handlers.databricks_retry_llm.litellm"):
+            from src.services.llm.handlers.databricks_retry_llm import DatabricksRetryLLM
 
             llm = DatabricksRetryLLM(model="databricks/x", api_key="k")
 

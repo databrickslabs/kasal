@@ -33,7 +33,7 @@ def monkeypatch_imports(monkeypatch):
     # Mock LLMManager
     fake_llm_mod = SimpleNamespace()
     fake_llm_mod.LLMManager = FakeLLMManager
-    monkeypatch.setitem(sys.modules, 'src.core.llm_manager', fake_llm_mod)
+    monkeypatch.setitem(sys.modules, 'src.services.llm.manager', fake_llm_mod)
 
     # Mock TemplateService
     fake_template_mod = SimpleNamespace()

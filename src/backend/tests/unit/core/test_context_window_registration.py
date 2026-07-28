@@ -17,7 +17,7 @@ The lookup is by EXACT key, so the registered id has to match the
 import pytest
 
 # Importing llm_manager runs the registration at module scope.
-import src.core.llm_manager  # noqa: F401
+import src.services.llm.manager  # noqa: F401
 from src.core.llm.transport import LLM_CONTEXT_WINDOW_SIZES
 from src.core.llm.transport.constants import DEFAULT_CONTEXT_WINDOW_SIZE
 from src.seeds.model_configs import DEFAULT_MODELS

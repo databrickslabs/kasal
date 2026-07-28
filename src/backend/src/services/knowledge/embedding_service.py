@@ -79,7 +79,7 @@ class KnowledgeEmbeddingService:
             # (so the search tool can narrow to a crew's knowledge sources). The
             # raw file still lives in the Databricks Volume; only the vector is
             # stored here. This replaces the Databricks Vector Search index.
-            from src.core.llm_manager import LLMManager
+            from src.services.llm.manager import LLMManager
             from src.schemas.documentation_embedding import DocumentationEmbeddingCreate
             from src.repositories.documentation_embedding_repository import (
                 DocumentationEmbeddingRepository,

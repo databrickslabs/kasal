@@ -9,7 +9,7 @@ import logging
 from src.services.execution.runtime import Process
 
 from src.core.logger import LoggerManager
-from src.core.llm_manager import LLMManager
+from src.services.llm.manager import LLMManager
 from src.services.agent_builder.agent_adapter import create_agent
 
 logger = LoggerManager.get_instance().crew

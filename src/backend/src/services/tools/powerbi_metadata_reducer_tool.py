@@ -1165,7 +1165,7 @@ Return ONLY valid JSON (no markdown, no explanation):
         llm_temperature = config.get("llm_temperature", 0.1)
         llm_confidence_threshold = config.get("llm_confidence_threshold", 0.0)
 
-        from src.core.llm_manager import LLMManager
+        from src.services.llm.manager import LLMManager
         from src.utils.telemetry import get_user_agent_header, KasalProduct
 
         logger.info(

@@ -1496,7 +1496,7 @@ class PowerBISemanticModelFetcherTool(BaseTool):
         batch_size: int = 5,
     ) -> None:
         """Batch-enrich tables with grain and purpose via LLM. Mutates in-place."""
-        from src.core.llm_manager import LLMManager
+        from src.services.llm.manager import LLMManager
         from src.utils.telemetry import get_user_agent_header, KasalProduct
 
         _SYSTEM = (
@@ -1567,7 +1567,7 @@ class PowerBISemanticModelFetcherTool(BaseTool):
         batch_size: int = 10,
     ) -> None:
         """Batch-enrich columns and measures with descriptions + synonyms. Mutates in-place."""
-        from src.core.llm_manager import LLMManager
+        from src.services.llm.manager import LLMManager
         from src.utils.telemetry import get_user_agent_header, KasalProduct
 
         _SYSTEM_COL = (

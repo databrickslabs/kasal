@@ -11,7 +11,7 @@ from typing import Dict, Any, List, Tuple, Optional
 from src.utils.prompt_utils import robust_json_parser
 from src.services.tools.tool_service import ToolService
 from src.schemas.crew import CrewGenerationRequest, CrewGenerationResponse, CrewStreamingRequest
-from src.core.llm_manager import LLMManager
+from src.services.llm.manager import LLMManager
 from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)

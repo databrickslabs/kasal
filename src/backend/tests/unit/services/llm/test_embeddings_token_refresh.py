@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.core.llm import embeddings
+from src.services.llm import embeddings
 
 
 class _Response:

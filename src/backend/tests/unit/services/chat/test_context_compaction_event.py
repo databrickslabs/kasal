@@ -10,7 +10,7 @@ Two defects this guards:
 
 2. An UNREGISTERED model silently gets DEFAULT_CONTEXT_WINDOW_SIZE (8192 → 6963
    after the 0.85 derate), which for a self-hosted model can be 4x too small, so
-   the trim shreds context the agent still needs. ``src.core.llm_manager``
+   the trim shreds context the agent still needs. ``src.services.llm.manager``
    registers every configured model at import and covers the common path, but a
    direct engine embedding — or a model set on an agent but absent from
    MODEL_CONFIGS — still lands on the 8192 default. The table stays authoritative
@@ -83,7 +83,7 @@ def test_unknown_model_falls_back_to_the_agents_configured_window():
 def test_a_known_model_keeps_the_table_window_even_if_the_agent_claims_more():
     """The table wins when it knows the model — honouring an over-claimed window
     would trim too late and turn a degraded run into a hard provider failure."""
-    import src.core.llm_manager  # noqa: F401 — registers MODEL_CONFIGS windows
+    import src.services.llm.manager  # noqa: F401 — registers MODEL_CONFIGS windows
 
     llm = _llm("Qwen3-Coder-30B-A3B-Instruct")
     assert llm._model_window_is_known()

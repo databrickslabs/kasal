@@ -173,7 +173,7 @@ class TestSearchIsolationAndTtl:
                 store_ctx(session),
             ),
             patch(
-                "src.core.llm_manager.LLMManager.get_embedding",
+                "src.services.llm.manager.LLMManager.get_embedding",
                 AsyncMock(return_value=[1.0, 0.0, 0.0]),
             ),
             patch(
@@ -245,7 +245,7 @@ class TestEmbedStampingAndPurge:
                 store_ctx(session),
             ),
             patch(
-                "src.core.llm_manager.LLMManager.get_embeddings",
+                "src.services.llm.manager.LLMManager.get_embeddings",
                 AsyncMock(return_value=[[1.0, 0.0, 0.0]]),
             ),
             patch.object(

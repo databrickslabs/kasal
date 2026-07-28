@@ -11,7 +11,7 @@ import json
 import sys
 import logging
 
-from src.core.llm.handlers.databricks_retry_llm import (
+from src.services.llm.handlers.databricks_retry_llm import (
     DatabricksRetryLLM,
     _resolve_schema_refs,
     _is_gemini_model,
@@ -191,7 +191,7 @@ class TestEngineToolCallsWithContent:
 class TestDatabricksRetryLLMOTelTracing:
     """Tests for OTel tracing integration in DatabricksRetryLLM retry logic."""
 
-    @patch("src.core.llm.handlers.databricks_retry_llm._get_retry_tracer")
+    @patch("src.services.llm.handlers.databricks_retry_llm._get_retry_tracer")
     @patch.object(DatabricksRetryLLM, "_get_crew_logger")
     def test_emit_retry_span_creates_span_with_attributes(
         self, mock_crew_log, mock_get_tracer
@@ -211,7 +211,7 @@ class TestDatabricksRetryLLMOTelTracing:
             llm = DatabricksRetryLLM(model="databricks/test-model")
 
         with patch(
-            "src.core.llm.handlers.databricks_retry_llm._time_mod"
+            "src.services.llm.handlers.databricks_retry_llm._time_mod"
         ) as mock_time:
             llm._emit_retry_span(
                 attempt=1,
@@ -242,7 +242,7 @@ class TestDatabricksRetryLLMOTelTracing:
         # sleep should happen inside the span
         mock_time.sleep.assert_called_once_with(2.0)
 
-    @patch("src.core.llm.handlers.databricks_retry_llm._get_retry_tracer")
+    @patch("src.services.llm.handlers.databricks_retry_llm._get_retry_tracer")
     @patch.object(DatabricksRetryLLM, "_get_crew_logger")
     def test_emit_retry_span_sleeps_without_tracer(
         self, mock_crew_log, mock_get_tracer
@@ -255,7 +255,7 @@ class TestDatabricksRetryLLMOTelTracing:
             llm = DatabricksRetryLLM(model="databricks/test-model")
 
         with patch(
-            "src.core.llm.handlers.databricks_retry_llm._time_mod"
+            "src.services.llm.handlers.databricks_retry_llm._time_mod"
         ) as mock_time:
             llm._emit_retry_span(
                 attempt=0,
@@ -269,7 +269,7 @@ class TestDatabricksRetryLLMOTelTracing:
 
         mock_time.sleep.assert_called_once_with(1.0)
 
-    @patch("src.core.llm.handlers.databricks_retry_llm._get_retry_tracer")
+    @patch("src.services.llm.handlers.databricks_retry_llm._get_retry_tracer")
     @patch.object(DatabricksRetryLLM, "_get_crew_logger")
     def test_emit_retry_span_still_sleeps_on_tracer_exception(
         self, mock_crew_log, mock_get_tracer
@@ -284,7 +284,7 @@ class TestDatabricksRetryLLMOTelTracing:
             llm = DatabricksRetryLLM(model="databricks/test-model")
 
         with patch(
-            "src.core.llm.handlers.databricks_retry_llm._time_mod"
+            "src.services.llm.handlers.databricks_retry_llm._time_mod"
         ) as mock_time:
             llm._emit_retry_span(
                 attempt=0,
@@ -590,10 +590,10 @@ class TestGetRetryTracer:
     def test_returns_none_when_opentelemetry_not_installed(self):
         """Verify _get_retry_tracer returns None when OTel is unavailable."""
         with patch(
-            "src.core.llm.handlers.databricks_retry_llm._get_retry_tracer"
+            "src.services.llm.handlers.databricks_retry_llm._get_retry_tracer"
         ) as mock:
             mock.return_value = None
-            from src.core.llm.handlers.databricks_retry_llm import (
+            from src.services.llm.handlers.databricks_retry_llm import (
                 _get_retry_tracer,
             )
 
@@ -670,7 +670,7 @@ class TestDatabricksRetryLLMRetryLogic:
             ],
         ):
             with patch(
-                "src.core.llm.handlers.databricks_retry_llm._time_mod"
+                "src.services.llm.handlers.databricks_retry_llm._time_mod"
             ) as mock_time:
                 result = llm.call([{"role": "user", "content": "test"}])
 
@@ -689,7 +689,7 @@ class TestDatabricksRetryLLMRetryLogic:
 
         test_error = Exception("Connection timeout")
         with patch.object(type(llm).__bases__[0], "call", side_effect=test_error):
-            with patch("src.core.llm.handlers.databricks_retry_llm._time_mod"):
+            with patch("src.services.llm.handlers.databricks_retry_llm._time_mod"):
                 with pytest.raises(Exception) as exc_info:
                     llm.call([{"role": "user", "content": "test"}])
 
@@ -791,7 +791,7 @@ class TestGetRetryTracerExceptionPath:
 
     def test_returns_none_when_otel_raises(self):
         """_get_retry_tracer returns None when opentelemetry raises on import."""
-        from src.core.llm.handlers.databricks_retry_llm import _get_retry_tracer
+        from src.services.llm.handlers.databricks_retry_llm import _get_retry_tracer
         import sys
 
         # Remove otel from sys.modules so import raises
@@ -1020,7 +1020,7 @@ class TestCallMethodMissingCoverage:
 
         # Always return empty (3 retries = MAX_RETRIES)
         with patch.object(type(llm).__bases__[0], "call", return_value=""):
-            with patch("src.core.llm.handlers.databricks_retry_llm._time_mod"):
+            with patch("src.services.llm.handlers.databricks_retry_llm._time_mod"):
                 result = llm.call([{"role": "user", "content": "test"}])
         assert result == ""
 
@@ -1043,7 +1043,7 @@ class TestMergeSystemMessagesForGemini:
 
     def test_merges_multiple_system_messages(self):
         """Multiple system messages are merged into one for Gemini."""
-        from src.core.llm.handlers.databricks_retry_llm import (
+        from src.services.llm.handlers.databricks_retry_llm import (
             _merge_system_messages_for_gemini,
         )
 
@@ -1064,7 +1064,7 @@ class TestMergeSystemMessagesForGemini:
 
     def test_single_system_message_unchanged(self):
         """Single system message is not modified."""
-        from src.core.llm.handlers.databricks_retry_llm import (
+        from src.services.llm.handlers.databricks_retry_llm import (
             _merge_system_messages_for_gemini,
         )
 
@@ -1078,7 +1078,7 @@ class TestMergeSystemMessagesForGemini:
 
     def test_noop_for_non_gemini_model(self):
         """No-op for non-Gemini models."""
-        from src.core.llm.handlers.databricks_retry_llm import (
+        from src.services.llm.handlers.databricks_retry_llm import (
             _merge_system_messages_for_gemini,
         )
 
@@ -1092,7 +1092,7 @@ class TestMergeSystemMessagesForGemini:
 
     def test_noop_for_empty_messages(self):
         """No-op for empty messages list."""
-        from src.core.llm.handlers.databricks_retry_llm import (
+        from src.services.llm.handlers.databricks_retry_llm import (
             _merge_system_messages_for_gemini,
         )
 
@@ -1102,7 +1102,7 @@ class TestMergeSystemMessagesForGemini:
 
     def test_filters_empty_system_content(self):
         """System messages with empty content are excluded from merge."""
-        from src.core.llm.handlers.databricks_retry_llm import (
+        from src.services.llm.handlers.databricks_retry_llm import (
             _merge_system_messages_for_gemini,
         )
 
@@ -1128,7 +1128,7 @@ class TestGeminiSanitizationRunsInCall:
     """
 
     def _llm(self, model):
-        with patch("src.core.llm.handlers.databricks_retry_llm.litellm"):
+        with patch("src.services.llm.handlers.databricks_retry_llm.litellm"):
             return DatabricksRetryLLM(model=model, api_key="k")
 
     def test_call_merges_system_messages_for_gemini(self):
@@ -1139,7 +1139,7 @@ class TestGeminiSanitizationRunsInCall:
             {"role": "system", "content": "Be concise."},
         ]
         with patch(
-            "src.core.llm.handlers.databricks_retry_llm.LLM.call", return_value="ok"
+            "src.services.llm.handlers.databricks_retry_llm.LLM.call", return_value="ok"
         ) as mock_call:
             llm.call(messages)
 
@@ -1164,7 +1164,7 @@ class TestGeminiSanitizationRunsInCall:
             }
         ]
         with patch(
-            "src.core.llm.handlers.databricks_retry_llm.LLM.call", return_value="ok"
+            "src.services.llm.handlers.databricks_retry_llm.LLM.call", return_value="ok"
         ):
             llm.call([{"role": "user", "content": "hi"}], tools=tools)
 
@@ -1180,7 +1180,7 @@ class TestGeminiSanitizationRunsInCall:
             {"role": "user", "content": "hi"},
         ]
         with patch(
-            "src.core.llm.handlers.databricks_retry_llm.LLM.call", return_value="ok"
+            "src.services.llm.handlers.databricks_retry_llm.LLM.call", return_value="ok"
         ) as mock_call:
             llm.call(messages)
 

@@ -15,7 +15,7 @@ from src.services.catalog.templates import TemplateService
 from src.schemas.template_generation import TemplateGenerationRequest, TemplateGenerationResponse
 from src.services.execution.logs.llm_log_service import LLMLogService
 from src.utils.prompt_utils import robust_json_parser
-from src.core.llm_manager import LLMManager
+from src.services.llm.manager import LLMManager
 from src.services.settings.models import ModelConfigService
 
 # Configure logging

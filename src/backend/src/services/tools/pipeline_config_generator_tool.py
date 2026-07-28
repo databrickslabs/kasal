@@ -1183,7 +1183,7 @@ class PipelineConfigGeneratorTool(BaseTool):
         ``{fact: {join_key, union_mode?, ...}}``. group_id/OBO derived from context;
         never pass them. Returns ``{}`` on any failure."""
         import json as _json
-        from src.core.llm_manager import LLMManager
+        from src.services.llm.manager import LLMManager
         from src.utils.telemetry import get_user_agent_header, KasalProduct
 
         prompt = (

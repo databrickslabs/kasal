@@ -1788,7 +1788,7 @@ class TestGenerateDaxWithSelfCorrectionDaxTool:
 
         mock_completion = AsyncMock(return_value="EVALUATE\nSUMMARIZECOLUMNS(\"R\", [Revenue])")
 
-        with patch("src.core.llm_manager.LLMManager.completion", mock_completion):
+        with patch("src.services.llm.manager.LLMManager.completion", mock_completion):
             result = self._run(
                 self.tool._generate_dax_with_self_correction(
                     "revenue?", model_context, config, previous

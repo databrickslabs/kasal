@@ -170,7 +170,7 @@ class TestEveryGateReportsItself:
         monkeypatch.setattr(a2ui_runner, "_resolve_config", _on)
         monkeypatch.setattr(a2ui_runner, "wants_rich_surface", lambda *a: True)
         monkeypatch.setattr(
-            "src.core.llm_manager.LLMManager.get_llm", staticmethod(_llm)
+            "src.services.llm.manager.LLMManager.get_llm", staticmethod(_llm)
         )
         monkeypatch.setattr(
             a2ui_runner.asyncio,
@@ -197,7 +197,7 @@ class TestEveryGateReportsItself:
         monkeypatch.setattr(a2ui_runner, "_resolve_config", _on)
         monkeypatch.setattr(a2ui_runner, "wants_rich_surface", lambda *a: True)
         monkeypatch.setattr(
-            "src.core.llm_manager.LLMManager.get_llm", staticmethod(_llm)
+            "src.services.llm.manager.LLMManager.get_llm", staticmethod(_llm)
         )
         monkeypatch.setattr(
             a2ui_runner.asyncio,
@@ -229,7 +229,7 @@ class TestEveryGateReportsItself:
         monkeypatch.setattr(a2ui_runner, "_resolve_config", _on)
         monkeypatch.setattr(a2ui_runner, "wants_rich_surface", lambda *a: True)
         monkeypatch.setattr(
-            "src.core.llm_manager.LLMManager.get_llm", staticmethod(_llm)
+            "src.services.llm.manager.LLMManager.get_llm", staticmethod(_llm)
         )
         monkeypatch.setattr(
             a2ui_runner.asyncio, "to_thread", lambda *a, **k: _completed(surface)

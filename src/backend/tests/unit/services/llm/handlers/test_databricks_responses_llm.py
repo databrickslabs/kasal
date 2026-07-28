@@ -125,7 +125,7 @@ _MOCK_MODULES = {
         LLMCallType=MagicMock(LLM_CALL="LLM_CALL", TOOL_CALL="TOOL_CALL"),
     ),
 }
-_HANDLER_MODULE_KEY = "src.core.llm.handlers.databricks_responses_llm"
+_HANDLER_MODULE_KEY = "src.services.llm.handlers.databricks_responses_llm"
 
 # Save originals so we can restore them after loading
 _saved_modules = {}

@@ -273,7 +273,7 @@ async def _apply_llm_guardrail(task_args, task_config, agent, config, task_key):
                 f"Augmented task {task_key} description with guardrail criteria for proactive alignment"
             )
 
-        from src.core.llm_manager import LLMManager
+        from src.services.llm.manager import LLMManager
         from src.utils.user_context import UserContext
 
         gc = UserContext.get_group_context()

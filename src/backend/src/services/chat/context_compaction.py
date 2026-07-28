@@ -117,7 +117,7 @@ async def maintain_session_summary(
     if not compaction_enabled() or not session_id or not group_ids:
         return False
     try:
-        from src.core.llm_manager import LLMManager
+        from src.services.llm.manager import LLMManager
         from src.db.session import request_scoped_session
         from src.repositories.chat_history_repository import ChatHistoryRepository
         from src.repositories.chat_session_repository import ChatSessionRepository

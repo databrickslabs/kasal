@@ -1450,7 +1450,7 @@ class TestEnrichFactJoinMapLlm:
                    new=AsyncMock(return_value=("https://x.cloud.databricks.com", "wh", {}))), \
              patch("src.services.tools.metric_view_utils.uc_query.run_query",
                    new=AsyncMock(return_value={"success": True, "columns": ["n"], "rows": [[100]]})), \
-             patch("src.core.llm_manager.LLMManager.completion",
+             patch("src.services.llm.manager.LLMManager.completion",
                    new=AsyncMock(return_value='{"FactB": {"join_key": "plant_workcenter_key", "union_mode": true}}')):
             log = await tool._enrich_fact_join_map_llm(config, ["FactB"], "wh", None)
         jk = config["fact_join_map"]["FactB"]["join_key"]
@@ -1471,7 +1471,7 @@ class TestEnrichFactJoinMapLlm:
                    new=AsyncMock(return_value=("https://x.cloud.databricks.com", "wh", {}))), \
              patch("src.services.tools.metric_view_utils.uc_query.run_query",
                    new=AsyncMock(return_value={"success": True, "rows": [[1]]})), \
-             patch("src.core.llm_manager.LLMManager.completion",
+             patch("src.services.llm.manager.LLMManager.completion",
                    new=AsyncMock(return_value='{"FactB": {"join_key": "should_not_apply"}}')):
             log = await tool._enrich_fact_join_map_llm(config, ["FactB"], "wh", None)
         assert config["fact_join_map"]["FactB"]["join_key"] == "human_key"  # untouched
@@ -1487,7 +1487,7 @@ class TestEnrichFactJoinMapLlm:
                    new=AsyncMock(return_value=("https://x.cloud.databricks.com", "wh", {}))), \
              patch("src.services.tools.metric_view_utils.uc_query.run_query",
                    new=AsyncMock(return_value={"success": True, "rows": [[1]]})), \
-             patch("src.core.llm_manager.LLMManager.completion",
+             patch("src.services.llm.manager.LLMManager.completion",
                    new=AsyncMock(side_effect=RuntimeError("LLM unavailable"))):
             log = await tool._enrich_fact_join_map_llm(config, ["FactB"], "wh", None)
         assert config["fact_join_map"]["FactB"]["join_key"] == "TODO: x"  # unchanged
@@ -1507,7 +1507,7 @@ class TestP3NegativeGate:
                  "from_cardinality": "one", "to_cardinality": "many"}]
         # gate returns [] → caller skips the LLM branch entirely
         assert tool._detect_cross_fact_merge(rels) == []
-        with patch("src.core.llm_manager.LLMManager.completion", new=AsyncMock()) as mock_llm:
+        with patch("src.services.llm.manager.LLMManager.completion", new=AsyncMock()) as mock_llm:
             # simulate the _run gate decision
             involved = tool._detect_cross_fact_merge(rels)
             assert not involved

@@ -17,7 +17,7 @@ from src.services.catalog.templates import TemplateService
 from src.utils.prompt_utils import robust_json_parser
 from src.repositories.log_repository import LLMLogRepository
 from src.services.execution.logs.llm_log_service import LLMLogService
-from src.core.llm_manager import LLMManager
+from src.services.llm.manager import LLMManager
 from src.schemas.task import TaskCreate
 from src.utils.user_context import GroupContext
 

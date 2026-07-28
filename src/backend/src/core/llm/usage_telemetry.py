@@ -33,13 +33,13 @@ def _resolve_user_token() -> Optional[str]:
     """User token for OBO telemetry, or None.
 
     Contextvars do not propagate into the worker threads LLM calls run on in
-    subprocess execution, hence the module-level fallback that
-    ``llm_manager.set_subprocess_user_token`` populates.
+    subprocess execution, hence the module-level fallback that the subprocess
+    populates via ``set_subprocess_user_token``.
     """
-    from src.core.llm_manager import _subprocess_user_token
+    from src.core.llm.subprocess_token import get_subprocess_user_token
     from src.utils.user_context import UserContext
 
-    return UserContext.get_user_token() or _subprocess_user_token
+    return UserContext.get_user_token() or get_subprocess_user_token()
 
 
 def _should_send(usage: Optional[dict]) -> bool:

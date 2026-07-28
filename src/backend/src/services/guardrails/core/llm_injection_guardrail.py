@@ -56,7 +56,7 @@ def _content_hash(text: str) -> str:
 
 def _run_completion(model: str, messages, max_tokens: int = 8):
     """Run LLMManager.completion() from a sync context (guardrail validate)."""
-    from src.core.llm_manager import LLMManager
+    from src.services.llm.manager import LLMManager
 
     async def _call():
         return await LLMManager.completion(

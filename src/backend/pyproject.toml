@@ -209,15 +209,15 @@ name = "Core and utils never import services"
 type = "forbidden"
 source_modules = ["src.core", "src.utils"]
 forbidden_modules = ["src.services"]
-# All four remaining violations are the same shape: core wants configuration that
-# lives behind a service (the model catalogue, API keys, LLM logs). Fixing them
-# means injecting the config or defining ports in core — or deciding llm_manager
-# is an application service that merely lives in core/. Not yet decided.
+# llm_manager and embeddings moved to services/llm/ — anything that reads the
+# model catalogue or a tenant's API key is per-tenant DB-backed business logic,
+# not core. What is left:
+#   - dependencies.py is the FastAPI composition root; wiring services together
+#     is its job, and it belongs with the API layer rather than in core/.
+#   - the three utils modules resolve credentials, group membership or a prompt
+#     template from below. A CredentialProvider port in core would clear most.
 ignore_imports = [
-    "src.core.llm_manager -> src.services.settings.models",
-    "src.core.llm_manager -> src.services.settings.api_keys",
     "src.core.dependencies -> src.services.execution.logs.llm_log_service",
-    "src.core.llm.embeddings -> src.services.settings.api_keys",
     "src.utils.user_context -> src.services.groups.groups",
     "src.utils.user_context -> src.services.groups.users",
     "src.utils.databricks_auth -> src.services.databricks.workspace.service",

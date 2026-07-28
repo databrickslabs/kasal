@@ -110,7 +110,7 @@ def _validate_source_sql(sql: str) -> bool:
 
 async def _call_llm(prompt: str, system_prompt: str, model: str) -> dict:
     """Call LLM via LLMManager.completion() — auth handled internally."""
-    from src.core.llm_manager import LLMManager
+    from src.services.llm.manager import LLMManager
     from src.utils.telemetry import get_user_agent_header, KasalProduct
 
     try:

@@ -167,7 +167,7 @@ Respond with valid JSON only (no markdown code blocks around the JSON)."""
         Returns:
             Dict with response content and usage
         """
-        from src.core.llm_manager import LLMManager
+        from src.services.llm.manager import LLMManager
         from src.utils.telemetry import get_user_agent_header, KasalProduct
 
         try:

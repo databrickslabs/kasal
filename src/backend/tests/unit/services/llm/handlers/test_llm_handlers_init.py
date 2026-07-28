@@ -10,17 +10,14 @@ import pathlib
 import pytest
 
 
-# parents[5] is src/backend: this file sits at
-# tests/unit/core/llm/handlers/, and the package it inspects moved to
-# src/core/llm/handlers/ when the two sibling LLM folders were merged.
-_INIT_PATH = (
-    pathlib.Path(__file__).resolve().parents[5]
-    / "src"
-    / "core"
-    / "llm"
-    / "handlers"
-    / "__init__.py"
+# Walk up to src/backend rather than counting parents. A parent count breaks
+# silently the moment this file changes depth, and it has now done so twice —
+# once when the two sibling LLM folders merged, once when the handlers moved to
+# services/ because they read the model catalogue.
+_BACKEND = next(
+    a for a in pathlib.Path(__file__).resolve().parents if (a / "src" / "services").is_dir()
 )
+_INIT_PATH = _BACKEND / "src" / "services" / "llm" / "handlers" / "__init__.py"
 
 
 @pytest.fixture(scope="module")

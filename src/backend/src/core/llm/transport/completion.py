@@ -393,7 +393,7 @@ class OpenAICompletion(BaseLLM):
         It is the UNKNOWN case that needs help: an unregistered model silently
         gets DEFAULT_CONTEXT_WINDOW_SIZE (8192 → 6963 after the 0.85 derate).
         For a self-hosted model that can be off by 4x, so the trim shreds tool
-        results the agent still needs. ``src.core.llm_manager`` registers every
+        results the agent still needs. ``src.services.llm.manager`` registers every
         configured model at import and covers the common path, but nothing
         guarantees it ran — a direct engine embedding, or a model added to an
         agent but not to MODEL_CONFIGS, both land here. When the table has no

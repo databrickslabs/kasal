@@ -54,7 +54,7 @@ def _patch_create_agent_deps():
     """Return a context manager stack that mocks all external deps of create_agent."""
     return (
         patch('src.services.execution.kernel.agent_builder.Agent'),
-        patch('src.core.llm_manager.LLMManager'),
+        patch('src.services.llm.manager.LLMManager'),
         patch('src.db.session.request_scoped_session'),
         patch('src.services.mcp.service.MCPService'),
         patch('src.services.tools.mcp_integration.MCPIntegration'),
@@ -67,7 +67,7 @@ async def _run_create_agent(agent_config, mock_config, mock_tools, agent_class_m
     mock_llm.model = "gpt-4o"
 
     with patch('src.services.execution.kernel.agent_builder.Agent') as mock_agent_class, \
-         patch('src.core.llm_manager.LLMManager') as mock_llm_manager, \
+         patch('src.services.llm.manager.LLMManager') as mock_llm_manager, \
          patch('src.db.session.request_scoped_session') as mock_session_factory, \
          patch('src.services.mcp.service.MCPService'), \
          patch('src.services.tools.mcp_integration.MCPIntegration') as mock_mcp:

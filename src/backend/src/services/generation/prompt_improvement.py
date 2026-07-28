@@ -13,7 +13,7 @@ import logging
 import os
 from typing import Any, Dict, Optional
 
-from src.core.llm_manager import LLMManager
+from src.services.llm.manager import LLMManager
 from src.repositories.log_repository import LLMLogRepository
 from src.services.execution.logs.llm_log_service import LLMLogService
 from src.services.catalog.templates import TemplateService

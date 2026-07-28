@@ -11,7 +11,7 @@ import traceback
 
 from src.schemas.execution import ExecutionNameGenerationRequest, ExecutionNameGenerationResponse
 from src.services.execution.logs.llm_log_service import LLMLogService
-from src.core.llm_manager import LLMManager
+from src.services.llm.manager import LLMManager
 
 # Configure logging
 logger = logging.getLogger(__name__)

@@ -50,7 +50,7 @@ async def _make_agent(agent_config=None, config=None, **kwargs):
     if config is None:
         config = {"group_id": "grp-1"}
 
-    with patch("src.core.llm_manager.LLMManager") as mock_lm, \
+    with patch("src.services.llm.manager.LLMManager") as mock_lm, \
          patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
          patch("src.db.session.request_scoped_session") as mock_sess, \
          patch("src.services.mcp.service.MCPService") as mock_mcp_svc, \
@@ -154,7 +154,7 @@ class TestCreateAgentBasic:
 
     @pytest.mark.asyncio
     async def test_agent_key_stored_as_attribute(self):
-        with patch("src.core.llm_manager.LLMManager") as mock_lm, \
+        with patch("src.services.llm.manager.LLMManager") as mock_lm, \
              patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp.service.MCPService"), \
@@ -199,7 +199,7 @@ class TestCreateAgentLLMConfig:
     @pytest.mark.asyncio
     async def test_llm_dict_with_model_key(self):
         cfg = _base_config(llm={"model": "gpt-4o", "temperature": 0.5})
-        with patch("src.core.llm_manager.LLMManager") as mock_lm, \
+        with patch("src.services.llm.manager.LLMManager") as mock_lm, \
              patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp.service.MCPService"), \
@@ -233,13 +233,13 @@ class TestCreateAgentLLMConfig:
     @pytest.mark.asyncio
     async def test_llm_dict_databricks_model_gets_retry_llm(self):
         cfg = _base_config(llm={"model": "databricks-meta-llama-4"})
-        with patch("src.core.llm_manager.LLMManager") as mock_lm, \
+        with patch("src.services.llm.manager.LLMManager") as mock_lm, \
              patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp.service.MCPService"), \
              patch("src.core.unit_of_work.UnitOfWork"), \
              patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls, \
-             patch("src.core.llm.handlers.databricks_retry_llm.DatabricksRetryLLM") as mock_retry:
+             patch("src.services.llm.handlers.databricks_retry_llm.DatabricksRetryLLM") as mock_retry:
 
             mock_configured = MagicMock()
             mock_configured.model = "databricks/databricks-meta-llama-4"
@@ -267,7 +267,7 @@ class TestCreateAgentLLMConfig:
     @pytest.mark.asyncio
     async def test_no_llm_in_config_uses_default(self):
         cfg = {"role": "R", "goal": "G", "backstory": "B"}
-        with patch("src.core.llm_manager.LLMManager") as mock_lm, \
+        with patch("src.services.llm.manager.LLMManager") as mock_lm, \
              patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp.service.MCPService"), \
@@ -303,7 +303,7 @@ class TestCreateAgentLLMConfig:
     @pytest.mark.asyncio
     async def test_llm_config_exception_falls_back_to_string(self):
         cfg = _base_config(llm="some-model")
-        with patch("src.core.llm_manager.LLMManager") as mock_lm, \
+        with patch("src.services.llm.manager.LLMManager") as mock_lm, \
              patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp.service.MCPService"), \
@@ -346,7 +346,7 @@ class TestCreateAgentToolResolution:
         mock_tool_instance.name = "SearchTool"
         mock_tool_factory.create_tool = MagicMock(return_value=mock_tool_instance)
 
-        with patch("src.core.llm_manager.LLMManager") as mock_lm, \
+        with patch("src.services.llm.manager.LLMManager") as mock_lm, \
              patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp.service.MCPService"), \
@@ -390,7 +390,7 @@ class TestCreateAgentToolResolution:
         mcp_sub2 = MagicMock(name="mcp_sub2")
         mock_tool_factory.create_tool = MagicMock(return_value=(True, [mcp_sub1, mcp_sub2]))
 
-        with patch("src.core.llm_manager.LLMManager") as mock_lm, \
+        with patch("src.services.llm.manager.LLMManager") as mock_lm, \
              patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp.service.MCPService"), \
@@ -430,7 +430,7 @@ class TestCreateAgentToolResolution:
         mock_tool_factory = MagicMock()
         mock_tool_factory.create_tool = MagicMock(return_value=(True, "mcp_service_adapter"))
 
-        with patch("src.core.llm_manager.LLMManager") as mock_lm, \
+        with patch("src.services.llm.manager.LLMManager") as mock_lm, \
              patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp.service.MCPService"), \
@@ -469,7 +469,7 @@ class TestCreateAgentToolResolution:
         mock_tool_factory = MagicMock()
         mock_tool_factory.create_tool = MagicMock(return_value=None)
 
-        with patch("src.core.llm_manager.LLMManager") as mock_lm, \
+        with patch("src.services.llm.manager.LLMManager") as mock_lm, \
              patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp.service.MCPService"), \
@@ -506,7 +506,7 @@ class TestCreateAgentToolResolution:
         mock_tool_svc = MagicMock()
         mock_tool_svc.get_tool_config_by_name = AsyncMock(return_value={})
 
-        with patch("src.core.llm_manager.LLMManager") as mock_lm, \
+        with patch("src.services.llm.manager.LLMManager") as mock_lm, \
              patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp.service.MCPService"), \
@@ -614,7 +614,7 @@ class TestCreateAgentAdditionalParams:
         mock_genie = MagicMock(name="GenieTool")
         mock_tool_factory.create_tool = MagicMock(return_value=mock_genie)
 
-        with patch("src.core.llm_manager.LLMManager") as mock_lm, \
+        with patch("src.services.llm.manager.LLMManager") as mock_lm, \
              patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp.service.MCPService"), \
@@ -650,7 +650,7 @@ class TestCreateAgentAdditionalParams:
     async def test_mcp_tools_error_continues(self):
         cfg = _base_config()
 
-        with patch("src.core.llm_manager.LLMManager") as mock_lm, \
+        with patch("src.services.llm.manager.LLMManager") as mock_lm, \
              patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp.service.MCPService"), \
@@ -679,7 +679,7 @@ class TestCreateAgentAdditionalParams:
 
         mock_tool_svc = MagicMock()
 
-        with patch("src.core.llm_manager.LLMManager") as mock_lm, \
+        with patch("src.services.llm.manager.LLMManager") as mock_lm, \
              patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp.service.MCPService"), \
@@ -714,7 +714,7 @@ class TestCreateAgentLLMConfigExtended:
     async def test_llm_dict_with_model_and_temperature_override(self):
         """Dict LLM config with temperature set at agent level."""
         cfg = _base_config(llm={"model": "gpt-4o"}, temperature=60)
-        with patch("src.core.llm_manager.LLMManager") as mock_lm, \
+        with patch("src.services.llm.manager.LLMManager") as mock_lm, \
              patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp.service.MCPService"), \
@@ -751,7 +751,7 @@ class TestCreateAgentLLMConfigExtended:
     async def test_llm_dict_no_model_key_uses_default(self):
         """Dict LLM config without 'model' key uses gpt-4o default."""
         cfg = _base_config(llm={"temperature": 0.5, "max_tokens": 1000})
-        with patch("src.core.llm_manager.LLMManager") as mock_lm, \
+        with patch("src.services.llm.manager.LLMManager") as mock_lm, \
              patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp.service.MCPService"), \
@@ -794,7 +794,7 @@ class TestCreateAgentLLMConfigExtended:
         # Return unexpected format (True, "unexpected_string")
         mock_tool_factory.create_tool = MagicMock(return_value=(True, "unexpected_not_list"))
 
-        with patch("src.core.llm_manager.LLMManager") as mock_lm, \
+        with patch("src.services.llm.manager.LLMManager") as mock_lm, \
              patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp.service.MCPService"), \
@@ -826,7 +826,7 @@ class TestCreateAgentLLMConfigExtended:
     async def test_llm_dict_databricks_prefix_ensured(self):
         """Dict LLM with databricks model delegates prefix handling to LLMManager."""
         cfg = _base_config(llm={"model": "databricks-meta-llama"})
-        with patch("src.core.llm_manager.LLMManager") as mock_lm, \
+        with patch("src.services.llm.manager.LLMManager") as mock_lm, \
              patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp.service.MCPService"), \
@@ -859,7 +859,7 @@ class TestCreateAgentLLMConfigExtended:
     async def test_llm_dict_configured_llm_no_model_attr_fallback(self):
         """When configured_llm doesn't have 'model' attr, uses fallback path."""
         cfg = _base_config(llm={"model": "some-model"})
-        with patch("src.core.llm_manager.LLMManager") as mock_lm, \
+        with patch("src.services.llm.manager.LLMManager") as mock_lm, \
              patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp.service.MCPService"), \

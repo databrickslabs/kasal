@@ -228,7 +228,7 @@ async def _call_llm(
     observable). Falls back to plain ``completion()`` if the cached path errors,
     so a transport hiccup never blocks translation (fail-open).
     """
-    from src.core.llm_manager import LLMManager
+    from src.services.llm.manager import LLMManager
     from src.utils.telemetry import get_user_agent_header, KasalProduct
 
     messages = [_system_message(system_prompt), {"role": "user", "content": prompt}]

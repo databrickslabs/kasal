@@ -270,7 +270,7 @@ class TestGetVectorStorage:
         assert result is None
 
 
-_LLM_GET_EMBEDDINGS = "src.core.llm_manager.LLMManager.get_embeddings"
+_LLM_GET_EMBEDDINGS = "src.services.llm.manager.LLMManager.get_embeddings"
 _DOC_EMBEDDING_REPO = "src.repositories.documentation_embedding_repository.DocumentationEmbeddingRepository"
 
 

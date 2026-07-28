@@ -43,7 +43,7 @@ def _set_mlflow_tracing(enabled: bool) -> None:
         pass
 
 from src.core.cache import intent_cache
-from src.core.llm_manager import LLMManager
+from src.services.llm.manager import LLMManager
 from src.schemas.crew import CrewGenerationRequest, CrewGenerationResponse, CrewStreamingRequest
 from src.schemas.dispatcher import DispatcherRequest, DispatcherResponse, IntentType
 from src.schemas.task_generation import TaskGenerationRequest, TaskGenerationResponse

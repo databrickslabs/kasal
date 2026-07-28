@@ -1230,7 +1230,7 @@ OUTPUT: Return ONLY the DAX query starting with EVALUATE. No text, no explanatio
 
         self._emit_llm_trace(event_context="DAX Generation - Prompt", prompt=prompt, model=llm_model, operation="generate_dax")
 
-        from src.core.llm_manager import LLMManager
+        from src.services.llm.manager import LLMManager
         from src.utils.telemetry import get_user_agent_header, KasalProduct
 
         try:
@@ -1350,7 +1350,7 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
         logger.info(f"[DaxTool] ═══ SELF-CORRECTION PROMPT (system={len(system_prompt)} chars, user={len(user_prompt)} chars) ═══")
         logger.info(f"[DaxTool] PROMPT START ═══\n{prompt}\n═══ PROMPT END")
 
-        from src.core.llm_manager import LLMManager
+        from src.services.llm.manager import LLMManager
         from src.utils.telemetry import get_user_agent_header, KasalProduct
 
         try:

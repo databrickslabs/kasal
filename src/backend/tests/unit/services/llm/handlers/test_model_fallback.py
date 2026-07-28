@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.core.llm.handlers.model_fallback import (
+from src.services.llm.handlers.model_fallback import (
     CONTEXT_WINDOW,
     ENDPOINT_MISSING,
     FATAL_4XX,

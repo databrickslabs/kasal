@@ -187,7 +187,7 @@ def _sync_llm_completion(
     request's UserContext (group id + OBO token, which LLMManager needs for
     API-key lookups) is re-established inside the coroutine.
     """
-    from src.core.llm_manager import LLMManager
+    from src.services.llm.manager import LLMManager
     from src.utils.telemetry import KasalProduct, get_user_agent_header
     from src.utils.user_context import UserContext
 

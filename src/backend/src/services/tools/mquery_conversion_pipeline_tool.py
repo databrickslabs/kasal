@@ -1318,7 +1318,7 @@ class MqueryConversionPipelineTool(BaseTool):
         """Ask LLM to fix SQL given the row-count diff vs DAX."""
         import re as _re
         try:
-            from src.core.llm_manager import LLMManager
+            from src.services.llm.manager import LLMManager
             from src.utils.telemetry import get_user_agent_header, KasalProduct
             model = cfg.get("llm_model", "databricks-claude-sonnet-4-5")
             prompt = (
@@ -1445,7 +1445,7 @@ class MqueryConversionPipelineTool(BaseTool):
         # LLM generates the CREATE TABLE; we do the INSERT VALUES mechanically
         # but with the correct types from the LLM-generated schema.
         try:
-            from src.core.llm_manager import LLMManager
+            from src.services.llm.manager import LLMManager
             from src.utils.telemetry import get_user_agent_header, KasalProduct
             model = cfg.get("llm_model", "databricks-claude-sonnet-4-5")
             prompt = (

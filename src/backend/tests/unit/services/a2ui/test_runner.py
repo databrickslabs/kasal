@@ -216,7 +216,7 @@ def _stub_compose_surface(monkeypatch, surface):
     async def _get_llm(*a, **k):
         return _LLM()
 
-    import src.core.llm_manager as llm_mod
+    import src.services.llm.manager as llm_mod
 
     monkeypatch.setattr(llm_mod.LLMManager, "get_llm", staticmethod(_get_llm))
 

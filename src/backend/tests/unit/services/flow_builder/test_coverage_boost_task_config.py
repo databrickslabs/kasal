@@ -374,7 +374,7 @@ class TestConfigureTask:
         with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
              patch("src.services.execution.runtime.Task", side_effect=mock_task_ctor), \
              patch("src.services.execution.runtime.LLMGuardrail") as MockLLMG, \
-             patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()), \
+             patch("src.services.llm.manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()), \
              patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_gc):
             MockLLMG.return_value = MagicMock()
 
@@ -401,7 +401,7 @@ class TestConfigureTask:
         with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
              patch("src.services.execution.runtime.Task", return_value=task), \
              patch("src.services.execution.runtime.LLMGuardrail") as MockLLMG, \
-             patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()), \
+             patch("src.services.llm.manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()), \
              patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_gc):
             mock_llm_guardrail = MagicMock()
             MockLLMG.return_value = mock_llm_guardrail
@@ -424,7 +424,7 @@ class TestConfigureTask:
         with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
              patch("src.services.execution.runtime.Task", return_value=task), \
              patch("src.services.execution.runtime.LLMGuardrail") as MockLLMG, \
-             patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new=mock_configure_llm), \
+             patch("src.services.llm.manager.LLMManager.configure_kasal_llm", new=mock_configure_llm), \
              patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_gc):
             MockLLMG.return_value = MagicMock()
             await TaskConfig.configure_task(task_data, agent=agent)
@@ -475,7 +475,7 @@ class TestConfigureTask:
         with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
              patch("src.services.execution.runtime.Task", side_effect=mock_task_ctor), \
              patch("src.services.execution.runtime.LLMGuardrail"), \
-             patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()), \
+             patch("src.services.llm.manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()), \
              patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_gc):
             await TaskConfig.configure_task(task_data, agent=agent)
 
@@ -496,7 +496,7 @@ class TestConfigureTask:
         with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
              patch("src.services.execution.runtime.Task", return_value=task), \
              patch("src.services.execution.runtime.LLMGuardrail", side_effect=ImportError("no crewai")), \
-             patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()), \
+             patch("src.services.llm.manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()), \
              patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_gc):
             result = await TaskConfig.configure_task(task_data, agent=agent)
 

@@ -287,7 +287,7 @@ class TestLLMSelection:
 
         mock_completion = AsyncMock(return_value=llm_content)
 
-        with patch("src.core.llm_manager.LLMManager.completion", mock_completion):
+        with patch("src.services.llm.manager.LLMManager.completion", mock_completion):
             result = tool._run(
                 model_context_json=json.dumps(ctx),
                 user_question="What is the total revenue by country?",

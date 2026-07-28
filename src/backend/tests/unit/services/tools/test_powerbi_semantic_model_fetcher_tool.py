@@ -2985,7 +2985,7 @@ class TestFetcherEnrichTablesSemantic:
             return_value='{"tables": [{"name": "Sales", "grain": "One row per order", "purpose": "Fact table"}]}'
         )
 
-        with patch("src.core.llm_manager.LLMManager.completion", mock_completion):
+        with patch("src.services.llm.manager.LLMManager.completion", mock_completion):
             self._run(
                 self.tool._enrich_tables_semantic(
                     "databricks-claude-sonnet-4",
@@ -3002,7 +3002,7 @@ class TestFetcherEnrichTablesSemantic:
         mock_completion = AsyncMock(side_effect=Exception("LLM error"))
 
         # Should not raise
-        with patch("src.core.llm_manager.LLMManager.completion", mock_completion):
+        with patch("src.services.llm.manager.LLMManager.completion", mock_completion):
             self._run(
                 self.tool._enrich_tables_semantic(
                     "databricks-claude-sonnet-4",
@@ -3038,7 +3038,7 @@ class TestFetcherEnrichColumnsAndMeasuresSemantic:
 
         mock_completion = AsyncMock(return_value='{"columns": []}')
 
-        with patch("src.core.llm_manager.LLMManager.completion", mock_completion):
+        with patch("src.services.llm.manager.LLMManager.completion", mock_completion):
             self._run(
                 self.tool._enrich_columns_and_measures_semantic(
                     "databricks-claude-sonnet-4",
@@ -3062,7 +3062,7 @@ class TestFetcherEnrichColumnsAndMeasuresSemantic:
             return_value='{"columns": [{"name": "Amount", "description": "Sales amount", "synonyms": ["Revenue"]}]}'
         )
 
-        with patch("src.core.llm_manager.LLMManager.completion", mock_completion):
+        with patch("src.services.llm.manager.LLMManager.completion", mock_completion):
             self._run(
                 self.tool._enrich_columns_and_measures_semantic(
                     "databricks-claude-sonnet-4",
@@ -3082,7 +3082,7 @@ class TestFetcherEnrichColumnsAndMeasuresSemantic:
             return_value='{"measures": [{"name": "Revenue", "description": "Total sales revenue", "synonyms": ["Total Revenue"]}]}'
         )
 
-        with patch("src.core.llm_manager.LLMManager.completion", mock_completion):
+        with patch("src.services.llm.manager.LLMManager.completion", mock_completion):
             self._run(
                 self.tool._enrich_columns_and_measures_semantic(
                     "databricks-claude-sonnet-4",

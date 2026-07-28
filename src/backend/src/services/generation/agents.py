@@ -17,7 +17,7 @@ from src.services.catalog.templates import TemplateService
 
 from src.repositories.log_repository import LLMLogRepository
 from src.services.execution.logs.llm_log_service import LLMLogService
-from src.core.llm_manager import LLMManager
+from src.services.llm.manager import LLMManager
 from src.utils.user_context import GroupContext
 
 # Configure logging

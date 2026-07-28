@@ -940,7 +940,7 @@ class TestMemoryLlmOverride:
         )
         fake_llm = MagicMock(name="ConfiguredLLM")
         with patch(
-            "src.core.llm_manager.LLMManager.configure_kasal_llm",
+            "src.services.llm.manager.LLMManager.configure_kasal_llm",
             new=AsyncMock(return_value=fake_llm),
         ) as mock_cfg:
             result = await service.resolve_memory_llm_override(mem_cfg)
@@ -953,7 +953,7 @@ class TestMemoryLlmOverride:
         mem_cfg = MagicMock()
         mem_cfg.cognitive_config = MagicMock(memory_llm_model="databricks-bad")
         with patch(
-            "src.core.llm_manager.LLMManager.configure_kasal_llm",
+            "src.services.llm.manager.LLMManager.configure_kasal_llm",
             new=AsyncMock(side_effect=RuntimeError("model not found")),
         ):
             assert await service.resolve_memory_llm_override(mem_cfg) is None

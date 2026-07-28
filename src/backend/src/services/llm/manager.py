@@ -67,8 +67,8 @@ import pathlib
 # Endpoint-specific LLM subclasses. This import no longer carries side effects:
 # the module used to apply two litellm monkey patches at import time, both of
 # which the engine bypasses (it speaks to endpoints with the OpenAI SDK).
-from src.core.llm.handlers.databricks_retry_llm import DatabricksRetryLLM
-from src.core.llm.handlers.vllm import VLLMFunctionCallingLLM
+from src.services.llm.handlers.databricks_retry_llm import DatabricksRetryLLM
+from src.services.llm.handlers.vllm import VLLMFunctionCallingLLM
 # The former crewai_memory_patch / crewai_instructor_patch side-effect
 # imports are gone: kasal_engine's analyze models are tolerant of
 # stringified-JSON metadata by design, and InternalInstructor accepts
@@ -84,16 +84,10 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 
-# Module-level token for subprocess callback fallback (contextvars don't propagate to callback threads)
-_subprocess_user_token: Optional[str] = None
-
-def set_subprocess_user_token(token: str) -> None:
-    """Set the token usage telemetry falls back to in subprocess mode.
-
-    Contextvars do not propagate into the worker threads LLM calls run on.
-    """
-    global _subprocess_user_token
-    _subprocess_user_token = token
+# The subprocess OBO token fallback lives in core/llm/subprocess_token.py — it is
+# process state that usage telemetry reads, and telemetry must not import this
+# module to get at it. Re-exported here for the existing call sites.
+from src.core.llm.subprocess_token import set_subprocess_user_token
 
 # Register Databricks model context windows with CrewAI
 # This is CRITICAL for CrewAI's respect_context_window to work correctly.
@@ -777,7 +771,7 @@ class LLMManager:
             #  - stop-word suppression (GPT-5 reasoning rejects 'stop')
             #  - diagnostic logging for tool-calling debugging
             if "gpt-5-3-codex" in model_name_value.lower():
-                from src.core.llm.handlers.databricks_responses_llm import DatabricksResponsesLLM
+                from src.services.llm.handlers.databricks_responses_llm import DatabricksResponsesLLM
                 # The Responses API is served under a DIFFERENT base path than chat:
                 # /ai-gateway/openai/v1 (gateway) or /serving-endpoints (otherwise).
                 # `api_base` here is the CHAT base (/ai-gateway/mlflow/v1 when the
@@ -947,7 +941,7 @@ class LLMManager:
         ``configure_kasal_llm`` with the same auth/endpoint. gpt-5-3-codex is
         excluded because it needs the Responses API (different base path).
         """
-        from src.core.llm.handlers.model_fallback import candidates_from_model_configs
+        from src.services.llm.handlers.model_fallback import candidates_from_model_configs
         from src.db.session import request_scoped_session
         from src.services.settings.models import ModelConfigService
 
@@ -974,7 +968,7 @@ class LLMManager:
         batch_size: Optional[int] = None,
     ) -> List[Optional[List[float]]]:
         """Embed many texts, resolving auth once and batching the requests."""
-        from src.core.llm.embeddings import get_embeddings
+        from src.services.llm.embeddings import get_embeddings
 
         return await get_embeddings(
             texts, model=model, embedder_config=embedder_config, batch_size=batch_size
@@ -987,6 +981,6 @@ class LLMManager:
         embedder_config: Optional[Dict[str, Any]] = None,
     ) -> Optional[List[float]]:
         """Embed a single text with the configured provider."""
-        from src.core.llm.embeddings import get_embedding
+        from src.services.llm.embeddings import get_embedding
 
         return await get_embedding(text, model=model, embedder_config=embedder_config)

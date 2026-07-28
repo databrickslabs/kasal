@@ -325,7 +325,7 @@ class TestStartingPointMethodBody:
 
         with patch("src.services.flow_builder.modules.flow_methods.Crew") as MockCrew, \
              patch("src.services.flow_builder.modules.flow_methods.asyncio.wait_for") as mock_wait, \
-             patch("src.core.llm_manager.LLMManager") as MockLLM:
+             patch("src.services.llm.manager.LLMManager") as MockLLM:
             mock_llm = MagicMock()
             MockLLM.get_llm = AsyncMock(return_value=mock_llm)
             crew_kwargs_captured = {}
@@ -790,7 +790,7 @@ class TestListenerMethodBody:
 
         with patch("src.services.flow_builder.modules.flow_methods.Crew") as MockCrew, \
              patch("src.services.flow_builder.modules.flow_methods.asyncio.wait_for") as mock_wait, \
-             patch("src.core.llm_manager.LLMManager") as MockLLM, \
+             patch("src.services.llm.manager.LLMManager") as MockLLM, \
              patch("src.services.flow_builder.modules.flow_methods.Task") as MockTask:
             mock_llm = MagicMock()
             MockLLM.get_llm = AsyncMock(return_value=mock_llm)

@@ -800,7 +800,7 @@ class CrewMemoryService:
 
         group_id = self.config.get("group_id") or "default"
         try:
-            from src.core.llm_manager import LLMManager
+            from src.services.llm.manager import LLMManager
 
             llm = await LLMManager.configure_kasal_llm(model_name, group_id)
             logger.info(
