@@ -830,6 +830,24 @@ async def _ensure_a2a_push_configs_table(conn) -> None:
         logger.warning(f"Could not ensure a2a_push_configs table: {e}")
 
 
+async def _ensure_a2a_agents_table(conn) -> None:
+    """Idempotently create a2a_agents (remote agents Kasal can call).
+
+    New table, so a checkfirst-create reaches deployed installs identically on
+    SQLite, PostgreSQL and Lakebase — same as its neighbours here.
+    """
+    try:
+        from src.models.a2a_agent import A2AAgent
+
+        def _create(sync_conn):
+            A2AAgent.__table__.create(sync_conn, checkfirst=True)
+
+        await conn.run_sync(_create)
+        logger.info("Ensured a2a_agents table exists")
+    except Exception as e:
+        logger.warning(f"Could not ensure a2a_agents table: {e}")
+
+
 async def _ensure_crew_publications_table(conn) -> None:
     """Idempotently create `publications` (the external-publication registry).
 
@@ -1166,6 +1184,7 @@ async def run_schema_self_heal(conn) -> None:
     await _ensure_workflow_recipe_trials_table(conn)
     await _ensure_crew_publications_table(conn)
     await _ensure_a2a_push_configs_table(conn)
+    await _ensure_a2a_agents_table(conn)
     await _ensure_crew_feedback_table(conn)
     await _ensure_powerbi_extraction_table(conn)
     await _ensure_prompt_optimization_runs_table(conn)

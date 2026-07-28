@@ -8,6 +8,7 @@ from src.services.tools.base import BaseTool
 
 # Import only the CrewAI tools we're keeping
 from src.services.tools.image_generation import ImageGenerationTool
+from src.services.tools.async_bridge import run_async_with_context
 from src.services.tools.scrape_website import ScrapeWebsiteTool
 from src.services.tools.serper_search import SerperDevTool
 
@@ -956,6 +957,25 @@ class ToolFactory:
                         f"{type(instance).__name__}: {stamp_err}"
                     )
         return result
+
+    def _group_ids_for_tools(self) -> list:
+        """Which workspaces' configuration this factory may read.
+
+        Prefers the live request context over the config dict: the config is a
+        snapshot taken when a run was queued, and a tool built later must not
+        reach into a workspace on the strength of a stale value.
+        """
+        try:
+            from src.utils.user_context import UserContext
+
+            group_context = UserContext.get_group_context()
+            if group_context and group_context.group_ids:
+                return list(group_context.group_ids)
+        except Exception:  # noqa: BLE001
+            pass
+
+        group_id = (self.config or {}).get("group_id")
+        return [group_id] if group_id else []
 
     def _create_tool_impl(
         self,
@@ -2257,6 +2277,23 @@ class ToolFactory:
                 )
 
                 return tool_class(**tool_args)
+
+            elif tool_name in ("A2AAgentTool", "Remote Agent"):
+                # One entry can produce several tools (one per attached remote),
+                # so this returns a list. Built in a sibling module because this
+                # file is already far past the size ceiling.
+                from src.services.tools.a2a_tool_builder import build_a2a_tools
+
+                group_ids = self._group_ids_for_tools()
+                return run_async_with_context(
+                    build_a2a_tools(
+                        tool_config=tool_config,
+                        user_token=self.user_token,
+                        group_ids=group_ids,
+                        result_as_answer=result_as_answer,
+                    ),
+                    timeout=60,
+                )
 
             elif tool_name == "MCPTool":
                 # MCPTool is a marker that signals MCP integration should be used.
