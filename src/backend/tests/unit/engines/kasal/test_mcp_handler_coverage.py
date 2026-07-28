@@ -48,7 +48,7 @@ async def test_get_or_create_mcp_adapter_creates_new():
     mock_module, mock_adapter = make_mock_mcp_module()
 
     params = {"url": "http://example.com", "auth_type": "token"}
-    with patch.dict(sys.modules, {"src.engines.common.mcp_adapter": mock_module}):
+    with patch.dict(sys.modules, {"src.services.tools.mcp_adapter": mock_module}):
         result = await mcp_handler.get_or_create_mcp_adapter(params, adapter_id="my-id")
 
     assert "my-id" in mcp_handler._active_mcp_adapters
@@ -105,7 +105,7 @@ async def test_get_or_create_mcp_adapter_pools_per_identity():
     mock_module.MCPAdapter = MagicMock(return_value=fresh)
     params_b = {"url": "http://example.com", "auth_type": "token",
                 "headers": {"Authorization": "Bearer token-user-b"}}
-    with patch.dict(sys.modules, {"src.engines.common.mcp_adapter": mock_module}):
+    with patch.dict(sys.modules, {"src.services.tools.mcp_adapter": mock_module}):
         assert await mcp_handler.get_or_create_mcp_adapter(params_b) is fresh
 
 
@@ -126,7 +126,7 @@ async def test_get_or_create_mcp_adapter_removes_stale_from_pool():
     mock_module.MCPAdapter = MagicMock(return_value=mock_new_adapter)
 
     params = {"url": "http://example.com", "auth_type": "token"}
-    with patch.dict(sys.modules, {"src.engines.common.mcp_adapter": mock_module}):
+    with patch.dict(sys.modules, {"src.services.tools.mcp_adapter": mock_module}):
         result = await mcp_handler.get_or_create_mcp_adapter(params)
 
     # Stale was removed and new one added
@@ -139,7 +139,7 @@ async def test_get_or_create_mcp_adapter_stdio_key():
     mock_module, mock_adapter = make_mock_mcp_module()
 
     params = {"transport": "stdio", "command": ["python", "server.py"]}
-    with patch.dict(sys.modules, {"src.engines.common.mcp_adapter": mock_module}):
+    with patch.dict(sys.modules, {"src.services.tools.mcp_adapter": mock_module}):
         result = await mcp_handler.get_or_create_mcp_adapter(params)
 
     pool_key = "stdio_python server.py"
@@ -152,7 +152,7 @@ async def test_get_or_create_mcp_adapter_stdio_string_command():
     mock_module, mock_adapter = make_mock_mcp_module()
 
     params = {"transport": "stdio", "command": "python server.py"}
-    with patch.dict(sys.modules, {"src.engines.common.mcp_adapter": mock_module}):
+    with patch.dict(sys.modules, {"src.services.tools.mcp_adapter": mock_module}):
         result = await mcp_handler.get_or_create_mcp_adapter(params)
 
     pool_key = "stdio_python server.py"
@@ -165,7 +165,7 @@ async def test_get_or_create_mcp_adapter_registers_with_id():
     mock_module, mock_adapter = make_mock_mcp_module()
 
     params = {"url": "http://example.com", "auth_type": "none"}
-    with patch.dict(sys.modules, {"src.engines.common.mcp_adapter": mock_module}):
+    with patch.dict(sys.modules, {"src.services.tools.mcp_adapter": mock_module}):
         result = await mcp_handler.get_or_create_mcp_adapter(params, adapter_id="adapter-42")
 
     assert "adapter-42" in mcp_handler._active_mcp_adapters
@@ -514,7 +514,7 @@ def test_create_kasal_tool_from_mcp_with_properties():
     mock_module = MagicMock()
     mock_module.MCPTool = MagicMock(return_value=mock_tool)
 
-    with patch.dict(sys.modules, {"src.engines.common.mcp_adapter": mock_module}):
+    with patch.dict(sys.modules, {"src.services.tools.mcp_adapter": mock_module}):
         result = mcp_handler.create_kasal_tool_from_mcp(mcp_tool_dict)
 
     assert result is not None
@@ -534,7 +534,7 @@ def test_create_kasal_tool_from_mcp_empty_schema():
     mock_module = MagicMock()
     mock_module.MCPTool = MagicMock(return_value=mock_tool)
 
-    with patch.dict(sys.modules, {"src.engines.common.mcp_adapter": mock_module}):
+    with patch.dict(sys.modules, {"src.services.tools.mcp_adapter": mock_module}):
         result = mcp_handler.create_kasal_tool_from_mcp(mcp_tool_dict)
 
     assert result is not None
@@ -557,7 +557,7 @@ def test_create_kasal_tool_from_mcp_optional_fields():
     mock_module = MagicMock()
     mock_module.MCPTool = MagicMock(return_value=mock_tool)
 
-    with patch.dict(sys.modules, {"src.engines.common.mcp_adapter": mock_module}):
+    with patch.dict(sys.modules, {"src.services.tools.mcp_adapter": mock_module}):
         result = mcp_handler.create_kasal_tool_from_mcp(mcp_tool_dict)
 
     assert result is not None

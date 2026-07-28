@@ -11,7 +11,7 @@ import inspect
 from unittest.mock import MagicMock, patch, mock_open
 from datetime import datetime
 
-from src.engines.kasal.guardrails.guardrail_wrapper import GuardrailWrapper
+from src.services.guardrails.wrapper import GuardrailWrapper
 from src.services.guardrails.base_guardrail import BaseGuardrail
 from src.core.logger import LoggerManager
 

@@ -1211,7 +1211,7 @@ class CrewPreparation:
             # seams. Recall: a context provider runs at each task's context
             # assembly (query = description + runtime context tail). Persist:
             # an output sink fires for every completed task, fire-and-forget.
-            from src.engines.kasal.memory.memory_hooks import (
+            from src.services.memory.hooks import (
                 make_memory_context_provider,
                 make_memory_output_sink,
             )
@@ -1234,7 +1234,7 @@ class CrewPreparation:
                 # Drain in-flight memory writes so the final task's save (and
                 # its "Memory Write" trace span) survives process teardown,
                 # then run the bounded LLM-free dedupe pass.
-                from src.engines.kasal.memory.memory_hooks import (
+                from src.services.memory.hooks import (
                     flush_memory_writes,
                 )
                 from src.services.memory.maintenance import (

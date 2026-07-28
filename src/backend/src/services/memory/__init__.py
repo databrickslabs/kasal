@@ -13,9 +13,9 @@ an exported app could too. The storage backends implement ``kasal_engine``'s
 types, but that is a LIBRARY dependency, the same kind as a tool's ``BaseTool``:
 it says what a backend must look like, not that a crew must be running.
 
-What stayed in the engine is ``memory_hooks``: recall before a task, persist
-after it, on the event bus. That is orchestration — it is about WHEN memory is
-touched during a run, not what memory is.
+``hooks`` is the run-side half: recall before a task, persist after it, driven
+off the event bus. It says WHEN memory is touched during a run; the rest of this
+package says what memory is.
 """
 
 from src.services.memory.backend_factory import MemoryBackendFactory

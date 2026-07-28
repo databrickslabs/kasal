@@ -1354,7 +1354,7 @@ def run_crew_in_process(
                 # sink fires from _finish_task for every completed task,
                 # fire-and-forget ("Memory Write" rows). Best-effort.
                 try:
-                    from src.engines.kasal.memory.memory_hooks import (
+                    from src.services.memory.hooks import (
                         make_memory_context_provider,
                         make_memory_output_sink,
                     )
@@ -1417,7 +1417,7 @@ def run_crew_in_process(
                     # otherwise die with the interpreter — losing both the
                     # stored memory and its "Memory Write" trace span.
                     try:
-                        from src.engines.kasal.memory.memory_hooks import (
+                        from src.services.memory.hooks import (
                             flush_memory_writes,
                         )
 

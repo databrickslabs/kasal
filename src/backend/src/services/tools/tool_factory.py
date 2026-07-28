@@ -75,7 +75,7 @@ except ImportError:
 
 # MCPTool - Import from mcp_adapter
 try:
-    from src.engines.common.mcp_adapter import MCPTool
+    from src.services.tools.mcp_adapter import MCPTool
 except ImportError:
     MCPTool = None
     logging.warning("Could not import MCPTool - MCP integration may not be available")

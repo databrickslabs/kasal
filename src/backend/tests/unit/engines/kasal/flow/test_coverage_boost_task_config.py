@@ -292,7 +292,7 @@ class TestConfigureTask:
         with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
              patch("kasal_engine.core.Task", return_value=task), \
              patch("src.services.guardrails.guardrail_factory.GuardrailFactory") as MockGF, \
-             patch("src.engines.kasal.guardrails.guardrail_wrapper.GuardrailWrapper", return_value=MagicMock()):
+             patch("src.services.guardrails.wrapper.GuardrailWrapper", return_value=MagicMock()):
             MockGF.create_guardrail.side_effect = _capture
 
             await TaskConfig.configure_task(task_data, agent=agent)
@@ -320,7 +320,7 @@ class TestConfigureTask:
         with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
              patch("kasal_engine.core.Task", return_value=task), \
              patch("src.services.guardrails.guardrail_factory.GuardrailFactory") as MockGF, \
-             patch("src.engines.kasal.guardrails.guardrail_wrapper.GuardrailWrapper", return_value=MagicMock()):
+             patch("src.services.guardrails.wrapper.GuardrailWrapper", return_value=MagicMock()):
             MockGF.create_guardrail.side_effect = _capture
 
             await TaskConfig.configure_task(task_data, agent=agent)

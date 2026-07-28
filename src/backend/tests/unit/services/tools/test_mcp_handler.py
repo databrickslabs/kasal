@@ -115,7 +115,7 @@ class TestGetOrCreateMCPAdapter:
         mock_adapter = _healthy_adapter()
 
         with patch(
-            "src.engines.common.mcp_adapter.MCPAdapter",
+            "src.services.tools.mcp_adapter.MCPAdapter",
             return_value=mock_adapter,
         ) as mock_cls:
             result = await get_or_create_mcp_adapter(
@@ -149,7 +149,7 @@ class TestGetOrCreateMCPAdapter:
         fresh = _healthy_adapter()
 
         with patch(
-            "src.engines.common.mcp_adapter.MCPAdapter",
+            "src.services.tools.mcp_adapter.MCPAdapter",
             return_value=fresh,
         ):
             result = await get_or_create_mcp_adapter(
@@ -168,7 +168,7 @@ class TestGetOrCreateMCPAdapter:
             made.append(a)
             return a
 
-        with patch("src.engines.common.mcp_adapter.MCPAdapter", side_effect=_make):
+        with patch("src.services.tools.mcp_adapter.MCPAdapter", side_effect=_make):
             a_user = await get_or_create_mcp_adapter({
                 "url": "https://w/api/2.0/mcp/genie/s1",
                 "auth_type": "databricks_obo",
@@ -193,7 +193,7 @@ class TestGetOrCreateMCPAdapter:
             "headers": {"Authorization": "Bearer SAME_TOKEN"},
         }
         # Prime the pool via a first create, then assert the second call reuses it.
-        with patch("src.engines.common.mcp_adapter.MCPAdapter", return_value=existing):
+        with patch("src.services.tools.mcp_adapter.MCPAdapter", return_value=existing):
             first = await get_or_create_mcp_adapter(params)
         second = await get_or_create_mcp_adapter(params)
         assert first is existing and second is existing
@@ -204,7 +204,7 @@ class TestGetOrCreateMCPAdapter:
         adapter = _healthy_adapter()
 
         with patch(
-            "src.engines.common.mcp_adapter.MCPAdapter",
+            "src.services.tools.mcp_adapter.MCPAdapter",
             return_value=adapter,
         ):
             await get_or_create_mcp_adapter(
@@ -222,7 +222,7 @@ class TestGetOrCreateMCPAdapter:
         failed.tools = []
         failed.initialize = AsyncMock()
 
-        with patch("src.engines.common.mcp_adapter.MCPAdapter", return_value=failed):
+        with patch("src.services.tools.mcp_adapter.MCPAdapter", return_value=failed):
             result = await get_or_create_mcp_adapter(
                 {"url": "http://example.com", "auth_type": "api_key"}
             )
@@ -240,7 +240,7 @@ class TestGetOrCreateMCPAdapter:
         mcp_handler._mcp_connection_pool["http://example.com_api_key_noauth"] = empty
 
         fresh = _healthy_adapter()
-        with patch("src.engines.common.mcp_adapter.MCPAdapter", return_value=fresh):
+        with patch("src.services.tools.mcp_adapter.MCPAdapter", return_value=fresh):
             result = await get_or_create_mcp_adapter(
                 {"url": "http://example.com", "auth_type": "api_key"}
             )
@@ -260,7 +260,7 @@ class TestGetOrCreateMCPAdapter:
         mcp_handler._mcp_connection_pool["http://example.com_api_key_noauth"] = poisoned
 
         fresh = _healthy_adapter()
-        with patch("src.engines.common.mcp_adapter.MCPAdapter", return_value=fresh):
+        with patch("src.services.tools.mcp_adapter.MCPAdapter", return_value=fresh):
             result = await get_or_create_mcp_adapter(
                 {"url": "http://example.com", "auth_type": "api_key"}
             )
@@ -522,7 +522,7 @@ class TestCreateCrewAIToolFromMCP:
                 "required": ["query"],
             },
         }
-        with patch("src.engines.common.mcp_adapter.MCPTool") as MockMCPTool:
+        with patch("src.services.tools.mcp_adapter.MCPTool") as MockMCPTool:
             wrapper = MagicMock()
             wrapper.name = "search"
             wrapper.description = "Search tool"
@@ -557,7 +557,7 @@ class TestCreateCrewAIToolFromMCP:
                 "required": ["query", "conversation_id"],
             },
         }
-        with patch("src.engines.common.mcp_adapter.MCPTool") as MockMCPTool:
+        with patch("src.services.tools.mcp_adapter.MCPTool") as MockMCPTool:
             wrapper = MagicMock()
             wrapper.name = "query_space"
             wrapper.description = "Query the genie space"
@@ -583,7 +583,7 @@ class TestCreateCrewAIToolFromMCP:
                 "required": ["a", "b"],
             },
         }
-        with patch("src.engines.common.mcp_adapter.MCPTool") as MockMCPTool:
+        with patch("src.services.tools.mcp_adapter.MCPTool") as MockMCPTool:
             wrapper = MagicMock()
             wrapper.name = "t"
             wrapper.description = "d"
@@ -601,7 +601,7 @@ class TestCreateCrewAIToolFromMCP:
             "description": "No params",
             "input_schema": None,
         }
-        with patch("src.engines.common.mcp_adapter.MCPTool") as MockMCPTool:
+        with patch("src.services.tools.mcp_adapter.MCPTool") as MockMCPTool:
             wrapper = MagicMock()
             wrapper.name = "simple"
             wrapper.description = "No params"
@@ -632,7 +632,7 @@ class TestCreateCrewAIToolFromMCP:
             isError=False,
         )
 
-        with patch("src.engines.common.mcp_adapter.MCPTool") as MockMCPTool:
+        with patch("src.services.tools.mcp_adapter.MCPTool") as MockMCPTool:
             wrapper = MagicMock()
             wrapper.name = "echo"
             wrapper.description = "Echo tool"
@@ -653,7 +653,7 @@ class TestCreateCrewAIToolFromMCP:
             "description": "Fail tool",
             "input_schema": {"properties": {}, "required": []},
         }
-        with patch("src.engines.common.mcp_adapter.MCPTool") as MockMCPTool:
+        with patch("src.services.tools.mcp_adapter.MCPTool") as MockMCPTool:
             wrapper = MagicMock()
             wrapper.name = "fail"
             wrapper.description = "Fail tool"
@@ -938,7 +938,7 @@ class TestCreateCrewAIToolFromMCPRunningLoop:
         content_item.text = "thread_result"
         mock_result.content = [content_item]
 
-        with patch("src.engines.common.mcp_adapter.MCPTool") as MockMCPTool:
+        with patch("src.services.tools.mcp_adapter.MCPTool") as MockMCPTool:
             wrapper = MagicMock()
             wrapper.name = "echo"
             wrapper.description = "Echo tool"
@@ -973,7 +973,7 @@ class TestCreateCrewAIToolFromMCPRunningLoop:
 
         plain_result = "plain string result"
 
-        with patch("src.engines.common.mcp_adapter.MCPTool") as MockMCPTool:
+        with patch("src.services.tools.mcp_adapter.MCPTool") as MockMCPTool:
             wrapper = MagicMock()
             wrapper.name = "plain"
             wrapper.description = "Plain tool"

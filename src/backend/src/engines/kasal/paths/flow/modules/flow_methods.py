@@ -361,7 +361,7 @@ def attach_memory_seams(crew: Any, crew_label: str) -> None:
     Best-effort by design: a broken memory backend must never break a flow.
     """
     try:
-        from src.engines.kasal.memory.memory_hooks import (
+        from src.services.memory.hooks import (
             make_memory_context_provider,
             make_memory_output_sink,
         )

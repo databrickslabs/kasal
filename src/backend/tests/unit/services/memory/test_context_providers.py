@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 
 from kasal_engine.core.crew import Crew
 from kasal_engine.memory import MemoryRecord
-from src.engines.kasal.memory.memory_hooks import (
+from src.services.memory.hooks import (
     MEMORY_BLOCK_HEADER,
     make_memory_context_provider,
 )
@@ -139,7 +139,7 @@ class TestCrewOutputSinks:
 
 class TestMakeMemoryOutputSink:
     def test_none_for_sentinel_memory(self):
-        from src.engines.kasal.memory.memory_hooks import make_memory_output_sink
+        from src.services.memory.hooks import make_memory_output_sink
 
         assert make_memory_output_sink(None) is None
         assert make_memory_output_sink(False) is None
@@ -148,7 +148,7 @@ class TestMakeMemoryOutputSink:
     def test_sink_persists_task_output(self):
         import threading
 
-        from src.engines.kasal.memory.memory_hooks import make_memory_output_sink
+        from src.services.memory.hooks import make_memory_output_sink
 
         done = threading.Event()
         memory = MagicMock()
@@ -171,7 +171,7 @@ class TestMakeMemoryOutputSink:
     def test_sink_skips_empty_output(self):
         import time as _time
 
-        from src.engines.kasal.memory.memory_hooks import make_memory_output_sink
+        from src.services.memory.hooks import make_memory_output_sink
 
         memory = MagicMock()
         sink = make_memory_output_sink(memory)

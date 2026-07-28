@@ -338,7 +338,7 @@ async def get_or_create_mcp_adapter(server_params, adapter_id=None):
     
     # Create new adapter
     logger.info(f"Creating new MCP adapter for key: {pool_key}")
-    from src.engines.common.mcp_adapter import MCPAdapter
+    from src.services.tools.mcp_adapter import MCPAdapter
     
     adapter = MCPAdapter(server_params)
     await adapter.initialize()
@@ -508,7 +508,7 @@ def create_kasal_tool_from_mcp(mcp_tool_dict):
     from kasal_engine.tools import BaseTool
     from pydantic import BaseModel, Field
     from typing import Type, Dict, Any
-    from src.engines.common.mcp_adapter import MCPTool
+    from src.services.tools.mcp_adapter import MCPTool
     
     # Create MCPTool wrapper
     mcp_tool_wrapper = MCPTool(mcp_tool_dict)

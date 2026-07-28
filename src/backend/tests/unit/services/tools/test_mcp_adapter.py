@@ -7,7 +7,7 @@ from unittest.mock import Mock, AsyncMock, patch, MagicMock
 from typing import Dict, Any, List
 
 from src.core.exceptions import MCPConnectionError
-from src.engines.common.mcp_adapter import MCPAdapter, MCPTool, _extract_error_summary, _is_http_auth_error, _log_exception_group
+from src.services.tools.mcp_adapter import MCPAdapter, MCPTool, _extract_error_summary, _is_http_auth_error, _log_exception_group
 
 
 class TestMCPAdapter:
@@ -909,7 +909,7 @@ class TestAdapterEdgeCases:
         })
 
         # Patch logger.info to raise, triggering the except branch
-        with patch('src.engines.common.mcp_adapter.logger') as mock_logger:
+        with patch('src.services.tools.mcp_adapter.logger') as mock_logger:
             mock_logger.info.side_effect = RuntimeError("log error")
             # Should not raise
             await adapter.stop()
@@ -921,7 +921,7 @@ class TestExtractErrorSummary:
 
     def test_regular_exception_returns_str(self):
         """Regular exception returns str(exc)."""
-        from src.engines.common.mcp_adapter import _extract_error_summary
+        from src.services.tools.mcp_adapter import _extract_error_summary
 
         exc = Exception("something went wrong")
         result = _extract_error_summary(exc)
@@ -929,7 +929,7 @@ class TestExtractErrorSummary:
 
     def test_exception_with_response_status_code(self):
         """Exception with .response.status_code returns 'HTTP {code} - {exc}' with body."""
-        from src.engines.common.mcp_adapter import _extract_error_summary
+        from src.services.tools.mcp_adapter import _extract_error_summary
 
         exc = Exception("Forbidden")
         mock_response = Mock()
@@ -944,7 +944,7 @@ class TestExtractErrorSummary:
 
     def test_exception_with_status_attribute(self):
         """Exception with .status attribute returns 'HTTP {status} - {exc}'."""
-        from src.engines.common.mcp_adapter import _extract_error_summary
+        from src.services.tools.mcp_adapter import _extract_error_summary
 
         exc = Exception("Unauthorized")
         exc.status = 401
@@ -954,7 +954,7 @@ class TestExtractErrorSummary:
 
     def test_exception_group_recurses_and_joins(self):
         """ExceptionGroup (has .exceptions list) recurses and joins with '; '."""
-        from src.engines.common.mcp_adapter import _extract_error_summary
+        from src.services.tools.mcp_adapter import _extract_error_summary
 
         sub1 = Exception("error one")
         sub2 = Exception("error two")
@@ -966,7 +966,7 @@ class TestExtractErrorSummary:
 
     def test_response_with_empty_body(self):
         """Response with empty body does not append body text."""
-        from src.engines.common.mcp_adapter import _extract_error_summary
+        from src.services.tools.mcp_adapter import _extract_error_summary
 
         exc = Exception("Server Error")
         mock_response = Mock()
@@ -985,7 +985,7 @@ class TestIsHttpAuthError:
 
     def test_response_status_code_403(self):
         """Returns True for exc with .response.status_code == 403."""
-        from src.engines.common.mcp_adapter import _is_http_auth_error
+        from src.services.tools.mcp_adapter import _is_http_auth_error
 
         exc = Exception("Forbidden")
         mock_response = Mock()
@@ -996,7 +996,7 @@ class TestIsHttpAuthError:
 
     def test_response_status_code_401(self):
         """Returns True for exc with .response.status_code == 401."""
-        from src.engines.common.mcp_adapter import _is_http_auth_error
+        from src.services.tools.mcp_adapter import _is_http_auth_error
 
         exc = Exception("Unauthorized")
         mock_response = Mock()
@@ -1007,7 +1007,7 @@ class TestIsHttpAuthError:
 
     def test_response_status_code_500_returns_false(self):
         """Returns False for .response.status_code == 500."""
-        from src.engines.common.mcp_adapter import _is_http_auth_error
+        from src.services.tools.mcp_adapter import _is_http_auth_error
 
         exc = Exception("Server Error")
         mock_response = Mock()
@@ -1018,7 +1018,7 @@ class TestIsHttpAuthError:
 
     def test_status_attribute_403(self):
         """Returns True for exc with .status == 403."""
-        from src.engines.common.mcp_adapter import _is_http_auth_error
+        from src.services.tools.mcp_adapter import _is_http_auth_error
 
         exc = Exception("Forbidden")
         # Ensure no .response attribute so .status branch is reached
@@ -1032,28 +1032,28 @@ class TestIsHttpAuthError:
 
     def test_string_contains_403(self):
         """Returns True when '403' in str(exc)."""
-        from src.engines.common.mcp_adapter import _is_http_auth_error
+        from src.services.tools.mcp_adapter import _is_http_auth_error
 
         exc = Exception("Client error 403 Forbidden")
         assert _is_http_auth_error(exc) is True
 
     def test_string_contains_401(self):
         """Returns True when '401' in str(exc)."""
-        from src.engines.common.mcp_adapter import _is_http_auth_error
+        from src.services.tools.mcp_adapter import _is_http_auth_error
 
         exc = Exception("Client error 401 Unauthorized")
         assert _is_http_auth_error(exc) is True
 
     def test_non_auth_error_returns_false(self):
         """Returns False for non-auth errors."""
-        from src.engines.common.mcp_adapter import _is_http_auth_error
+        from src.services.tools.mcp_adapter import _is_http_auth_error
 
         exc = Exception("Connection timed out")
         assert _is_http_auth_error(exc) is False
 
     def test_exception_group_with_auth_sub_exception(self):
         """Recurses into ExceptionGroup with one auth sub-exception."""
-        from src.engines.common.mcp_adapter import _is_http_auth_error
+        from src.services.tools.mcp_adapter import _is_http_auth_error
 
         sub_auth = Exception("Forbidden")
         mock_response = Mock()
@@ -1069,7 +1069,7 @@ class TestIsHttpAuthError:
 
     def test_exception_group_with_no_auth_sub_exceptions(self):
         """Returns False for ExceptionGroup with no auth sub-exceptions."""
-        from src.engines.common.mcp_adapter import _is_http_auth_error
+        from src.services.tools.mcp_adapter import _is_http_auth_error
 
         sub1 = Exception("Connection reset")
         sub2 = Exception("DNS resolution failed")
@@ -1085,11 +1085,11 @@ class TestLogExceptionGroup:
 
     def test_logs_error_for_regular_exception(self):
         """Logs error for regular exception."""
-        from src.engines.common.mcp_adapter import _log_exception_group
+        from src.services.tools.mcp_adapter import _log_exception_group
 
         exc = Exception("something broke")
 
-        with patch('src.engines.common.mcp_adapter.logger') as mock_logger:
+        with patch('src.services.tools.mcp_adapter.logger') as mock_logger:
             _log_exception_group(exc, "test context")
 
             # Should log the main error message
@@ -1097,14 +1097,14 @@ class TestLogExceptionGroup:
 
     def test_logs_sub_exceptions_for_exception_group(self):
         """Logs sub-exceptions for ExceptionGroup."""
-        from src.engines.common.mcp_adapter import _log_exception_group
+        from src.services.tools.mcp_adapter import _log_exception_group
 
         sub1 = Exception("sub error 1")
         sub2 = Exception("sub error 2")
         group = Exception("group error")
         group.exceptions = [sub1, sub2]
 
-        with patch('src.engines.common.mcp_adapter.logger') as mock_logger:
+        with patch('src.services.tools.mcp_adapter.logger') as mock_logger:
             _log_exception_group(group, "ctx")
 
             # Check that sub-exceptions are logged
@@ -1115,7 +1115,7 @@ class TestLogExceptionGroup:
 
     def test_logs_response_body_for_sub_exception_with_response(self):
         """Logs response body for sub-exception with .response."""
-        from src.engines.common.mcp_adapter import _log_exception_group
+        from src.services.tools.mcp_adapter import _log_exception_group
 
         sub = Exception("HTTP error")
         mock_response = Mock()
@@ -1126,7 +1126,7 @@ class TestLogExceptionGroup:
         group = Exception("group")
         group.exceptions = [sub]
 
-        with patch('src.engines.common.mcp_adapter.logger') as mock_logger:
+        with patch('src.services.tools.mcp_adapter.logger') as mock_logger:
             _log_exception_group(group, "ctx")
 
             error_calls = [str(call) for call in mock_logger.error.call_args_list]
@@ -1500,7 +1500,7 @@ class TestRateLimitRetryAndGate:
             return eg
 
     def test_extract_http_status_walks_exception_groups(self):
-        from src.engines.common.mcp_adapter import _extract_http_status
+        from src.services.tools.mcp_adapter import _extract_http_status
 
         assert _extract_http_status(self._http_error(429)) == 429
         # Nested groups resolve too.
@@ -1509,7 +1509,7 @@ class TestRateLimitRetryAndGate:
         assert _extract_http_status(Exception('no status')) is None
 
     def test_server_call_gate_is_shared_per_url(self):
-        from src.engines.common.mcp_adapter import _server_call_gate
+        from src.services.tools.mcp_adapter import _server_call_gate
 
         a1 = _server_call_gate('https://one.example.com/mcp')
         a2 = _server_call_gate('https://one.example.com/mcp')
@@ -1565,7 +1565,7 @@ class TestRateLimitRetryAndGate:
 
     @pytest.mark.asyncio
     async def test_gate_is_released_after_failure(self):
-        from src.engines.common.mcp_adapter import _server_call_gate
+        from src.services.tools.mcp_adapter import _server_call_gate
 
         params = self._params()
         adapter = MCPAdapter(params)
@@ -1719,7 +1719,7 @@ class TestMcpErrorShortCircuit:
         assert 'UNAUTHENTICATED via sse' in adapter.initialization_error.detail
 
     def test_extract_mcp_error_walks_groups_and_ignores_others(self):
-        from src.engines.common.mcp_adapter import _extract_mcp_error
+        from src.services.tools.mcp_adapter import _extract_mcp_error
         from mcp.shared.exceptions import McpError
         from mcp.types import ErrorData
 

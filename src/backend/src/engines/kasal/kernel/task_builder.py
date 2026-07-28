@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional
 
 from src.core.logger import LoggerManager
 from src.engines.kasal.kernel.genie_formatting import apply_genie_mcp_space_id
-from src.engines.kasal.guardrails.guardrail_wrapper import GuardrailWrapper
+from src.services.guardrails.wrapper import GuardrailWrapper
 
 logger = LoggerManager.get_instance().crew
 guardrail_logger = LoggerManager.get_instance().guardrails

@@ -20,7 +20,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
 from kasal_engine.memory import Memory
 from src.services.memory.engine_storage_adapter import EngineStorageAdapter
 from src.services.memory.local_storage_backend import LocalMemoryStorage
-from src.engines.kasal.memory.memory_hooks import (
+from src.services.memory.hooks import (
     inject_task_memory,
     register_task_output_persistence,
 )
@@ -129,7 +129,7 @@ class TestPersistReachesTrace:
         record is in storage and the Memory Write span is exported — nothing
         left to die with the interpreter."""
         from kasal_engine.events import TaskCompletedEvent, crewai_event_bus
-        from src.engines.kasal.memory.memory_hooks import flush_memory_writes
+        from src.services.memory.hooks import flush_memory_writes
 
         backend = LocalMemoryStorage(tmp_path / "m.db", embedder=_embedder)
         memory = Memory(storage=EngineStorageAdapter(backend), root_scope="/g1")

@@ -826,7 +826,7 @@ class TestCreateTask:
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.common.mcp_adapter.MCPAdapter') as mock_adapter_class, \
+             patch('src.services.tools.mcp_adapter.MCPAdapter') as mock_adapter_class, \
              patch('src.services.tools.mcp_handler.create_kasal_tool_from_mcp') as mock_create_tool, \
              patch('src.services.tools.mcp_handler.register_mcp_adapter') as mock_register:
             
@@ -901,7 +901,7 @@ class TestCreateTask:
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.common.mcp_adapter.MCPAdapter') as mock_adapter_class, \
+             patch('src.services.tools.mcp_adapter.MCPAdapter') as mock_adapter_class, \
              patch('src.utils.databricks_auth.get_mcp_auth_headers', new_callable=AsyncMock) as mock_auth, \
              patch('src.services.tools.mcp_handler.create_kasal_tool_from_mcp') as mock_create_tool, \
              patch('src.services.tools.mcp_handler.register_mcp_adapter'):
@@ -1072,7 +1072,7 @@ class TestCreateTask:
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.common.mcp_adapter.MCPAdapter') as mock_adapter_class, \
+             patch('src.services.tools.mcp_adapter.MCPAdapter') as mock_adapter_class, \
              patch('mcp.StdioServerParameters') as mock_stdio_params, \
              patch('src.services.tools.mcp_handler.create_kasal_tool_from_mcp') as mock_create_tool, \
              patch('src.services.tools.mcp_handler.register_mcp_adapter'), \
@@ -1274,7 +1274,7 @@ class TestCreateTask:
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.common.mcp_adapter.MCPAdapter') as mock_adapter_class, \
+             patch('src.services.tools.mcp_adapter.MCPAdapter') as mock_adapter_class, \
              patch('src.utils.databricks_auth.get_mcp_auth_headers') as mock_auth, \
              patch('src.services.tools.mcp_handler.create_kasal_tool_from_mcp') as mock_create_tool, \
              patch('src.services.tools.mcp_handler.register_mcp_adapter'):
@@ -1331,7 +1331,7 @@ class TestCreateTask:
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.common.mcp_adapter.MCPAdapter') as mock_adapter_class:
+             patch('src.services.tools.mcp_adapter.MCPAdapter') as mock_adapter_class:
             
             # Setup MCP service mocks
             mock_mcp_instance = Mock()
@@ -1378,7 +1378,7 @@ class TestCreateTask:
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.common.mcp_adapter.MCPAdapter') as mock_adapter_class, \
+             patch('src.services.tools.mcp_adapter.MCPAdapter') as mock_adapter_class, \
              patch('mcp.StdioServerParameters'):
             
             # Setup MCP service mocks
@@ -1424,7 +1424,7 @@ class TestCreateTask:
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.common.mcp_adapter.MCPAdapter') as mock_adapter_class:
+             patch('src.services.tools.mcp_adapter.MCPAdapter') as mock_adapter_class:
             
             # Setup MCP service mocks
             mock_mcp_instance = Mock()
@@ -2100,7 +2100,7 @@ class TestCreateTask:
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.common.mcp_adapter.MCPAdapter') as mock_adapter_class, \
+             patch('src.services.tools.mcp_adapter.MCPAdapter') as mock_adapter_class, \
              patch('mcp.StdioServerParameters') as mock_stdio_params, \
              patch('src.services.tools.mcp_handler.create_kasal_tool_from_mcp') as mock_create_tool, \
              patch('src.services.tools.mcp_handler.register_mcp_adapter'), \
@@ -2991,7 +2991,7 @@ class TestCreateTask:
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.common.mcp_adapter.MCPAdapter') as mock_adapter_class, \
+             patch('src.services.tools.mcp_adapter.MCPAdapter') as mock_adapter_class, \
              patch('src.utils.databricks_auth.get_mcp_auth_headers') as mock_auth, \
              patch('src.services.tools.mcp_handler.create_kasal_tool_from_mcp'), \
              patch('src.services.tools.mcp_handler.register_mcp_adapter'):
@@ -3046,7 +3046,7 @@ class TestCreateTask:
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.common.mcp_adapter.MCPAdapter') as mock_adapter_class, \
+             patch('src.services.tools.mcp_adapter.MCPAdapter') as mock_adapter_class, \
              patch('src.services.tools.mcp_handler.create_kasal_tool_from_mcp'), \
              patch('src.services.tools.mcp_handler.register_mcp_adapter'):
             
@@ -3259,7 +3259,7 @@ class TestCreateTask:
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.common.mcp_adapter.MCPAdapter') as mock_adapter_class:
+             patch('src.services.tools.mcp_adapter.MCPAdapter') as mock_adapter_class:
             
             # Setup MCP service mocks
             mock_mcp_instance = Mock()

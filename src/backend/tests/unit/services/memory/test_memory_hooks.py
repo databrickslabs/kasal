@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from kasal_engine.memory import MemoryRecord
-from src.engines.kasal.memory.memory_hooks import (
+from src.services.memory.hooks import (
     MEMORY_BLOCK_HEADER,
     build_memory_preamble,
     flush_memory_writes,

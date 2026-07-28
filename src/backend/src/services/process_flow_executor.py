@@ -680,7 +680,7 @@ def run_flow_in_process(
                     # down — the flow crews' output-sink saves are fire-and-forget
                     # and would otherwise die with the interpreter.
                     try:
-                        from src.engines.kasal.memory.memory_hooks import (
+                        from src.services.memory.hooks import (
                             flush_memory_writes,
                         )
 

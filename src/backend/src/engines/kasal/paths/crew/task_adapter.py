@@ -17,7 +17,7 @@ from kasal_engine.core import TaskOutput
 from src.core.logger import LoggerManager
 from src.engines.kasal.kernel.tool_helpers import resolve_tool_ids_to_names
 from src.core.unit_of_work import UnitOfWork
-from src.engines.kasal.guardrails.guardrail_wrapper import GuardrailWrapper
+from src.services.guardrails.wrapper import GuardrailWrapper
 from src.engines.kasal.kernel.task_builder import build_task_args
 
 

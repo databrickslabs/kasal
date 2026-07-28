@@ -13,9 +13,9 @@ Layout:
   human_review).
 - demo/: domain demo guardrails coupled to the ``data_processing`` table.
 
-What stayed in the engine is ``GuardrailWrapper``: it exists to give a built
-guardrail a stable class identity so the engine can label it in events and trace
-rows. That is an orchestration concern and nothing else needs it.
+``wrapper.GuardrailWrapper`` gives a built guardrail a stable class identity so
+a run can label it in events and trace rows (``Task._guardrail_label`` reads the
+wrapper's inner type).
 """
 
 from src.services.guardrails.base_guardrail import BaseGuardrail, is_task_output
@@ -35,6 +35,7 @@ from src.services.guardrails.demo.empty_data_processing_guardrail import (
 )
 from src.services.guardrails.guardrail_factory import GuardrailFactory
 from src.services.guardrails.guardrail_model import resolve_guardrail_model
+from src.services.guardrails.wrapper import GuardrailWrapper
 
 __all__ = [
     "BaseGuardrail",
@@ -44,6 +45,7 @@ __all__ = [
     "DataProcessingGuardrail",
     "EmptyDataProcessingGuardrail",
     "GuardrailFactory",
+    "GuardrailWrapper",
     "LLMInjectionGuardrail",
     "MinimumNumberGuardrail",
     "SelfReflectionGuardrail",

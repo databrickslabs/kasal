@@ -884,7 +884,7 @@ class LightAgentService:
                     # One embedding + one search (no LLM calls); best-effort.
                     memory_block = ""
                     if _agent_memory is not None:
-                        from src.engines.kasal.memory.memory_hooks import (
+                        from src.services.memory.hooks import (
                             build_memory_preamble,
                         )
                         memory_block = await asyncio.to_thread(
@@ -947,7 +947,7 @@ class LightAgentService:
                 # ── Memory persist — fire-and-forget (never blocks the answer).
                 # The engine Agent does not auto-save; store the compact turn.
                 if _agent_memory is not None and (answer or "").strip():
-                    from src.engines.kasal.memory.memory_hooks import (
+                    from src.services.memory.hooks import (
                         format_turn_for_memory,
                         remember_async,
                     )
