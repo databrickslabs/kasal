@@ -15,7 +15,7 @@ Date: 2025
 import logging
 from typing import Any, Optional, Type, Dict, List
 
-from kasal_engine.tools import BaseTool
+from src.services.tools.base import BaseTool
 from pydantic import BaseModel, Field, PrivateAttr
 
 import httpx

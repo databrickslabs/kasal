@@ -32,7 +32,7 @@ for _mod_name in [
     "crewai.llms.providers",
     "crewai.llms.providers.openai",
     "kasal_engine.llm",
-    "kasal_engine.tools",
+    "src.services.tools.base",
     "kasal_engine.events",
     "crewai.events.types",
     "kasal_engine.events",
@@ -56,7 +56,7 @@ for _mod_name in [
     "crewai.tasks",
     "kasal_engine.core",
     "kasal_engine.core",
-    "kasal_engine.tools",
+    "src.services.tools.base",
 ]:
     if _mod_name not in sys.modules:
         _mock = MagicMock()

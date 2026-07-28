@@ -505,7 +505,7 @@ def create_kasal_tool_from_mcp(mcp_tool_dict):
     Returns:
         CrewAI tool instance
     """
-    from kasal_engine.tools import BaseTool
+    from src.services.tools.base import BaseTool
     from pydantic import BaseModel, Field
     from typing import Type, Dict, Any
     from src.services.tools.mcp_adapter import MCPTool

@@ -1,5 +1,5 @@
 from typing import Dict, Optional, Union, Any, List
-from kasal_engine.tools import BaseTool
+from src.services.tools.base import BaseTool
 import logging
 import os
 import asyncio
@@ -10,7 +10,9 @@ import json
 from src.utils.sensitive_data_utils import mask_sensitive_fields
 
 # Import only the CrewAI tools we're keeping
-from kasal_engine.tools import DallETool, SerperDevTool, ScrapeWebsiteTool
+from src.services.tools.dalle import DallETool
+from src.services.tools.serper_search import SerperDevTool
+from src.services.tools.scrape_website import ScrapeWebsiteTool
 
 # Import custom tools - Using proper import paths
 try:

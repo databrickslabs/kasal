@@ -263,7 +263,7 @@ class CrewMemoryService:
         )
 
         # Check storage path
-        from kasal_engine.utils import db_storage_path
+        from src.utils.storage_paths import db_storage_path
 
         storage_path = Path(db_storage_path())
         logger.info(f"Full storage path resolved by CrewAI: {storage_path.absolute()}")
@@ -624,7 +624,7 @@ class CrewMemoryService:
         override the hybrid-scoring defaults.
         """
         try:
-            from kasal_engine.utils import db_storage_path
+            from src.utils.storage_paths import db_storage_path
 
             from src.services.memory.engine_storage_adapter import (
                 build_litellm_embedder,

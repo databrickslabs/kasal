@@ -4,7 +4,7 @@ Databricks Knowledge Search Tool for CrewAI
 This is a lightweight wrapper around the DatabricksKnowledgeService
 that makes knowledge search available as a CrewAI tool.
 """
-from kasal_engine.tools import BaseTool
+from src.services.tools.base import BaseTool
 from typing import Optional, Type, Dict, Any, List
 from pydantic import BaseModel, Field, PrivateAttr
 import logging

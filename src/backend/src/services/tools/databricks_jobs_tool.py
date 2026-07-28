@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlencode
 
 import aiohttp
-from kasal_engine.tools import BaseTool
+from src.services.tools.base import BaseTool
 from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
 from src.utils.telemetry import get_user_agent_header, KasalProduct

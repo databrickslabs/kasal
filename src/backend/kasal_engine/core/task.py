@@ -28,7 +28,7 @@ from ..events.types import (
     TaskFailedEvent,
     TaskStartedEvent,
 )
-from ..tools.base import BaseTool
+from src.services.tools.base import BaseTool
 from .agent import BaseAgent
 from .executor import interpolate_text, json_schema_instruction, structured_from_raw
 from .types import OutputFormat, TaskOutput

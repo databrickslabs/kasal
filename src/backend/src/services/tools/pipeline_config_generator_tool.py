@@ -11,7 +11,7 @@ import sys
 from collections import defaultdict
 from typing import Any, Optional, Type
 
-from kasal_engine.tools import BaseTool
+from src.services.tools.base import BaseTool
 from pydantic import BaseModel, Field, PrivateAttr
 
 from src.services.tools.metric_view_utils.utils import run_async as _run_async

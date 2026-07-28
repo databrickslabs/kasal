@@ -3,7 +3,7 @@
 import logging
 from typing import Any, Optional, Type
 
-from kasal_engine.tools import BaseTool
+from src.services.tools.base import BaseTool
 from pydantic import BaseModel, Field, PrivateAttr
 
 # Import converters

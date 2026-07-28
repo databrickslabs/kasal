@@ -38,7 +38,7 @@ import re
 from typing import Any, Dict, List, Optional, Type
 
 import aiohttp
-from kasal_engine.tools import BaseTool
+from src.services.tools.base import BaseTool
 from pydantic import BaseModel, Field, PrivateAttr, field_validator
 
 from src.utils.telemetry import get_user_agent_header, KasalProduct

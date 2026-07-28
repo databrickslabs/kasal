@@ -20,7 +20,7 @@ import re
 from typing import Any, Optional, Type, Dict, List
 from concurrent.futures import ThreadPoolExecutor
 
-from kasal_engine.tools import BaseTool
+from src.services.tools.base import BaseTool
 from pydantic import BaseModel, Field, PrivateAttr
 import httpx
 

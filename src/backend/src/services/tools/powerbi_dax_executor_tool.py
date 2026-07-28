@@ -15,7 +15,7 @@ import logging
 from typing import Any, Dict, Optional, Type
 from concurrent.futures import ThreadPoolExecutor
 
-from kasal_engine.tools import BaseTool
+from src.services.tools.base import BaseTool
 from pydantic import BaseModel, Field, PrivateAttr
 import httpx
 

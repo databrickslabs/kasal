@@ -6,7 +6,7 @@ Universal converter: Any source (Power BI, Tableau, YAML) → Any target (DAX, S
 import logging
 from typing import Any, Optional, Type, Dict, Literal
 
-from kasal_engine.tools import BaseTool
+from src.services.tools.base import BaseTool
 from pydantic import BaseModel, Field, PrivateAttr
 
 # Import converters

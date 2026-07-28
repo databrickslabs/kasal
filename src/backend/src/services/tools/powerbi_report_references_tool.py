@@ -21,7 +21,7 @@ import re
 import json
 from typing import Any, Optional, Type, Dict, List, Set
 
-from kasal_engine.tools import BaseTool
+from src.services.tools.base import BaseTool
 from pydantic import BaseModel, Field, PrivateAttr
 import httpx
 

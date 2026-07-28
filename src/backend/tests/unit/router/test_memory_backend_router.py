@@ -12,7 +12,7 @@ import atexit
 os.environ["DATABASE_TYPE"] = "sqlite"
 os.environ["SQLITE_DB_PATH"] = ":memory:"
 
-# NOTE: this module used to stub `kasal_engine.tools` into sys.modules for its
+# NOTE: this module used to stub `src.services.tools.base` into sys.modules for its
 # whole run. kasal_engine is a real vendored package here, and any src.* module
 # imported for the first time inside that window stayed cached holding a Mock —
 # poisoning every later test file on the same xdist worker. `asyncpg` is a real

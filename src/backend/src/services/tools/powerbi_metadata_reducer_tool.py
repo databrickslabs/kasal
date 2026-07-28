@@ -29,7 +29,7 @@ import time
 from typing import Any, Optional, Type, Dict, List
 from concurrent.futures import ThreadPoolExecutor
 
-from kasal_engine.tools import BaseTool
+from src.services.tools.base import BaseTool
 from pydantic import BaseModel, Field, PrivateAttr
 
 from src.services.tools.tool_session_provider import ToolSessionProvider

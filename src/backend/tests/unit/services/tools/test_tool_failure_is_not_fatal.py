@@ -116,7 +116,7 @@ class TestSafeFetchErrorMessages:
         before fetching. Stub resolution with an arbitrary public address so the
         test exercises the error path, not the SSRF guard. Nothing is contacted —
         urlopen is stubbed in each test."""
-        from kasal_engine.tools import bundled
+        from src.services.tools import web_fetch as bundled
 
         monkeypatch.setattr(
             bundled.socket,
@@ -125,7 +125,7 @@ class TestSafeFetchErrorMessages:
         )
 
     def test_http_error_names_the_url(self, monkeypatch):
-        from kasal_engine.tools import bundled
+        from src.services.tools import web_fetch as bundled
 
         def fake_urlopen(request, timeout=None):
             raise urllib.error.HTTPError(
@@ -141,7 +141,7 @@ class TestSafeFetchErrorMessages:
         assert "news.example.com/article" in str(exc.value)
 
     def test_unreachable_host_names_the_url(self, monkeypatch):
-        from kasal_engine.tools import bundled
+        from src.services.tools import web_fetch as bundled
 
         def fake_urlopen(request, timeout=None):
             raise urllib.error.URLError("connection refused")

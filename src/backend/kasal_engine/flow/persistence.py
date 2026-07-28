@@ -16,7 +16,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
-from ..utils.paths import db_storage_path
+from src.utils.storage_paths import db_storage_path
 
 logger = logging.getLogger(__name__)
 

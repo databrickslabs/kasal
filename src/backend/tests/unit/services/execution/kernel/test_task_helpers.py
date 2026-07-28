@@ -7,7 +7,7 @@ import json
 
 from kasal_engine.core import Agent, Task
 from kasal_engine.core import TaskOutput
-from kasal_engine.tools import BaseTool
+from src.services.tools.base import BaseTool
 from pydantic import BaseModel, create_model
 
 from src.services.agent_builder.task_adapter import (

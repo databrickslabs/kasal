@@ -27,7 +27,7 @@ warnings.filterwarnings("ignore", message=".*Accessing the 'model_fields' attrib
 warnings.filterwarnings("ignore", message=".*remove second argument of ws_handler.*")
 
 # Import CrewAI's Printer for output redirection (still needed)
-from kasal_engine.utils import Printer
+from src.utils.agent_printer import Printer
 
 # Import core logger
 from src.core.logger import LoggerManager

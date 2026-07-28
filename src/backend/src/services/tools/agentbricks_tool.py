@@ -1,4 +1,4 @@
-from kasal_engine.tools import BaseTool
+from src.services.tools.base import BaseTool
 from typing import Optional, Type, Union, Dict, Any, List
 from pydantic import BaseModel, Field, PrivateAttr, field_validator
 import logging

@@ -25,7 +25,7 @@ from ..events.types import (
     LiteAgentExecutionErrorEvent,
     LiteAgentExecutionStartedEvent,
 )
-from ..tools.base import BaseTool
+from src.services.tools.base import BaseTool
 from .executor import build_messages, run_agent, structured_from_raw, json_schema_instruction
 from .types import LiteAgentOutput, PlanningConfig
 
