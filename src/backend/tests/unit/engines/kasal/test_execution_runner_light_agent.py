@@ -430,7 +430,7 @@ def _light_patches(mock_agent, update_mock, compose_mock):
               new_callable=AsyncMock, return_value=MagicMock()),
         patch("src.engines.kasal.kernel.agent_tools.build_agent_with_tools",
               new_callable=AsyncMock, return_value=mock_agent),
-        patch("src.engines.kasal.kernel.a2ui_runner.compose_surface", compose_mock),
+        patch("src.services.a2ui.runner.compose_surface", compose_mock),
         patch("src.services.execution_status_service.ExecutionStatusService.update_status",
               update_mock),
     )

@@ -15,7 +15,7 @@ import pytest
 
 from kasal_engine.events.bus import crewai_event_bus
 from kasal_engine.events.types import A2UISurfaceEvent
-from src.engines.kasal.kernel import a2ui_runner
+from src.services.a2ui import runner as a2ui_runner
 
 
 @pytest.fixture

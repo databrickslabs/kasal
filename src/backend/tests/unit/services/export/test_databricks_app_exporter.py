@@ -1630,7 +1630,7 @@ class TestA2uiFrontendVendor:
 
     def test_vendor_in_sync_with_frontend_source(self):
         """The committed template copy must match the canonical frontend A2UI
-        source. On failure, re-vendor: copy src/frontend/src/shared/a2ui into
+        source. On failure, re-vendor: copy src/frontend/src/services/a2ui into
         SHARED_A2UI_FRONTEND_DIR (excluding *.test.*)."""
         canonical = TEMPLATE_DIR.parents[6] / "frontend" / "src" / "shared" / "a2ui"
         if not canonical.is_dir():

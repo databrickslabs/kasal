@@ -9,8 +9,8 @@ the full catalog so rich surfaces don't silently regress.
 import json
 from types import SimpleNamespace
 
-from src.engines.kasal.kernel import a2ui_runner as R
-from src.shared.a2ui.compose import (
+from src.services.a2ui import runner as R
+from src.services.a2ui.compose import (
     MINIMAL_COMPONENTS,
     a2ui_system_prompt,
     compose_a2ui,

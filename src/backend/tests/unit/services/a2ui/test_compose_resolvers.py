@@ -1,5 +1,5 @@
 """Unit tests for the shared, dict-based UIConfig resolvers in the portable A2UI
-composer (``src.shared.a2ui.compose``).
+composer (``src.services.a2ui.compose``).
 
 These resolvers are the SINGLE source of truth used by BOTH the live runner
 (via thin adapters in a2ui_runner) AND the exporter/exported app — so the live
@@ -10,7 +10,7 @@ bundleable into a self-contained export.
 
 import json
 
-from src.shared.a2ui.compose import (
+from src.services.a2ui.compose import (
     MINIMAL_COMPONENTS,
     compose_a2ui,
     guidance_for,

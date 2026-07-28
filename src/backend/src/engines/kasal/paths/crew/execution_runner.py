@@ -216,7 +216,7 @@ async def run_crew_in_process(
             # ONE implementation. Gated by the workspace UIConfigurator; returns the
             # result unchanged when no rich surface applies.
             try:
-                from src.engines.kasal.kernel.a2ui_runner import (
+                from src.services.a2ui.runner import (
                     wrap_result_with_surface,
                 )
                 final_result = await wrap_result_with_surface(

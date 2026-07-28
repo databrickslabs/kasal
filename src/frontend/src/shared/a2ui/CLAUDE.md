@@ -29,7 +29,7 @@ touches many more places (see step 9).
 A completed run persists either a plain string or a `{text, a2ui: Surface}` envelope.
 The surface **is** the canonical rendering, so the raw text must NOT also show:
 
-- Backend gate — `engines/kasal/kernel/a2ui_runner.py::compose_surface` drops a
+- Backend gate — `services/a2ui/runner.py::compose_surface` drops a
   `dashboard`/`document` surface that has **no deliverable component** (`_has_data_component`
   / `_DATA_COMPONENTS`). This stops prose-only surfaces from double-rendering **but** means
   any new deliverable component MUST be added to `_DATA_COMPONENTS` or its surface gets
@@ -57,15 +57,15 @@ Do ALL that apply. Frontend paths are under `src/frontend/src`; backend under
 2. **Registry** — `shared/a2ui/registry.tsx`. Map `Name -> Component`. Unregistered names
    render as `Unsupported`.
 3. **Wire types** — `shared/a2ui/types.ts` only if you add new wire shapes (usually not).
-4. **Catalog** — `backend/src/shared/a2ui/catalog.json`. Add `{summary, props}` so the composer
+4. **Catalog** — `backend/src/services/a2ui/catalog.json`. Add `{summary, props}` so the composer
    is *allowed* to emit it. Read live at export (no vendoring).
-5. **Composer prompt** — `backend/src/shared/a2ui/compose.py`:
+5. **Composer prompt** — `backend/src/services/a2ui/compose.py`:
    - Add a routing line to **rule 5** (surfaceKind + root component selection) and/or the
      special-components block (**rule 11**) telling the model when/how to emit it.
    - Add trigger words to `RICH_INTENT` (so a chat request even *invokes* the composer).
    - Add to `DELIVERABLE_KEYWORDS` if it's its own deliverable (order matters — specific
      multi-word keys before bare ones, e.g. `network graph` before a bare `graph`).
-6. **Prose gate** — `backend/src/engines/kasal/kernel/a2ui_runner.py`: add the component to
+6. **Prose gate** — `backend/src/services/a2ui/runner.py`: add the component to
    `_DATA_COMPONENTS` if it's a genuine deliverable (chart/table/diagram/gallery/map), or its
    `dashboard`/`document` surface will be dropped as "prose-only".
 7. **Legacy adapter** — `components/ChatMode/utils/surfaceAdapter.ts`: add to `UiComponentType`
@@ -109,9 +109,9 @@ Do ALL that apply. Frontend paths are under `src/frontend/src`; backend under
 |---|---|
 | Component renderers | `frontend/src/shared/a2ui/components.tsx` |
 | Registry (name→renderer) | `frontend/src/shared/a2ui/registry.tsx` |
-| Composer + prompt + intent + deliverable keywords | `backend/src/shared/a2ui/compose.py` |
-| Catalog (what the model may emit) | `backend/src/shared/a2ui/catalog.json` |
-| Prose gate / `{text,a2ui}` envelope build | `backend/src/engines/kasal/kernel/a2ui_runner.py` |
+| Composer + prompt + intent + deliverable keywords | `backend/src/services/a2ui/compose.py` |
+| Catalog (what the model may emit) | `backend/src/services/a2ui/catalog.json` |
+| Prose gate / `{text,a2ui}` envelope build | `backend/src/services/a2ui/runner.py` |
 | Legacy parse + component/deliverable maps | `frontend/src/components/ChatMode/utils/surfaceAdapter.ts` |
 | Per-type branding list + settings | `frontend/src/components/Configuration/uiConfigShared.ts` |
 | Palette resolution + root→deliverable | `frontend/src/components/ChatMode/components/Chat/A2uiSurface.tsx` |

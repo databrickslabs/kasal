@@ -1,6 +1,6 @@
 """Live-app adapter for the shared A2UI composer.
 
-The composer itself (``src.shared.a2ui.compose``) is portable and stdlib-only —
+The composer itself (``src.services.a2ui.compose``) is portable and stdlib-only —
 it takes an injected ``llm_call``. This thin adapter is the Kasal-side wiring:
 it builds ``llm_call`` from Kasal's ``LLMManager`` (which already injects the
 Kasal User-Agent telemetry header) and runs the blocking composer off the event
@@ -17,7 +17,7 @@ import logging
 import os
 from typing import Any, Dict, List, Optional, Tuple
 
-from src.shared.a2ui.compose import (
+from src.services.a2ui.compose import (
     compose_a2ui,
     guidance_for,
     infer_deliverable,
@@ -175,7 +175,7 @@ def _retries() -> int:
 
 
 # Catalog/directive resolution is shared (stdlib-only) with the exported app so
-# both resolve a workspace's UIConfig IDENTICALLY — see src.shared.a2ui.compose.
+# both resolve a workspace's UIConfig IDENTICALLY — see src.services.a2ui.compose.
 # These thin adapters turn Kasal's pydantic UIConfigResponse into the plain dict
 # view the shared resolvers expect, preserving the live runner's call surface.
 

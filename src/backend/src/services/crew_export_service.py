@@ -189,11 +189,11 @@ class CrewExportService:
         Returns ``{a2ui_enabled, a2ui_catalog, a2ui_directives}`` — the enabled
         flag, the catalog the composer may use (resolved from the workspace's
         catalog_type/catalog_json), and the per-deliverable directives map. Uses
-        the SHARED resolvers (``src.shared.a2ui.compose``) so the live app and the
+        the SHARED resolvers (``src.services.a2ui.compose``) so the live app and the
         exported app resolve config identically. Non-fatal: on any error, defaults
         to enabled + the full bundled catalog + no directives.
         """
-        from src.shared.a2ui.compose import (
+        from src.services.a2ui.compose import (
             load_catalog,
             resolve_catalog,
             resolve_directives,

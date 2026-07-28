@@ -26,14 +26,14 @@ from .yaml_generator import YAMLGenerator
 TEMPLATE_DIR = Path(__file__).parent / "templates" / "databricks_app"
 # The ONE portable A2UI composer (stdlib-only), shared with the live app and
 # vendored verbatim into every export so generative UI never forks into a second
-# implementation. ``parents[2]`` is ``src/backend/src``.
-SHARED_A2UI_DIR = Path(__file__).parents[2] / "shared" / "a2ui"
+# implementation. ``parent.parent`` is ``src/backend/src/services``.
+SHARED_A2UI_DIR = Path(__file__).parent.parent / "a2ui"
 # The shared frontend A2UI renderer (self-contained React+TS module), vendored
 # verbatim into the export so the deployed UI draws surfaces with the SAME renderer
 # as Kasal chat. It lives IN the template tree (not the frontend source) so it
 # ships with the backend and an export from the DEPLOYED app — which does NOT ship
 # the frontend source — still gets it. The canonical source is
-# ``src/frontend/src/shared/a2ui``; this committed copy is kept in sync by a test
+# ``src/frontend/src/services/a2ui``; this committed copy is kept in sync by a test
 # (test_a2ui_frontend_vendor_in_sync). See _a2ui_frontend_files().
 SHARED_A2UI_FRONTEND_DIR = TEMPLATE_DIR / "frontend" / "src" / "a2ui"
 # Standalone tool implementations bundled into the app (no Kasal `src.*` deps).
@@ -642,7 +642,7 @@ class DatabricksAppExporter(BaseExporter):
         """Vendor the ONE shared A2UI composer + bake the workspace's resolved config.
 
         Ships ``agent_server/a2ui/`` = the portable composer (``__init__.py`` +
-        ``compose.py``, copied verbatim from ``src.shared.a2ui``) plus two baked
+        ``compose.py``, copied verbatim from ``src.services.a2ui``) plus two baked
         data files: ``catalog.json`` (the catalog the composer may use, resolved
         from this workspace's UIConfig) and ``config.json`` ({enabled, directives}).
         The deployed ``agent.py`` imports this module instead of carrying its own
@@ -699,7 +699,7 @@ class DatabricksAppExporter(BaseExporter):
         the template tree (``SHARED_A2UI_FRONTEND_DIR``) — NOT the frontend source —
         so this works even when the export runs inside the DEPLOYED Kasal app, which
         ships the backend but not the frontend source tree. The copy is kept in sync
-        with the canonical ``src/frontend/src/shared/a2ui`` by a test. Emitted
+        with the canonical ``src/frontend/src/services/a2ui`` by a test. Emitted
         VERBATIM (the token-substituting template walk skips this subtree).
         """
         files: List[Dict[str, str]] = []

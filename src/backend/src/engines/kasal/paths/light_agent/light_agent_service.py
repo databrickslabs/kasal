@@ -987,13 +987,13 @@ class LightAgentService:
             _log(f"Chat agent '{role}' completed ({len(answer or '')} chars)")
 
             # Compose a renderable A2UI surface from the answer — the SAME shared
-            # composer the exported app uses (src.shared.a2ui), run post-answer so the
+            # composer the exported app uses (src.services.a2ui), run post-answer so the
             # local model only has to answer in prose, not also emit UI JSON inline.
             # Persisted as a {text, a2ui} envelope; the chat renders the surface inline
             # by default. Never blocks completion (returns None / markdown on any issue).
             result_payload: Any = answer
             try:
-                from src.engines.kasal.kernel.a2ui_runner import compose_surface
+                from src.services.a2ui.runner import compose_surface
                 # Bounded: this is an auxiliary LLM call for the UI surface. If it
                 # hangs it must NOT block the terminal status — the prose answer has
                 # already streamed, so on timeout we complete with the plain answer.

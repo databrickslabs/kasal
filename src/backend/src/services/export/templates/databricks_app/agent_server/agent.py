@@ -36,7 +36,7 @@ from agent_server import a2ui_store, cancel, crew_progress, progress
 from agent_server.utils import get_session_id, get_user_id, get_user_workspace_client
 
 # The ONE shared, stdlib-only A2UI composer (vendored verbatim from Kasal's
-# src.shared.a2ui into agent_server/a2ui/) — the SAME code live Kasal chat runs,
+# src.services.a2ui into agent_server/a2ui/) — the SAME code live Kasal chat runs,
 # so generative UI never forks into a second implementation.
 from agent_server.a2ui.compose import (
     compose_a2ui as _compose_surface,
@@ -741,7 +741,7 @@ def _conversation_model() -> str:
 
 # --- A2UI generative-UI composer ---------------------------------------------
 # Generative UI is produced by the ONE shared, stdlib-only composer vendored under
-# agent_server/a2ui/ (copied verbatim from Kasal's src.shared.a2ui — the SAME code
+# agent_server/a2ui/ (copied verbatim from Kasal's src.services.a2ui — the SAME code
 # live Kasal chat runs, so there is no second implementation to drift). It turns
 # the answer into a single declarative A2UI surface (custom_outputs.a2ui) the
 # frontend renders as rich UI. The catalog + per-deliverable directives are baked
