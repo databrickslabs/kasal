@@ -64,7 +64,7 @@ async def get_powerbi_access_token(
         Exception: If token acquisition fails
     """
     # Import here to avoid circular imports
-    from src.converters.services.powerbi.authentication import AadService
+    from src.services.converters.formats.powerbi.authentication import AadService
 
     # Create AadService with all parameters
     aad_service = AadService(

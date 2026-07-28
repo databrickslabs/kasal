@@ -5,7 +5,7 @@ Comprehensive unit tests for services/kpi_conversion_service.py
 import pytest
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
-from src.converters.base.converter import ConversionFormat
+from src.services.converters.base.converter import ConversionFormat
 from src.services.powerbi.kpi_conversion import KPIConversionService
 from src.schemas.kpi_conversion import (
     ConversionRequest,
@@ -36,7 +36,7 @@ class TestKPIConversionServiceInit:
         assert svc.factory is not None
 
     def test_factory_type(self):
-        from src.converters.base.factory import ConverterFactory
+        from src.services.converters.base.factory import ConverterFactory
         svc = KPIConversionService()
         assert isinstance(svc.factory, ConverterFactory)
 

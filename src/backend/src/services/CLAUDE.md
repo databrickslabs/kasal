@@ -13,10 +13,21 @@ never the reverse.
 
 Not everything in this directory is a `*_service.py` CRUD class, and that is
 deliberate. **Capability packages** — `tools/`, `memory/`, `guardrails/`,
-`security/`, `knowledge/`, `export/`, `a2ui/`, `trace/`, `task_output/` — are
-things an agent run needs that do not require a crew to be running. They were
-moved out of the old `src/engines/` tree so a chat turn, crew generation, or an
-exported app can use them without importing an orchestrator.
+`security/`, `knowledge/`, `export/`, `a2ui/`, `trace/`, `task_output/`,
+`converters/` — are things an agent run needs that do not require a crew to be
+running. They were moved out of the old `src/engines/` tree so a chat turn, crew
+generation, or an exported app can use them without importing an orchestrator.
+
+`converters/` came from a different place: it was `src/converters/`, a top-level
+package sitting beside `services/` with no contract covering it. It is the
+KPI/KBI conversion library the PowerBI and metric-view tools are built on
+(YAML → DAX / SQL / UC Metrics / M-Query). Its layout is
+`base/` (the `BaseConverter` + `ConversionFormat` contract), `common/`
+(transformers and translators shared by every target) and `formats/`
+(one package per target: `powerbi/`, `sql/`, `uc_metrics/`, `mquery/`). That last
+one was itself called `services/` — which, once the package moved under
+`src/services/`, would have read `services/converters/services/powerbi`.
+`formats/` matches the `ConversionFormat` enum the base contract already uses.
 
 `src/engines/` is gone entirely: the three paths are `chat/`, `agent_builder/`
 and `flow_builder/`, over shared machinery in `execution/`. See

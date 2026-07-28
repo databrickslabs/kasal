@@ -1369,7 +1369,7 @@ class PipelineConfigGeneratorTool(BaseTool):
         Service Principal first, then Service Account. ``AadService`` is
         synchronous, so it is safe to call directly from this sync tool.
         """
-        from src.converters.services.powerbi.authentication import AadService
+        from src.services.converters.formats.powerbi.authentication import AadService
 
         service = AadService(
             client_id=client_id,

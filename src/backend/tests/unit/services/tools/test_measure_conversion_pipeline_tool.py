@@ -349,8 +349,8 @@ class TestMeasureConversionPipelineTool:
 
     # ========== Run Method Tests - YAML Success Paths ==========
 
-    @patch('src.converters.services.powerbi.DAXGenerator')
-    @patch('src.converters.common.transformers.yaml.YAMLKPIParser')
+    @patch('src.services.converters.formats.powerbi.DAXGenerator')
+    @patch('src.services.converters.common.transformers.yaml.YAMLKPIParser')
     def test_run_yaml_to_dax_success(self, mock_yaml_parser_class, mock_dax_generator_class, tool):
         """Test _run YAML to DAX conversion"""
         # Mock YAML parser
@@ -386,9 +386,9 @@ class TestMeasureConversionPipelineTool:
         assert "DAX" in result
         assert "Total Sales" in result
 
-    @patch('src.converters.services.sql.SQLTranslationOptions')
-    @patch('src.converters.services.sql.SQLGenerator')
-    @patch('src.converters.common.transformers.yaml.YAMLKPIParser')
+    @patch('src.services.converters.formats.sql.SQLTranslationOptions')
+    @patch('src.services.converters.formats.sql.SQLGenerator')
+    @patch('src.services.converters.common.transformers.yaml.YAMLKPIParser')
     def test_run_yaml_to_sql_success(self, mock_yaml_parser_class, mock_sql_generator_class, mock_options_class, tool):
         """Test _run YAML to SQL conversion"""
         # Mock YAML parser
@@ -430,8 +430,8 @@ class TestMeasureConversionPipelineTool:
         assert "YAML Measures" in result
         assert "SQL" in result
 
-    @patch('src.converters.services.uc_metrics.UCMetricsGenerator')
-    @patch('src.converters.common.transformers.yaml.YAMLKPIParser')
+    @patch('src.services.converters.formats.uc_metrics.UCMetricsGenerator')
+    @patch('src.services.converters.common.transformers.yaml.YAMLKPIParser')
     def test_run_yaml_to_uc_metrics_success(self, mock_yaml_parser_class, mock_uc_generator_class, tool):
         """Test _run YAML to UC Metrics conversion"""
         # Mock YAML parser
@@ -597,7 +597,7 @@ class TestMeasureConversionPipelineTool:
         assert "Error" in result
         assert "Unexpected error" in result
 
-    @patch('src.converters.common.transformers.yaml.YAMLKPIParser')
+    @patch('src.services.converters.common.transformers.yaml.YAMLKPIParser')
     def test_run_yaml_conversion_exception(self, mock_yaml_parser_class, tool):
         """Test _run handles YAML conversion exceptions"""
         mock_parser = Mock()

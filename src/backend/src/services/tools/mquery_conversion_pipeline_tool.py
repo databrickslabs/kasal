@@ -547,7 +547,7 @@ class MqueryConversionPipelineTool(BaseTool):
             # ────────────────────────────────────────────────────────────────
 
             # Import M-Query converter (lazy import to avoid circular dependencies)
-            from src.converters.services.mquery import MQueryConnector, MQueryConversionConfig
+            from src.services.converters.formats.mquery import MQueryConnector, MQueryConversionConfig
 
             # Get LLM configuration - auto-detect from environment if not provided
             llm_workspace_url = merged_kwargs.get("llm_workspace_url")
@@ -685,7 +685,7 @@ class MqueryConversionPipelineTool(BaseTool):
         """Execute the async M-Query conversion."""
         try:
             # Import M-Query converter
-            from src.converters.services.mquery import MQueryConnector
+            from src.services.converters.formats.mquery import MQueryConnector
 
             async with MQueryConnector(config) as connector:
                 # Scan workspace
@@ -977,7 +977,7 @@ class MqueryConversionPipelineTool(BaseTool):
           Static      → EVALUATE <TableName> via PBI → CREATE TABLE + INSERT on DBSQL
           Other       → flag as NOT TRANSPILABLE (no LLM called)
         """
-        from src.converters.services.mquery import MQueryConnector, MQueryConversionConfig
+        from src.services.converters.formats.mquery import MQueryConnector, MQueryConversionConfig
         from src.services.tools.powerbi_auth_utils import get_powerbi_access_token
 
         workspace_id = cfg.get("workspace_id", "")

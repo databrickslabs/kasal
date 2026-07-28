@@ -810,7 +810,7 @@ class UCMetricViewGeneratorTool(BaseTool):
 
         # 1. Extract measures via Execute Queries API
         try:
-            from src.converters.services.powerbi.connector import PowerBIConnector
+            from src.services.converters.formats.powerbi.connector import PowerBIConnector
 
             connector = PowerBIConnector(
                 semantic_model_id=dataset_id,
@@ -854,7 +854,7 @@ class UCMetricViewGeneratorTool(BaseTool):
 
         # 2. Extract MQuery via Admin API scan
         try:
-            from src.converters.services.mquery.scanner import PowerBIAdminScanner
+            from src.services.converters.formats.mquery.scanner import PowerBIAdminScanner
 
             scanner = PowerBIAdminScanner(access_token=token)
 

@@ -7,10 +7,10 @@ Power BI: semantic models, DAX, and measure conversion.
 - ``conversions`` / ``kpi_conversion`` — conversion jobs, history and saved
   configs (the BUSINESS side: rows, group scoping, status)
 
-The transformation itself is not here. ``src/converters/`` is a pure library
+The transformation itself is not here. ``src/services/converters/`` is a pure library
 (KPI model, DAX parse/generate, SQL and UC-Metrics emit) with no DB, no session
 and no GroupContext — this package drives it. Keep it that way: a repository
-call inside src/converters/ is the bug this note exists to prevent.
+call inside src/services/converters/ is the bug this note exists to prevent.
 
 Power BI is not Databricks: these calls take no Kasal User-Agent header.
 """

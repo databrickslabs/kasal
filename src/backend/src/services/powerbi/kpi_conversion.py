@@ -7,8 +7,8 @@ Orchestrates conversion between different KPI formats using the converters packa
 
 import logging
 from typing import Any, Dict, List, Optional
-from src.converters.base.converter import ConversionFormat
-from src.converters.base.factory import ConverterFactory
+from src.services.converters.base.converter import ConversionFormat
+from src.services.converters.base.factory import ConverterFactory
 from src.schemas.kpi_conversion import (
     ConversionRequest,
     ConversionResponse,

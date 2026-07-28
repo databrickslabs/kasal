@@ -16,23 +16,13 @@ Focus areas:
 - Context enrichment injection
 - Placeholder resolution with sensitive key masking
 """
-# ORDERING NOTE — this file must sort AFTER
-# test_tool_factory_create_tool_paths.py.
-#
-# Something in here leaves ToolFactory state that makes
-# TestDatabricksKnowledgeSearchToolCreation in that file see the real
-# DatabricksKnowledgeSearchTool instead of its patched mock. Running these two
-# in the other order reproduces it every time:
-#
-#   pytest test_tool_factory_credential_and_config_paths.py \
-#          test_tool_factory_create_tool_paths.py
-#   -> 2 failed
-#
-# The bug is the shared state, not the name; the name is just what currently
-# keeps alphabetical collection order on the working side. This pair was
-# previously called _extended.py / _extended2.py and had the same constraint by
-# accident — it is one of the "flaky" suites that turned out not to be flaky at
-# all. Fixing it properly means finding what is not being torn down.
+# This file used to carry an ORDERING NOTE saying it must sort AFTER
+# test_tool_factory_create_tool_paths.py, because something here left state
+# that made that file's patched DatabricksKnowledgeSearchTool resolve to the
+# real class. The cause was TestImportFallbackCoverage below: it deleted
+# src.services.tools.tool_factory from sys.modules and never restored it, so a
+# later patch targeted a second, distinct module object. It is fixed (that test
+# now reloads in place and restores), and the two files pass in either order.
 
 import asyncio
 import os
@@ -1195,33 +1185,56 @@ class TestDatabricksJobsToolAuthPaths:
         assert result is not None
 
 
-# ─── Import-fallback coverage via module-level mock ──────────────────────────
+# ─── Import-fallback coverage ────────────────────────────────────────────────
+
 
 class TestImportFallbackCoverage:
-    """Tests that cover the import-time except blocks by temporarily
-    making imports fail, then re-importing the module."""
+    """Covers the import-time ``except ImportError`` fallbacks in tool_factory."""
 
     def test_perplexity_import_fallback_sets_none(self):
-        """When PerplexitySearchTool import fails, PerplexitySearchTool is None."""
-        import importlib
+        """When PerplexitySearchTool cannot be imported, the name falls back to None.
+
+        This executes tool_factory's source into a SEPARATE, throwaway module
+        object with the perplexity module poisoned. The real
+        sys.modules["src.services.tools.tool_factory"] entry is never created,
+        replaced, deleted or reloaded — which is the whole point:
+
+        - The original version of this test did ``del sys.modules[...]`` with no
+          restore, and its body was ``assert True``. The next test that patched a
+          name on tool_factory then imported a SECOND, distinct module object and
+          patched that one, while the already-imported ToolFactory kept resolving
+          against the first — so the patch silently did nothing and a real tool
+          got constructed. It only ever passed because it happened to sort after
+          its victim.
+        - Reloading in place is no good either: tool_factory is imported lazily,
+          so it is simply absent from sys.modules on any run that reaches this
+          test first.
+
+        The probe is given a dotted name under src.services.tools so that
+        ``__package__`` resolves and the module's relative imports still work.
+        """
+        import importlib.util
         import sys
 
-        # Save original import
-        orig = sys.modules.get("src.services.tools.perplexity_tool")
+        origin = importlib.util.find_spec("src.services.tools.tool_factory").origin
+        spec = importlib.util.spec_from_file_location(
+            "src.services.tools._tool_factory_fallback_probe", origin
+        )
+        probe = importlib.util.module_from_spec(spec)
 
+        perplexity_name = "src.services.tools.perplexity_tool"
+        sentinel = object()
+        original = sys.modules.get(perplexity_name, sentinel)
         try:
-            # Make it fail
-            sys.modules["src.services.tools.perplexity_tool"] = None
-
-            # Re-import should use fallback
-            if "src.services.tools.tool_factory" in sys.modules:
-                del sys.modules["src.services.tools.tool_factory"]
-
-            # This just tests the import works (coverage won't count without reimport)
-            # Just verify we can handle None tool_factory gracefully
-            assert True  # Module itself tests the fallback at import time
+            # A None entry in sys.modules makes `import` raise ImportError.
+            sys.modules[perplexity_name] = None
+            spec.loader.exec_module(probe)
         finally:
-            if orig is not None:
-                sys.modules["src.services.tools.perplexity_tool"] = orig
-            elif "src.services.tools.perplexity_tool" in sys.modules:
-                del sys.modules["src.services.tools.perplexity_tool"]
+            if original is sentinel:
+                sys.modules.pop(perplexity_name, None)
+            else:
+                sys.modules[perplexity_name] = original
+
+        assert probe.PerplexitySearchTool is None
+        # The probe never displaced the real module.
+        assert "src.services.tools._tool_factory_fallback_probe" not in sys.modules

@@ -56,11 +56,6 @@ def _offenders() -> set[str]:
 #: Files whose directory does not match what they import. Shrink this.
 _BASELINE = {
     "api/test_memory_backend_router.py",
-    "converters/dax/test_context.py",
-    "converters/sql/test_formula_parser.py",
-    "converters/sql/test_sql_structures.py",
-    "converters/sql/test_yaml_to_sql.py",
-    "converters/uc_metrics/test_context.py",
     "services/agent_builder/test_execution_runner_callbacks.py",
     "services/chat/test_context_compaction_event.py",
     "services/execution/kernel/test_agent_helpers_create_agent_config.py",

@@ -350,7 +350,7 @@ class TestResolveTokenUsesAadService:
     def test_service_principal_autodetect(self):
         tool = PipelineConfigGeneratorTool()
         with patch(
-            "src.converters.services.powerbi.authentication.AadService"
+            "src.services.converters.formats.powerbi.authentication.AadService"
         ) as MockAad:
             inst = MockAad.return_value
             inst.get_access_token.return_value = "sp-token"
@@ -370,7 +370,7 @@ class TestResolveTokenUsesAadService:
     def test_service_account_passthrough(self):
         tool = PipelineConfigGeneratorTool()
         with patch(
-            "src.converters.services.powerbi.authentication.AadService"
+            "src.services.converters.formats.powerbi.authentication.AadService"
         ) as MockAad:
             inst = MockAad.return_value
             inst.get_access_token.return_value = "sa-token"
@@ -388,7 +388,7 @@ class TestResolveTokenUsesAadService:
     def test_explicit_auth_method_forwarded(self):
         tool = PipelineConfigGeneratorTool()
         with patch(
-            "src.converters.services.powerbi.authentication.AadService"
+            "src.services.converters.formats.powerbi.authentication.AadService"
         ) as MockAad:
             inst = MockAad.return_value
             inst.get_access_token.return_value = "t"
@@ -404,7 +404,7 @@ class TestResolveTokenUsesAadService:
     def test_access_token_passthrough(self):
         tool = PipelineConfigGeneratorTool()
         with patch(
-            "src.converters.services.powerbi.authentication.AadService"
+            "src.services.converters.formats.powerbi.authentication.AadService"
         ) as MockAad:
             inst = MockAad.return_value
             inst.get_access_token.return_value = "oauth-token"

@@ -603,7 +603,7 @@ class TestMqueryExecuteConversionComprehensive:
         mock_module = MagicMock()
         mock_module.MQueryConnector = MagicMock(return_value=connector)
 
-        with patch.dict("sys.modules", {"src.converters.services.mquery": mock_module}):
+        with patch.dict("sys.modules", {"src.services.converters.formats.mquery": mock_module}):
             result = self._run(self.tool._execute_conversion(config, False))
 
         assert result["success"] is False
@@ -626,7 +626,7 @@ class TestMqueryExecuteConversionComprehensive:
         mock_module = MagicMock()
         mock_module.MQueryConnector = MagicMock(return_value=connector)
 
-        with patch.dict("sys.modules", {"src.converters.services.mquery": mock_module}):
+        with patch.dict("sys.modules", {"src.services.converters.formats.mquery": mock_module}):
             result = self._run(self.tool._execute_conversion(config, True))
 
         assert result["success"] is True
@@ -649,7 +649,7 @@ class TestMqueryExecuteConversionComprehensive:
         mock_module = MagicMock()
         mock_module.MQueryConnector = MagicMock(return_value=connector)
 
-        with patch.dict("sys.modules", {"src.converters.services.mquery": mock_module}):
+        with patch.dict("sys.modules", {"src.services.converters.formats.mquery": mock_module}):
             result = self._run(self.tool._execute_conversion(config, False))
 
         assert result["success"] is True
@@ -660,7 +660,7 @@ class TestMqueryExecuteConversionComprehensive:
         mock_module = MagicMock()
         mock_module.MQueryConnector = MagicMock(side_effect=Exception("connector error"))
 
-        with patch.dict("sys.modules", {"src.converters.services.mquery": mock_module}):
+        with patch.dict("sys.modules", {"src.services.converters.formats.mquery": mock_module}):
             result = self._run(self.tool._execute_conversion(config, False))
 
         assert result["success"] is False
@@ -1146,7 +1146,7 @@ class TestRunMainPipeline:
         mock_module = MagicMock()
         mock_module.MQueryConversionConfig = MagicMock()
         with patch.dict("sys.modules", {
-            "src.converters.services.mquery": mock_module,
+            "src.services.converters.formats.mquery": mock_module,
         }):
             result = tool._run()
 
@@ -1832,7 +1832,7 @@ class TestExecuteWithValidation:
         mock_module = MagicMock()
         mock_module.MQueryConversionConfig = MagicMock()
 
-        with patch.dict("sys.modules", {"src.converters.services.mquery": mock_module}):
+        with patch.dict("sys.modules", {"src.services.converters.formats.mquery": mock_module}):
             with patch(
                 "src.services.tools.powerbi_auth_utils.get_powerbi_access_token",
                 new_callable=AsyncMock, side_effect=Exception("auth failed")
@@ -1858,7 +1858,7 @@ class TestExecuteWithValidation:
         mock_module.MQueryConnector = MagicMock(return_value=mock_connector)
         mock_module.MQueryConversionConfig = MagicMock()
 
-        with patch.dict("sys.modules", {"src.converters.services.mquery": mock_module}):
+        with patch.dict("sys.modules", {"src.services.converters.formats.mquery": mock_module}):
             with patch(
                 "src.services.tools.powerbi_auth_utils.get_powerbi_access_token",
                 new_callable=AsyncMock, return_value="token"

@@ -110,7 +110,7 @@ class ExecutionLogCapture:
             engine_logger.setLevel(logging.DEBUG)
             
             # Also capture other related loggers
-            for logger_name in ['langchain', 'httpx', 'openai', 'src.converters']:
+            for logger_name in ['langchain', 'httpx', 'openai', 'src.services.converters']:
                 try:
                     related_logger = logging.getLogger(logger_name)
                     related_logger.handlers = []

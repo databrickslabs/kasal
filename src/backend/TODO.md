@@ -26,7 +26,7 @@ LIKE_FOR_LIKE, TRANSITION_MATRIX, MULTI_GRAIN_COMPOSITE, AGGR_VIRTUAL
 ```
 
 **Proposed implementation**:
-1. Create `src/converters/services/powerbi/dax_strategy_classifier.py`
+1. Create `src/services/converters/formats/powerbi/dax_strategy_classifier.py`
    - Fast pre-LLM pass: regex/AST scan of DAX expression
    - Map each measure to one of the 22 named types (or UNKNOWN)
    - Can be a lightweight LLM classification call if regex is insufficient

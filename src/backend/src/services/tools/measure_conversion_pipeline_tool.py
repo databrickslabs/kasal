@@ -10,8 +10,8 @@ from src.services.tools.base import BaseTool
 from pydantic import BaseModel, Field, PrivateAttr
 
 # Import converters
-from src.converters.pipeline import ConversionPipeline, OutboundFormat
-from src.converters.base.connectors import ConnectorType
+from src.services.converters.pipeline import ConversionPipeline, OutboundFormat
+from src.services.converters.base.connectors import ConnectorType
 
 logger = logging.getLogger(__name__)
 
@@ -633,11 +633,11 @@ class MeasureConversionPipelineTool(BaseTool):
         print(f"[YAML DEBUG] yaml_content length={len(yaml_content) if yaml_content else 0}, yaml_file_path={yaml_file_path}")
 
         try:
-            from src.converters.common.transformers.yaml import YAMLKPIParser
-            from src.converters.services.powerbi import DAXGenerator
-            from src.converters.services.sql import SQLGenerator
-            from src.converters.services.sql import SQLDialect
-            from src.converters.services.uc_metrics import UCMetricsGenerator
+            from src.services.converters.common.transformers.yaml import YAMLKPIParser
+            from src.services.converters.formats.powerbi import DAXGenerator
+            from src.services.converters.formats.sql import SQLGenerator
+            from src.services.converters.formats.sql import SQLDialect
+            from src.services.converters.formats.uc_metrics import UCMetricsGenerator
 
             print(f"[YAML DEBUG] Imports successful, creating parser")
 
@@ -676,7 +676,7 @@ class MeasureConversionPipelineTool(BaseTool):
 
             elif outbound_format == "sql":
                 # Use the same pattern as DAX - process each KPI individually
-                from src.converters.services.sql import SQLTranslationOptions
+                from src.services.converters.formats.sql import SQLTranslationOptions
 
                 dialect = kwargs.get("sql_dialect", "databricks")
                 sql_dialect = SQLDialect[dialect.upper()]

@@ -415,7 +415,7 @@ class TestExtractFromPbiApi:
         mock_connector = MagicMock()
         mock_connector.extract_measures.return_value = [mock_kpi]
         with (
-            patch('src.converters.services.powerbi.connector.PowerBIConnector',
+            patch('src.services.converters.formats.powerbi.connector.PowerBIConnector',
                   return_value=mock_connector),
             patch('src.services.tools.uc_metric_view_generator_tool._run_async',
                   side_effect=Exception('Admin API unavailable')),
@@ -519,7 +519,7 @@ class TestExtractFromPbiApiMQueryScan:
                 return_value=([mock_model], {'raw': 'scan'}),
             ),
             patch(
-                'src.converters.services.mquery.scanner.PowerBIAdminScanner',
+                'src.services.converters.formats.mquery.scanner.PowerBIAdminScanner',
                 return_value=mock_scanner,
             ),
         ):
@@ -591,7 +591,7 @@ class TestExtractFromPbiApiMeasures:
         mock_connector.extract_measures.return_value = [mock_kpi]
 
         with (
-            patch('src.converters.services.powerbi.connector.PowerBIConnector',
+            patch('src.services.converters.formats.powerbi.connector.PowerBIConnector',
                   return_value=mock_connector),
         ):
             result = tool._extract_from_pbi_api(
@@ -617,7 +617,7 @@ class TestExtractFromPbiApiMeasures:
         mock_connector.extract_measures.return_value = [mock_kpi]
 
         with (
-            patch('src.converters.services.powerbi.connector.PowerBIConnector',
+            patch('src.services.converters.formats.powerbi.connector.PowerBIConnector',
                   return_value=mock_connector),
         ):
             result = tool._extract_from_pbi_api(

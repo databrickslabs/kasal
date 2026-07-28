@@ -7,8 +7,8 @@ from src.services.tools.base import BaseTool
 from pydantic import BaseModel, Field, PrivateAttr
 
 # Import converters
-from src.converters.pipeline import ConversionPipeline, OutboundFormat
-from src.converters.base.connectors import ConnectorType
+from src.services.converters.pipeline import ConversionPipeline, OutboundFormat
+from src.services.converters.base.connectors import ConnectorType
 
 logger = logging.getLogger(__name__)
 
