@@ -101,7 +101,15 @@ class TestResolvedCaller:
 
         assert response.status_code == 200
         body = response.json()
-        assert {t["name"] for t in body["tools"]} == {"ask_kasal", "list_crews"}
+        assert {t["name"] for t in body["tools"]} == {
+            "ask_kasal",
+            "list_crews",
+            "start_crew",
+            "get_run_status",
+            "get_run_result",
+            "cancel_run",
+            "respond_to_run",
+        }
         assert body["protocolVersion"]
 
     def test_unknown_tool_is_a_404(self, client):

@@ -26,6 +26,7 @@ from src.services.external.identity import (
     resolve_caller,
 )
 from src.services.mcp_server import server as mcp_server
+from src.services.mcp_server.tools import UnknownCapabilityError, UnknownRunError
 
 router = APIRouter(
     prefix="/mcp/v1",
@@ -119,6 +120,17 @@ async def call_tool(request: ToolCallRequest, caller: CallerDep, session: Sessio
         )
     except mcp_server.UnknownToolError as exc:
         raise NotFoundError(str(exc))
+    except (UnknownCapabilityError, UnknownRunError) as exc:
+        # 404 for both "does not exist" and "not yours". They must stay
+        # indistinguishable, or run ids and capability names become an oracle
+        # for other workspaces.
+        raise NotFoundError(str(exc))
+    except ExternalAuthError as exc:
+        # Raised mid-call by require_obo_token(): the caller is known, but this
+        # operation needs their Databricks token and they presented none. That
+        # is the auth_required state — reported before any run is created,
+        # rather than as a run that dies inside an agent.
+        raise ExternalAuthRequired(exc.detail)
     except TypeError as exc:
         # Wrong/missing arguments for a known tool. A 422 rather than a 500:
         # this is the caller's mistake and it can fix it.

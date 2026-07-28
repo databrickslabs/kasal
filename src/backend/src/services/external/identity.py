@@ -13,6 +13,24 @@ The chain deliberately mirrors ``src/core/dependencies.py`` — the same headers
 in the same order, that the browser-facing API already trusts. An external
 surface that authenticated differently from the rest of the app would be a
 second security model to reason about.
+
+**The identity model is OBO, decided and not defaulted.** Work invoked from
+outside runs as the CALLING USER, on their Databricks token — never as a service
+principal. Two reasons, in order:
+
+1. Kasal is reached through Databricks Apps, so a caller that can reach this
+   surface at all already holds a token. OBO costs the caller nothing it does
+   not already have.
+2. A service principal would mean a crew invoked by a low-privilege agent could
+   read more than that agent ever could. The blast radius of a prompt-injected
+   external call would be the SPN's access, not the caller's.
+
+The consequence is that a token is not optional for anything touching
+Databricks, and its absence is an ``auth_required`` answer rather than a run
+that fails halfway with a permissions error. That is what finally gives
+``auth_required`` a producer: it was the one canonical external state with no
+``ExecutionStatus`` behind it, because it describes an invocation that never
+became a run.
 """
 
 import logging
@@ -62,6 +80,33 @@ class ExternalCaller:
     @property
     def group_ids(self) -> list:
         return self.group_context.group_ids or []
+
+    @property
+    def access_token(self) -> Optional[str]:
+        """The caller's own token. Everything runs on this, per the OBO decision."""
+        return getattr(self.group_context, "access_token", None)
+
+    def require_obo_token(self) -> str:
+        """The caller's token, or refuse with ``auth_required``.
+
+        Called before starting work that will reach Databricks. Refusing HERE,
+        rather than letting the run start and fail somewhere inside an agent
+        with a permissions error, is the difference between a caller that knows
+        to present a token and one that sees an inexplicable mid-run failure.
+
+        ``ask_kasal`` does not call this: a question answered from the model
+        alone needs no workspace access, and demanding a token for it would make
+        the cheapest tool the hardest to call.
+        """
+        token = self.access_token
+        if not token:
+            raise ExternalAuthError(
+                "This workspace runs external invocations on the caller's own "
+                "Databricks token (on-behalf-of). Present one via "
+                "X-Forwarded-Access-Token or X-Auth-Request-Access-Token.",
+                scheme="oauth2",
+            )
+        return token
 
 
 async def resolve_caller(

@@ -17,9 +17,10 @@ from src.services.external.identity import (
 
 
 class _Ctx:
-    def __init__(self, group_ids, email="alice@acme-corp.com"):
+    def __init__(self, group_ids, email="alice@acme-corp.com", token="tok-123"):
         self.group_ids = list(group_ids)
         self.group_email = email
+        self.access_token = token
 
     @property
     def primary_group_id(self):
@@ -112,3 +113,51 @@ class TestSuccessfulResolution:
         )
         with pytest.raises(Exception):
             caller.protocol = "a2a"
+
+
+class TestOnBehalfOf:
+    """The identity model: externally-invoked work runs as the CALLING USER.
+
+    Not a service principal. Kasal is reached through Databricks Apps, so a
+    caller that can reach this surface already holds a token — and an SPN would
+    mean a crew invoked by a low-privilege agent could read more than that agent
+    ever could.
+    """
+
+    def test_missing_token_is_refused_with_auth_required_semantics(self):
+        caller = ExternalCaller(
+            group_context=_Ctx(["acme_corp"], token=None),
+            protocol="mcp",
+            identifier="alice@acme-corp.com",
+        )
+        with pytest.raises(ExternalAuthError) as exc:
+            caller.require_obo_token()
+        assert exc.value.scheme == "oauth2"
+        assert "on-behalf-of" in str(exc.value).lower()
+
+    def test_the_callers_own_token_is_what_is_used(self):
+        caller = ExternalCaller(
+            group_context=_Ctx(["acme_corp"], token="tok-abc"),
+            protocol="a2a",
+            identifier="alice@acme-corp.com",
+        )
+        assert caller.require_obo_token() == "tok-abc"
+        assert caller.access_token == "tok-abc"
+
+    @pytest.mark.asyncio
+    async def test_group_membership_comes_from_the_resolved_user_not_the_request(self):
+        """The token identifies the user; their groups come from the memberships
+        they were actually added to. A caller cannot name its own workspace."""
+        with _patch_from_email(_Ctx(["acme_corp"])):
+            caller = await resolve_caller(
+                protocol="mcp", email="alice@acme-corp.com", access_token="tok"
+            )
+        assert caller.group_ids == ["acme_corp"]
+
+    @pytest.mark.asyncio
+    async def test_the_token_is_carried_into_the_context(self):
+        with _patch_from_email(_Ctx(["acme_corp"], token="tok-xyz")):
+            caller = await resolve_caller(
+                protocol="mcp", email="alice@acme-corp.com", access_token="tok-xyz"
+            )
+        assert caller.require_obo_token() == "tok-xyz"

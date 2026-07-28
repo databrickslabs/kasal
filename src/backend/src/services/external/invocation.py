@@ -1,6 +1,10 @@
 """Running work on behalf of an external caller.
 
-Phase 2 scope: the BLOCKING ask, over the chat path only.
+Two shapes, because Kasal has two:
+
+* the BLOCKING ask, over the chat path — fits inside a tool-call timeout;
+* ASYNC HANDLES for crews — start returns a run id immediately, and the caller
+  polls status/result or cancels.
 
 The chat path (``execution_type="agent"``) runs a single agent in-process via
 ``Agent.kickoff_async`` — no subprocess, no crew, sub-second. That makes it the
@@ -8,11 +12,14 @@ one Kasal execution shape that fits inside an ordinary tool-call timeout, which
 is why it is the first thing exposed: it exercises transport, identity and group
 scoping end to end without needing any async-handle machinery.
 
-Crew and flow runs take minutes; the run-level budget work contemplates up to an
-hour. They will be reachable through start/status/result/cancel handles, added
-here in phase 3. This module deliberately does NOT offer a blocking crew call —
-one would look fine against a three-task crew in testing and time out in
-production, and having it available is how it ends up used.
+Crew runs take minutes; the run-level budget work contemplates up to an hour.
+There is deliberately NO blocking crew call — one would look fine against a
+three-task crew in testing and time out in production, and having it available
+is how it ends up used. ``start_run`` returns a handle and returns it fast.
+
+Everything that reaches Databricks runs on the CALLER's token (OBO). A caller
+with no token gets ``auth_required`` before a run is created, rather than a run
+that starts and fails inside an agent with a permissions error.
 
 No new execution logic lives here. Everything goes through
 ``services/execution/`` exactly as a browser-initiated run does, which is what
@@ -182,3 +189,137 @@ def _to_result(execution_id: str, raw: Any) -> InvocationResult:
         output=str(output) if output is not None else None,
         error=raw.get("error"),
     )
+
+
+# ---------------------------------------------------------------------------
+# Async handles — the shape crews need.
+# ---------------------------------------------------------------------------
+
+
+async def start_run(
+    caller: ExternalCaller,
+    publication: Any,
+    inputs: Optional[Dict[str, Any]] = None,
+    session: Any = None,
+) -> InvocationResult:
+    """Start a published crew and return a handle immediately.
+
+    Never waits for the run. The caller polls :func:`run_status` (or, later,
+    subscribes) — see the module docstring for why a blocking variant does not
+    exist.
+
+    ``publication`` is a CrewPublication the caller has ALREADY been authorised
+    for by ``PublicationService.resolve_capability``; this function does not
+    re-resolve it, so there is exactly one place that decides whether a caller
+    may reach a given crew.
+    """
+    # OBO: refuse before creating anything. A run that starts without a token
+    # and dies inside an agent costs the caller a run id and tells them nothing.
+    caller.require_obo_token()
+
+    from src.services.catalog.crews import CrewService
+    from src.services.execution.service import ExecutionService
+
+    crew_service = CrewService(session)
+    crew = await crew_service.get(publication.crew_id)
+    if crew is None:
+        raise ValueError(f"Published crew {publication.crew_id} no longer exists")
+
+    config = CrewConfig(
+        agents_yaml=_nodes_to_yaml(crew, "agent"),
+        tasks_yaml=_nodes_to_yaml(crew, "task"),
+        inputs={**(inputs or {}), "external_origin": caller.origin},
+        execution_type="crew",
+    )
+
+    service = ExecutionService(session)
+    created = await service.create_execution(
+        config=config, group_context=caller.group_context
+    )
+    run_id = (created or {}).get("execution_id", "")
+
+    logger.info(
+        "[external] %s started crew %s as run=%s (group=%s)",
+        caller.protocol,
+        publication.external_name,
+        run_id,
+        caller.group_ids,
+    )
+    return InvocationResult(
+        run_id=run_id, state=to_external_state((created or {}).get("status"))
+    )
+
+
+async def run_status(
+    caller: ExternalCaller, run_id: str, session: Any = None
+) -> Optional[InvocationResult]:
+    """The current state of a run, or None if this caller may not see it.
+
+    None for both "no such run" and "another tenant's run" — the caller must not
+    be able to tell those apart, or run ids become an oracle for other
+    workspaces' activity.
+    """
+    from src.services.execution.service import ExecutionService
+
+    service = ExecutionService(session)
+    raw = await service.get_execution_status(run_id, caller.group_ids)
+    if raw is None:
+        return None
+    return _to_result(run_id, raw)
+
+
+async def run_result(
+    caller: ExternalCaller, run_id: str, session: Any = None
+) -> Optional[InvocationResult]:
+    """A finished run's output. Same group scoping as :func:`run_status`.
+
+    Returns the run whatever its state: a caller asking for the result of a run
+    that is still working gets ``working`` and no output, which is a better
+    answer than an error it has to special-case.
+    """
+    return await run_status(caller, run_id, session=session)
+
+
+async def cancel_run(
+    caller: ExternalCaller, run_id: str, session: Any = None
+) -> Optional[InvocationResult]:
+    """Stop a run. None if the caller may not see it."""
+    from src.services.execution.service import ExecutionService
+
+    service = ExecutionService(session)
+
+    # Authorise through the same group-scoped read as everything else BEFORE
+    # stopping anything — the stop path itself takes a bare execution id.
+    current = await service.get_execution_status(run_id, caller.group_ids)
+    if current is None:
+        return None
+
+    await service.stop_execution(
+        execution_id=run_id,
+        stop_type="user_requested",
+        reason=f"cancelled by {caller.origin}",
+        requested_by=caller.identifier,
+        db=session,
+    )
+    return InvocationResult(run_id=run_id, state=ExternalTaskState.CANCELED)
+
+
+def _nodes_to_yaml(crew: Any, node_type: str) -> Dict[str, Any]:
+    """Project a saved crew's nodes into the agents_yaml/tasks_yaml the engine
+    takes.
+
+    Kept here rather than in the adapters because both protocols start crews the
+    same way, and a second copy of this projection is a second way for an
+    external run to differ from a UI-initiated one.
+    """
+    nodes = getattr(crew, "nodes", None) or []
+    out: Dict[str, Any] = {}
+    for node in nodes:
+        data = node.get("data") if isinstance(node, dict) else None
+        if not isinstance(data, dict):
+            continue
+        if (node.get("type") or "").lower() not in (node_type, f"{node_type}node"):
+            continue
+        key = str(data.get("name") or data.get("role") or node.get("id"))
+        out[key] = data
+    return out

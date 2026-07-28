@@ -40,12 +40,15 @@ class TestAdvertisedSurface:
         assert advertised == set(TOOL_HANDLERS)
 
     def test_no_blocking_crew_tool_is_advertised(self):
-        """Crew runs take minutes. A blocking run_crew passes testing against a
-        small crew and times out in production, so it must not exist until async
-        handles do."""
+        """Crew runs take minutes. A BLOCKING run_crew passes testing against a
+        small crew and times out in production, so it must never exist.
+
+        start_crew is the sanctioned shape: it returns a handle and does not
+        wait. The distinction is the whole point, so it is pinned rather than
+        left to reviewer memory."""
         names = {t["name"] for t in TOOL_DEFINITIONS}
         assert "run_crew" not in names
-        assert "start_crew" not in names  # phase 3
+        assert "start_crew" in names
 
     def test_every_tool_declares_an_input_schema(self):
         for tool in TOOL_DEFINITIONS:
