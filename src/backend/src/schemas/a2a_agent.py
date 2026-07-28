@@ -56,6 +56,9 @@ class A2AAgentResponse(A2AAgentBase):
     """
 
     id: int
+    #: NULL for a globally-registered agent, set for a workspace's own opt-in
+    #: copy. The UI reads it to tell "inherited, toggle only" from "yours".
+    group_id: Optional[str] = None
     has_api_key: bool = False
     skills: List[Dict[str, Any]] = Field(default_factory=list)
     card_fetched_at: Optional[datetime] = None

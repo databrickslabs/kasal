@@ -18,6 +18,12 @@ export interface A2ASkill {
 
 export interface A2AAgent {
   id: number;
+  /**
+   * NULL for a globally-registered agent, set for a workspace's own opt-in
+   * copy. In the workspace view a null `group_id` means "inherited — toggle
+   * only, edited in the global view".
+   */
+  group_id?: string | null;
   name: string;
   card_url: string;
   description?: string | null;
@@ -58,6 +64,43 @@ export const A2AAgentService = {
   async list(): Promise<A2AAgent[]> {
     const { data } = await apiClient.get<{ agents: A2AAgent[]; count: number }>(BASE);
     return data.agents ?? [];
+  },
+
+  /**
+   * The Kasal-admin catalogue: globally registered agents.
+   *
+   * A remote agent carries an outbound URL and a credential, so registering one
+   * is a system-administration act — the same split MCP servers have. 403s for
+   * anyone who is not a Kasal admin.
+   */
+  async listBase(): Promise<A2AAgent[]> {
+    const { data } = await apiClient.get<{ agents: A2AAgent[]; count: number }>(
+      `${BASE}/base`,
+    );
+    return data.agents ?? [];
+  },
+
+  /** Kasal admin: offer an agent to all workspaces, or withdraw it. */
+  async setGlobalAvailability(id: number, enabled: boolean): Promise<A2AAgent> {
+    const { data } = await apiClient.patch<A2AAgent>(
+      `${BASE}/${id}/global-availability`,
+      { enabled },
+    );
+    return data;
+  },
+
+  /**
+   * Workspace admin: turn an agent on or off for THIS workspace.
+   *
+   * Toggling an inherited global agent creates a workspace-scoped copy carrying
+   * that choice; the global row is never touched.
+   */
+  async setWorkspaceEnabled(id: number, enabled: boolean): Promise<A2AAgent> {
+    const { data } = await apiClient.patch<A2AAgent>(
+      `${BASE}/${id}/workspace-enabled`,
+      { enabled },
+    );
+    return data;
   },
 
   async create(input: A2AAgentInput): Promise<A2AAgent> {

@@ -214,6 +214,15 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
         index: currentIndex++,
         group: 'system'
       });
+      // Remote Agents (Global) - registered once, offered to workspaces. A
+      // remote agent carries an outbound URL and a credential, so registering
+      // one is system administration — the same split MCP servers have.
+      baseNavItems.push({
+        label: t('configuration.remoteAgents.global', { defaultValue: 'Remote Agents (Global)' }),
+        icon: <HubIcon fontSize="small" />,
+        index: currentIndex++,
+        group: 'system'
+      });
       baseNavItems.push({
         label: t('configuration.userPermissions.tab', { defaultValue: 'User Permissions' }),
         icon: <SettingsIcon fontSize="small" />,
@@ -276,7 +285,7 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
       // because they are the same kind of thing to an operator: an external
       // capability attached to this workspace's agents.
       baseNavItems.push({
-        label: t('configuration.remoteAgents.tab', { defaultValue: 'Remote Agents' }),
+        label: t('configuration.remoteAgents.workspace', { defaultValue: 'Remote Agents (Teamspace)' }),
         icon: <HubIcon fontSize="small" />,
         index: currentIndex++,
         group: 'workspace'
@@ -762,11 +771,20 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
               );
             }
 
-            // Remote Agents (Workspace)
-            if (item.label === t('configuration.remoteAgents.tab', { defaultValue: 'Remote Agents' })) {
+            // Remote Agents (Workspace) - opt in to what a Kasal admin offered
+            if (item.label === t('configuration.remoteAgents.workspace', { defaultValue: 'Remote Agents (Teamspace)' })) {
               return (
                 <ContentPanel key={item.index} value={activeSection} index={item.index}>
-                  <RemoteAgents />
+                  <RemoteAgents mode="workspace" />
+                </ContentPanel>
+              );
+            }
+
+            // Remote Agents (Global) - System Administration
+            if (item.label === t('configuration.remoteAgents.global', { defaultValue: 'Remote Agents (Global)' })) {
+              return (
+                <ContentPanel key={item.index} value={activeSection} index={item.index}>
+                  <RemoteAgents mode="system" />
                 </ContentPanel>
               );
             }

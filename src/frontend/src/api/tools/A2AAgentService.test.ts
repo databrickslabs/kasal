@@ -5,6 +5,7 @@ vi.mock('../../config/api/ApiConfig', () => ({
     get: vi.fn(),
     post: vi.fn(),
     put: vi.fn(),
+    patch: vi.fn(),
     delete: vi.fn(),
   },
 }));
@@ -16,6 +17,7 @@ const client = apiClient as unknown as {
   get: ReturnType<typeof vi.fn>;
   post: ReturnType<typeof vi.fn>;
   put: ReturnType<typeof vi.fn>;
+  patch: ReturnType<typeof vi.fn>;
   delete: ReturnType<typeof vi.fn>;
 };
 
@@ -66,5 +68,34 @@ describe('A2AAgentService', () => {
     client.delete.mockResolvedValue({ data: null });
     await A2AAgentService.remove(7);
     expect(client.delete).toHaveBeenCalledWith('/a2a-agents/7');
+  });
+});
+
+describe('A2AAgentService — global vs workspace', () => {
+  it('reads the Kasal-admin catalogue from /base', async () => {
+    client.get.mockResolvedValue({ data: { agents: [], count: 0 } });
+    await A2AAgentService.listBase();
+    expect(client.get).toHaveBeenCalledWith('/a2a-agents/base');
+  });
+
+  it('withdraws an agent globally through its own endpoint', async () => {
+    // Distinct from the workspace toggle: this one cascades everywhere, so it
+    // must never be reachable by the workspace path.
+    client.patch = vi.fn().mockResolvedValue({ data: { id: 1 } });
+    await A2AAgentService.setGlobalAvailability(1, false);
+    expect(client.patch).toHaveBeenCalledWith('/a2a-agents/1/global-availability', {
+      enabled: false,
+    });
+  });
+
+  it('opts a workspace in without touching the global row', async () => {
+    client.patch = vi.fn().mockResolvedValue({ data: { id: 9, group_id: 'acme' } });
+    const saved = await A2AAgentService.setWorkspaceEnabled(1, true);
+    expect(client.patch).toHaveBeenCalledWith('/a2a-agents/1/workspace-enabled', {
+      enabled: true,
+    });
+    // The response is the workspace's own copy — a DIFFERENT id from the base,
+    // which is why the list reconciles by name.
+    expect(saved.id).toBe(9);
   });
 });
