@@ -74,8 +74,12 @@ class TestSettings:
             DATABASE_TYPE="sqlite"
         )
         
-        # It uses the default SQLITE_DB_PATH which is "./app.db"
-        expected_uri = "sqlite+aiosqlite:///./app.db"
+        # The default SQLITE_DB_PATH is ABSOLUTE (anchored on the backend root)
+        # rather than the CWD-relative "./app.db" it used to be — a relative
+        # default created a stray database wherever the process happened to run.
+        from src.core.paths import BACKEND_ROOT
+
+        expected_uri = f"sqlite+aiosqlite:///{BACKEND_ROOT / 'app.db'}"
         assert settings.DATABASE_URI == expected_uri
     
     def test_database_uri_custom_string(self):
@@ -106,7 +110,9 @@ class TestSettings:
         )
         
         # It uses the default SQLITE_DB_PATH which is "./app.db"
-        expected_uri = "sqlite:///./app.db"
+        from src.core.paths import BACKEND_ROOT
+
+        expected_uri = f"sqlite:///{BACKEND_ROOT / 'app.db'}"
         assert settings.SYNC_DATABASE_URI == expected_uri
     
     def test_sync_database_uri_custom_string(self):

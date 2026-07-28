@@ -1,5 +1,7 @@
 from typing import Any, Dict, List, Optional, Union
 import os
+
+from src.core.paths import BACKEND_ROOT
 from pathlib import Path
 
 from pydantic import AnyHttpUrl, PostgresDsn, field_validator
@@ -35,8 +37,15 @@ class Settings(BaseSettings):
     DATABASE_URI: Optional[str] = None
     SYNC_DATABASE_URI: Optional[str] = None
     
-    # Database file path for SQLite
-    SQLITE_DB_PATH: Optional[str] = os.getenv("SQLITE_DB_PATH", "./app.db")
+    # Database file path for SQLite.
+    #
+    # The default is ABSOLUTE on purpose. It used to be "./app.db", which
+    # resolves against the process CWD — so a script run from the repo root or
+    # from src/frontend/ silently created its own empty database there instead
+    # of opening the real one. Three such strays existed in the tree.
+    SQLITE_DB_PATH: Optional[str] = os.getenv(
+        "SQLITE_DB_PATH", str(BACKEND_ROOT / "app.db")
+    )
     DB_FILE_PATH: Optional[str] = os.getenv("DB_FILE_PATH", "sqlite.db")
 
     @field_validator("DATABASE_URI", mode="before")
@@ -48,7 +57,7 @@ class Settings(BaseSettings):
         db_type = info.data.get("DATABASE_TYPE", "postgres")
         
         if db_type.lower() == "sqlite":
-            sqlite_path = info.data.get("SQLITE_DB_PATH", "./app.db")
+            sqlite_path = info.data.get("SQLITE_DB_PATH", str(BACKEND_ROOT / "app.db"))
             return f"sqlite+aiosqlite:///{sqlite_path}"
         else:
             # Default to PostgreSQL - return string instead of PostgresDsn to avoid validation issues
@@ -63,7 +72,7 @@ class Settings(BaseSettings):
         db_type = info.data.get("DATABASE_TYPE", "postgres")
         
         if db_type.lower() == "sqlite":
-            sqlite_path = info.data.get("SQLITE_DB_PATH", "./app.db")
+            sqlite_path = info.data.get("SQLITE_DB_PATH", str(BACKEND_ROOT / "app.db"))
             return f"sqlite:///{sqlite_path}"
         else:
             # Use asyncpg for sync operations too - avoid psycopg2 dependency

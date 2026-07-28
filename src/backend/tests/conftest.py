@@ -14,6 +14,22 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+# Point the process at a throwaway database BEFORE anything imports settings.
+#
+# This cannot be a fixture. `config/settings.py` evaluates
+# `os.getenv("SQLITE_DB_PATH", ...)` when the Settings CLASS BODY runs — i.e. at
+# import, during collection — so an autouse `monkeypatch.setenv` further down
+# this file always loses the race. It has been losing it silently: the default
+# used to be the CWD-relative "./app.db", which is how empty app.db files ended
+# up at the repo root and in src/frontend/. The default is absolute now, which
+# makes setting this early MORE important, not less: without it a stray write
+# would land in the real development database instead of a stray file.
+# Only the PATH is set here, deliberately. DATABASE_TYPE is left alone because
+# it is read the same way, and tests assert on its "postgres" default — setting
+# it at import time would bake "sqlite" into the class and break them. The
+# autouse fixture below still sets both for the code that reads them at runtime.
+os.environ.setdefault("SQLITE_DB_PATH", ":memory:")
+
 # Import numpy (and its lazy submodules) to completion BEFORE pytest collection
 # imports any test module. During collection, a half-finished numpy import
 # (KeyError('numpy.exceptions') / "partially initialized module 'numpy'")

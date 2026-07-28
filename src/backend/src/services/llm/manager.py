@@ -33,6 +33,7 @@ import litellm
 from litellm import CustomLogger
 
 from src.core.llm.transport import LLM
+from src.core.logger import LoggerManager
 from src.schemas.model_provider import ModelProvider
 
 # Dedicated executor for blocking LLM calls. ``asyncio.to_thread`` shares the
@@ -62,7 +63,6 @@ async def _run_llm_blocking(func, /, *args, **kwargs):
 from src.utils.databricks_url_utils import DatabricksURLUtils
 from src.services.settings.models import ModelConfigService
 from src.services.settings.api_keys import ApiKeysService
-import pathlib
 
 # Endpoint-specific LLM subclasses. This import no longer carries side effects:
 # the module used to apply two litellm monkey patches at import time, both of
@@ -75,8 +75,13 @@ from src.services.llm.handlers.vllm import VLLMFunctionCallingLLM
 # per-call api_key/base_url natively.
 
 
-# Get the absolute path to the logs directory
-log_dir = os.environ.get("LOG_DIR", str(pathlib.Path(__file__).parent.parent.parent / "logs"))
+# The log directory comes from LoggerManager, which owns that decision. This
+# used to recompute it as Path(__file__).parent.parent.parent / "logs" — a
+# depth-counting path that was correct only while this module lived at
+# src/core/. When it moved to src/services/llm/ the same expression started
+# resolving to backend/src/logs, so LLM logs and the litellm disk cache were
+# written INTO the source tree, in production as well as in tests.
+log_dir = str(LoggerManager.get_instance().log_dir)
 log_file_path = os.path.join(log_dir, "llm.log")
 
 # Configure standard Python logger to also write to the llm.log file

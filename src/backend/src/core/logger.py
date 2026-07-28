@@ -207,6 +207,27 @@ class LoggerManager:
         # Log initialization success
         self._system_logger.info(f"Logging system initialized. Log directory: {self._log_dir}")
     
+    @property
+    def log_dir(self) -> Path:
+        """The one directory every log file goes in.
+
+        Exposed because callers were recomputing it. A second copy of
+        ``Path(__file__).parent.parent.parent / "logs"`` is correct only from a
+        module at one specific depth, so it silently points somewhere else the
+        moment that module moves — which is exactly what happened to the LLM
+        manager when it moved from ``core/`` to ``services/llm/``.
+        """
+        if self._log_dir is None:
+            # Same resolution initialize() uses, without forcing a full logger
+            # setup on a caller that only wants the path.
+            env_log_dir = os.environ.get("LOG_DIR")
+            self._log_dir = (
+                Path(env_log_dir)
+                if env_log_dir
+                else Path(__file__).parent.parent.parent / "logs"
+            )
+        return self._log_dir
+
     def _get_all_domain_loggers(self) -> list:
         """Return all initialized domain loggers."""
         loggers = []

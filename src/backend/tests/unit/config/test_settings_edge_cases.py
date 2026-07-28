@@ -237,5 +237,10 @@ class TestSettingsEdgeCases:
         
         # Should use all defaults
         assert clean_settings.DATABASE_TYPE == "postgres"  # Default fallback
-        assert clean_settings.SQLITE_DB_PATH == "./app.db"  # Default fallback
+        # SQLITE_DB_PATH is baked into the class body at IMPORT time, so
+        # clearing os.environ here cannot change it — conftest sets ":memory:"
+        # before collection. What this asserts is the property that matters: the
+        # value is never a CWD-relative path, because that is what scattered
+        # empty app.db files across the repo.
+        assert not clean_settings.SQLITE_DB_PATH.startswith("./")
         assert clean_settings.DB_FILE_PATH == "sqlite.db"  # Default fallback
