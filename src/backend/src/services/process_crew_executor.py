@@ -206,7 +206,7 @@ def run_crew_in_process(
         }
 
     # This must be done early before any other imports that might configure logging
-    from src.engines.kasal.infra.logging_config import (
+    from src.services.execution.subprocess_bootstrap import (
         configure_subprocess_logging,
         restore_stdout_stderr,
         suppress_stdout_stderr,
@@ -1003,7 +1003,7 @@ def run_crew_in_process(
                 from src.engines.kasal.kernel.execution_callback import (
                     create_execution_callbacks,
                 )
-                from src.engines.kasal.infra.trace_management import TraceManager
+                from src.services.execution.logs.writer_task import LogWriterTask
 
                 async_logger.info(
                     f"Process {os.getpid()} initializing event listeners for {execution_id}"
@@ -1020,9 +1020,9 @@ def run_crew_in_process(
                     )
 
                     # Start the trace writer to process queued traces
-                    await TraceManager.ensure_writer_started()
+                    await LogWriterTask.ensure_writer_started()
                     async_logger.info(
-                        f"TraceManager writer started in subprocess for {execution_id}"
+                        f"LogWriterTask writer started in subprocess for {execution_id}"
                     )
 
                     # Event subscriptions belong to the OTel bridge, registered
@@ -1132,7 +1132,7 @@ def run_crew_in_process(
                     crew_log_path = os.path.join(log_dir, "crew.log")
 
                     # Create file handler for crew.log
-                    from src.engines.kasal.infra.logging_config import (
+                    from src.services.execution.logs import (
                         ExecutionContextFormatter,
                         set_execution_context,
                     )

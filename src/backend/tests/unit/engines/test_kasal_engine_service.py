@@ -101,7 +101,7 @@ class TestInitialize:
     @pytest.mark.asyncio
     async def test_returns_true_on_success(self, service):
         with patch(
-            "src.engines.kasal.kasal_engine_service.TraceManager.ensure_writer_started",
+            "src.engines.kasal.kasal_engine_service.LogWriterTask.ensure_writer_started",
             new_callable=AsyncMock,
         ):
             result = await service.initialize(llm_provider="openai", model="gpt-4o")
@@ -110,7 +110,7 @@ class TestInitialize:
     @pytest.mark.asyncio
     async def test_uses_default_provider_and_model(self, service):
         with patch(
-            "src.engines.kasal.kasal_engine_service.TraceManager.ensure_writer_started",
+            "src.engines.kasal.kasal_engine_service.LogWriterTask.ensure_writer_started",
             new_callable=AsyncMock,
         ):
             result = await service.initialize()
@@ -119,21 +119,21 @@ class TestInitialize:
     @pytest.mark.asyncio
     async def test_returns_false_on_exception(self, service):
         with patch(
-            "src.engines.kasal.kasal_engine_service.TraceManager.ensure_writer_started",
+            "src.engines.kasal.kasal_engine_service.LogWriterTask.ensure_writer_started",
             new_callable=AsyncMock,
         ), patch(
-            "src.engines.kasal.infra.crew_logger.crew_logger",
+            "src.services.execution.logs.capture.execution_log_capture",
             side_effect=Exception("boom"),
         ):
             # Force the import inside initialize() to fail
-            with patch.dict("sys.modules", {"src.engines.kasal.infra.crew_logger": None}):
+            with patch.dict("sys.modules", {"src.services.execution.logs.capture": None}):
                 result = await service.initialize()
                 assert result is False
 
     @pytest.mark.asyncio
     async def test_flow_execution_type_uses_flow_logger(self, service):
         with patch(
-            "src.engines.kasal.kasal_engine_service.TraceManager.ensure_writer_started",
+            "src.engines.kasal.kasal_engine_service.LogWriterTask.ensure_writer_started",
             new_callable=AsyncMock,
         ):
             result = await service.initialize(execution_type="flow")
@@ -293,7 +293,7 @@ class TestRunExecution:
             "src.engines.kasal.kasal_engine_service.normalize_config",
             return_value=sample_execution_config,
         ), patch(
-            "src.engines.kasal.kasal_engine_service.TraceManager.ensure_writer_started",
+            "src.engines.kasal.kasal_engine_service.LogWriterTask.ensure_writer_started",
             new_callable=AsyncMock,
         ), patch(
             "src.engines.kasal.kasal_engine_service.run_crew_in_process",
@@ -317,7 +317,7 @@ class TestRunExecution:
             "src.engines.kasal.kasal_engine_service.normalize_config",
             return_value=sample_execution_config,
         ), patch(
-            "src.engines.kasal.kasal_engine_service.TraceManager.ensure_writer_started",
+            "src.engines.kasal.kasal_engine_service.LogWriterTask.ensure_writer_started",
             new_callable=AsyncMock,
         ), patch(
             "src.services.tools.tool_factory.ToolFactory.create",
@@ -344,7 +344,7 @@ class TestRunExecution:
             "src.engines.kasal.kasal_engine_service.normalize_config",
             side_effect=capture_normalize,
         ), patch(
-            "src.engines.kasal.kasal_engine_service.TraceManager.ensure_writer_started",
+            "src.engines.kasal.kasal_engine_service.LogWriterTask.ensure_writer_started",
             new_callable=AsyncMock,
         ), patch(
             "src.engines.kasal.kasal_engine_service.run_crew_in_process",
@@ -370,7 +370,7 @@ class TestRunExecution:
             "src.engines.kasal.kasal_engine_service.normalize_config",
             return_value=sample_execution_config,
         ), patch(
-            "src.engines.kasal.kasal_engine_service.TraceManager.ensure_writer_started",
+            "src.engines.kasal.kasal_engine_service.LogWriterTask.ensure_writer_started",
             new_callable=AsyncMock,
         ), patch(
             "src.engines.kasal.kasal_engine_service.logger.info",
@@ -406,7 +406,7 @@ class TestRunFlow:
             "src.engines.kasal.kasal_engine_service.normalize_flow_config",
             return_value=sample_flow_config,
         ), patch(
-            "src.engines.kasal.kasal_engine_service.TraceManager.ensure_writer_started",
+            "src.engines.kasal.kasal_engine_service.LogWriterTask.ensure_writer_started",
             new_callable=AsyncMock,
         ), patch(
             "src.engines.kasal.kasal_engine_service.run_flow_in_process",
@@ -425,7 +425,7 @@ class TestRunFlow:
             "src.engines.kasal.kasal_engine_service.normalize_flow_config",
             side_effect=lambda c: c,
         ), patch(
-            "src.engines.kasal.kasal_engine_service.TraceManager.ensure_writer_started",
+            "src.engines.kasal.kasal_engine_service.LogWriterTask.ensure_writer_started",
             new_callable=AsyncMock,
         ), patch(
             "src.engines.kasal.kasal_engine_service.run_flow_in_process",

@@ -11,8 +11,8 @@ import asyncio
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 
-from src.engines.kasal.infra.trace_management import TraceManager
-class TestTraceManagerEventFiltering:
+from src.services.execution.logs.writer_task import LogWriterTask
+class TestLogWriterTaskEventFiltering:
     """Test cases for trace manager event filtering."""
 
     def test_important_event_types_list(self):
@@ -280,20 +280,20 @@ class TestConfigSanitization:
 
 
 # ---------------------------------------------------------------------------
-# TraceManager.ensure_writer_started and stop_writer tests
+# LogWriterTask.ensure_writer_started and stop_writer tests
 # ---------------------------------------------------------------------------
 
-_START_WRITER_PATCH = "src.services.execution_logs_service.start_logs_writer"
-_STOP_WRITER_PATCH = "src.services.execution_logs_service.stop_logs_writer"
+_START_WRITER_PATCH = "src.services.execution.logs.writer.start_logs_writer"
+_STOP_WRITER_PATCH = "src.services.execution.logs.writer.stop_logs_writer"
 
 
 def _reset_trace_manager():
-    """Reset all TraceManager class-level state between tests."""
-    TraceManager._logs_writer_task = None
-    TraceManager._shutdown_event = None
-    TraceManager._writer_started = False
-    TraceManager._lock = None
-    TraceManager._writer_loop = None
+    """Reset all LogWriterTask class-level state between tests."""
+    LogWriterTask._logs_writer_task = None
+    LogWriterTask._shutdown_event = None
+    LogWriterTask._writer_started = False
+    LogWriterTask._lock = None
+    LogWriterTask._writer_loop = None
 
 
 def _make_task_mock(done=False):
@@ -305,14 +305,14 @@ def _make_task_mock(done=False):
 
 @pytest.fixture(autouse=False)
 def clean_trace_manager():
-    """Fixture that resets TraceManager state before and after each test."""
+    """Fixture that resets LogWriterTask state before and after each test."""
     _reset_trace_manager()
     yield
     _reset_trace_manager()
 
 
-class TestTraceManagerEnsureWriterStarted:
-    """Tests for TraceManager.ensure_writer_started (lines 36-65)."""
+class TestLogWriterTaskEnsureWriterStarted:
+    """Tests for LogWriterTask.ensure_writer_started (lines 36-65)."""
 
     @pytest.mark.asyncio
     async def test_first_call_starts_writer(self, clean_trace_manager):
@@ -324,14 +324,14 @@ class TestTraceManagerEnsureWriterStarted:
             new_callable=AsyncMock,
             return_value=mock_task,
         ) as mock_start:
-            await TraceManager.ensure_writer_started()
+            await LogWriterTask.ensure_writer_started()
 
             mock_start.assert_called_once()
-            assert TraceManager._writer_started is True
-            assert TraceManager._logs_writer_task is mock_task
-            assert TraceManager._shutdown_event is not None
-            assert TraceManager._lock is not None
-            assert TraceManager._writer_loop is asyncio.get_running_loop()
+            assert LogWriterTask._writer_started is True
+            assert LogWriterTask._logs_writer_task is mock_task
+            assert LogWriterTask._shutdown_event is not None
+            assert LogWriterTask._lock is not None
+            assert LogWriterTask._writer_loop is asyncio.get_running_loop()
 
     @pytest.mark.asyncio
     async def test_second_call_skips_start_when_task_running(self, clean_trace_manager):
@@ -343,13 +343,13 @@ class TestTraceManagerEnsureWriterStarted:
             new_callable=AsyncMock,
             return_value=mock_task,
         ) as mock_start:
-            await TraceManager.ensure_writer_started()
+            await LogWriterTask.ensure_writer_started()
             assert mock_start.call_count == 1
 
             # Second call -- task is not done, should hit the else branch (line 63-65)
-            await TraceManager.ensure_writer_started()
+            await LogWriterTask.ensure_writer_started()
             assert mock_start.call_count == 1
-            assert TraceManager._writer_started is True
+            assert LogWriterTask._writer_started is True
 
     @pytest.mark.asyncio
     async def test_restarts_when_task_done(self, clean_trace_manager):
@@ -358,30 +358,30 @@ class TestTraceManagerEnsureWriterStarted:
         new_task = _make_task_mock(done=False)
 
         loop = asyncio.get_running_loop()
-        TraceManager._logs_writer_task = done_task
-        TraceManager._writer_loop = loop
-        TraceManager._lock = asyncio.Lock()
-        TraceManager._shutdown_event = asyncio.Event()
+        LogWriterTask._logs_writer_task = done_task
+        LogWriterTask._writer_loop = loop
+        LogWriterTask._lock = asyncio.Lock()
+        LogWriterTask._shutdown_event = asyncio.Event()
 
         with patch(
             _START_WRITER_PATCH,
             new_callable=AsyncMock,
             return_value=new_task,
         ) as mock_start:
-            await TraceManager.ensure_writer_started()
+            await LogWriterTask.ensure_writer_started()
 
             mock_start.assert_called_once()
-            assert TraceManager._logs_writer_task is new_task
-            assert TraceManager._writer_started is True
+            assert LogWriterTask._logs_writer_task is new_task
+            assert LogWriterTask._writer_started is True
 
     @pytest.mark.asyncio
     async def test_loop_change_resets_state(self, clean_trace_manager):
         """Test that a loop change detection resets writer state."""
         old_loop = MagicMock()
-        TraceManager._writer_loop = old_loop
-        TraceManager._writer_started = True
-        TraceManager._logs_writer_task = _make_task_mock(done=False)
-        TraceManager._lock = MagicMock()
+        LogWriterTask._writer_loop = old_loop
+        LogWriterTask._writer_started = True
+        LogWriterTask._logs_writer_task = _make_task_mock(done=False)
+        LogWriterTask._lock = MagicMock()
 
         mock_task = _make_task_mock(done=False)
 
@@ -390,19 +390,19 @@ class TestTraceManagerEnsureWriterStarted:
             new_callable=AsyncMock,
             return_value=mock_task,
         ) as mock_start:
-            await TraceManager.ensure_writer_started()
+            await LogWriterTask.ensure_writer_started()
 
             mock_start.assert_called_once()
-            assert TraceManager._writer_started is True
-            assert TraceManager._writer_loop is asyncio.get_running_loop()
+            assert LogWriterTask._writer_started is True
+            assert LogWriterTask._writer_loop is asyncio.get_running_loop()
 
     @pytest.mark.asyncio
     async def test_lock_recreated_on_loop_change(self, clean_trace_manager):
         """Test that lock is recreated when loop changes."""
         old_loop = MagicMock()
         old_lock = MagicMock()
-        TraceManager._writer_loop = old_loop
-        TraceManager._lock = old_lock
+        LogWriterTask._writer_loop = old_loop
+        LogWriterTask._lock = old_lock
 
         mock_task = _make_task_mock(done=False)
 
@@ -411,14 +411,14 @@ class TestTraceManagerEnsureWriterStarted:
             new_callable=AsyncMock,
             return_value=mock_task,
         ):
-            await TraceManager.ensure_writer_started()
+            await LogWriterTask.ensure_writer_started()
 
-            assert isinstance(TraceManager._lock, asyncio.Lock)
-            assert TraceManager._lock is not old_lock
+            assert isinstance(LogWriterTask._lock, asyncio.Lock)
+            assert LogWriterTask._lock is not old_lock
 
 
-class TestTraceManagerStopWriter:
-    """Tests for TraceManager.stop_writer (lines 70-120)."""
+class TestLogWriterTaskStopWriter:
+    """Tests for LogWriterTask.stop_writer (lines 70-120)."""
 
     @pytest.mark.asyncio
     async def test_stop_writer_normal_success(self, clean_trace_manager):
@@ -426,24 +426,24 @@ class TestTraceManagerStopWriter:
         loop = asyncio.get_running_loop()
         mock_task = _make_task_mock(done=False)
 
-        TraceManager._writer_loop = loop
-        TraceManager._logs_writer_task = mock_task
-        TraceManager._writer_started = True
-        TraceManager._shutdown_event = asyncio.Event()
-        TraceManager._lock = asyncio.Lock()
+        LogWriterTask._writer_loop = loop
+        LogWriterTask._logs_writer_task = mock_task
+        LogWriterTask._writer_started = True
+        LogWriterTask._shutdown_event = asyncio.Event()
+        LogWriterTask._lock = asyncio.Lock()
 
         with patch(
             _STOP_WRITER_PATCH,
             new_callable=AsyncMock,
             return_value=True,
         ) as mock_stop:
-            await TraceManager.stop_writer()
+            await LogWriterTask.stop_writer()
 
             mock_stop.assert_called_once_with(timeout=5.0)
-            assert TraceManager._shutdown_event.is_set()
-            assert TraceManager._logs_writer_task is None
-            assert TraceManager._writer_started is False
-            assert TraceManager._writer_loop is None
+            assert LogWriterTask._shutdown_event.is_set()
+            assert LogWriterTask._logs_writer_task is None
+            assert LogWriterTask._writer_started is False
+            assert LogWriterTask._writer_loop is None
 
     @pytest.mark.asyncio
     async def test_stop_writer_normal_failure(self, clean_trace_manager):
@@ -451,42 +451,42 @@ class TestTraceManagerStopWriter:
         loop = asyncio.get_running_loop()
         mock_task = _make_task_mock(done=False)
 
-        TraceManager._writer_loop = loop
-        TraceManager._logs_writer_task = mock_task
-        TraceManager._writer_started = True
-        TraceManager._shutdown_event = asyncio.Event()
-        TraceManager._lock = asyncio.Lock()
+        LogWriterTask._writer_loop = loop
+        LogWriterTask._logs_writer_task = mock_task
+        LogWriterTask._writer_started = True
+        LogWriterTask._shutdown_event = asyncio.Event()
+        LogWriterTask._lock = asyncio.Lock()
 
         with patch(
             _STOP_WRITER_PATCH,
             new_callable=AsyncMock,
             return_value=False,
         ) as mock_stop:
-            await TraceManager.stop_writer()
+            await LogWriterTask.stop_writer()
 
             mock_stop.assert_called_once_with(timeout=5.0)
-            assert TraceManager._logs_writer_task is None
-            assert TraceManager._writer_started is False
+            assert LogWriterTask._logs_writer_task is None
+            assert LogWriterTask._writer_started is False
 
     @pytest.mark.asyncio
     async def test_stop_writer_task_not_running(self, clean_trace_manager):
         """Test stop when writer task is not running (None)."""
         loop = asyncio.get_running_loop()
-        TraceManager._writer_loop = loop
-        TraceManager._logs_writer_task = None
-        TraceManager._writer_started = True
-        TraceManager._shutdown_event = asyncio.Event()
-        TraceManager._lock = asyncio.Lock()
+        LogWriterTask._writer_loop = loop
+        LogWriterTask._logs_writer_task = None
+        LogWriterTask._writer_started = True
+        LogWriterTask._shutdown_event = asyncio.Event()
+        LogWriterTask._lock = asyncio.Lock()
 
         with patch(
             _STOP_WRITER_PATCH,
             new_callable=AsyncMock,
         ) as mock_stop:
-            await TraceManager.stop_writer()
+            await LogWriterTask.stop_writer()
 
             mock_stop.assert_not_called()
-            assert TraceManager._writer_started is False
-            assert TraceManager._writer_loop is None
+            assert LogWriterTask._writer_started is False
+            assert LogWriterTask._writer_loop is None
 
     @pytest.mark.asyncio
     async def test_stop_writer_task_already_done(self, clean_trace_manager):
@@ -494,20 +494,20 @@ class TestTraceManagerStopWriter:
         loop = asyncio.get_running_loop()
         mock_task = _make_task_mock(done=True)
 
-        TraceManager._writer_loop = loop
-        TraceManager._logs_writer_task = mock_task
-        TraceManager._writer_started = True
-        TraceManager._shutdown_event = asyncio.Event()
-        TraceManager._lock = asyncio.Lock()
+        LogWriterTask._writer_loop = loop
+        LogWriterTask._logs_writer_task = mock_task
+        LogWriterTask._writer_started = True
+        LogWriterTask._shutdown_event = asyncio.Event()
+        LogWriterTask._lock = asyncio.Lock()
 
         with patch(
             _STOP_WRITER_PATCH,
             new_callable=AsyncMock,
         ) as mock_stop:
-            await TraceManager.stop_writer()
+            await LogWriterTask.stop_writer()
 
             mock_stop.assert_not_called()
-            assert TraceManager._writer_started is False
+            assert LogWriterTask._writer_started is False
 
     @pytest.mark.asyncio
     async def test_stop_writer_loop_mismatch(self, clean_trace_manager):
@@ -515,20 +515,20 @@ class TestTraceManagerStopWriter:
         old_loop = MagicMock()
         mock_task = _make_task_mock(done=False)
 
-        TraceManager._writer_loop = old_loop
-        TraceManager._logs_writer_task = mock_task
-        TraceManager._writer_started = True
-        TraceManager._shutdown_event = asyncio.Event()
-        TraceManager._lock = asyncio.Lock()
+        LogWriterTask._writer_loop = old_loop
+        LogWriterTask._logs_writer_task = mock_task
+        LogWriterTask._writer_started = True
+        LogWriterTask._shutdown_event = asyncio.Event()
+        LogWriterTask._lock = asyncio.Lock()
 
-        await TraceManager.stop_writer()
+        await LogWriterTask.stop_writer()
 
         mock_task.cancel.assert_called_once()
-        assert TraceManager._logs_writer_task is None
-        assert TraceManager._writer_started is False
-        assert TraceManager._writer_loop is None
-        assert TraceManager._shutdown_event is None
-        assert TraceManager._lock is None
+        assert LogWriterTask._logs_writer_task is None
+        assert LogWriterTask._writer_started is False
+        assert LogWriterTask._writer_loop is None
+        assert LogWriterTask._shutdown_event is None
+        assert LogWriterTask._lock is None
 
     @pytest.mark.asyncio
     async def test_stop_writer_loop_mismatch_cancel_exception(self, clean_trace_manager):
@@ -537,18 +537,18 @@ class TestTraceManagerStopWriter:
         mock_task = _make_task_mock(done=False)
         mock_task.cancel.side_effect = RuntimeError("cannot cancel")
 
-        TraceManager._writer_loop = old_loop
-        TraceManager._logs_writer_task = mock_task
-        TraceManager._writer_started = True
-        TraceManager._shutdown_event = asyncio.Event()
-        TraceManager._lock = asyncio.Lock()
+        LogWriterTask._writer_loop = old_loop
+        LogWriterTask._logs_writer_task = mock_task
+        LogWriterTask._writer_started = True
+        LogWriterTask._shutdown_event = asyncio.Event()
+        LogWriterTask._lock = asyncio.Lock()
 
-        await TraceManager.stop_writer()
+        await LogWriterTask.stop_writer()
 
         mock_task.cancel.assert_called_once()
-        assert TraceManager._logs_writer_task is None
-        assert TraceManager._writer_started is False
-        assert TraceManager._writer_loop is None
+        assert LogWriterTask._logs_writer_task is None
+        assert LogWriterTask._writer_started is False
+        assert LogWriterTask._writer_loop is None
 
     @pytest.mark.asyncio
     async def test_stop_writer_loop_mismatch_task_already_done(self, clean_trace_manager):
@@ -556,75 +556,75 @@ class TestTraceManagerStopWriter:
         old_loop = MagicMock()
         mock_task = _make_task_mock(done=True)
 
-        TraceManager._writer_loop = old_loop
-        TraceManager._logs_writer_task = mock_task
-        TraceManager._writer_started = True
-        TraceManager._shutdown_event = asyncio.Event()
-        TraceManager._lock = asyncio.Lock()
+        LogWriterTask._writer_loop = old_loop
+        LogWriterTask._logs_writer_task = mock_task
+        LogWriterTask._writer_started = True
+        LogWriterTask._shutdown_event = asyncio.Event()
+        LogWriterTask._lock = asyncio.Lock()
 
-        await TraceManager.stop_writer()
+        await LogWriterTask.stop_writer()
 
         mock_task.cancel.assert_not_called()
-        assert TraceManager._logs_writer_task is None
-        assert TraceManager._writer_started is False
+        assert LogWriterTask._logs_writer_task is None
+        assert LogWriterTask._writer_started is False
 
     @pytest.mark.asyncio
     async def test_stop_writer_lock_is_none(self, clean_trace_manager):
         """Test stop_writer creates a lock when lock is None."""
         loop = asyncio.get_running_loop()
-        TraceManager._writer_loop = loop
-        TraceManager._logs_writer_task = None
-        TraceManager._writer_started = False
-        TraceManager._shutdown_event = None
-        TraceManager._lock = None
+        LogWriterTask._writer_loop = loop
+        LogWriterTask._logs_writer_task = None
+        LogWriterTask._writer_started = False
+        LogWriterTask._shutdown_event = None
+        LogWriterTask._lock = None
 
-        await TraceManager.stop_writer()
+        await LogWriterTask.stop_writer()
 
-        assert isinstance(TraceManager._lock, asyncio.Lock)
-        assert TraceManager._writer_started is False
-        assert TraceManager._writer_loop is None
+        assert isinstance(LogWriterTask._lock, asyncio.Lock)
+        assert LogWriterTask._writer_started is False
+        assert LogWriterTask._writer_loop is None
 
     @pytest.mark.asyncio
     async def test_stop_writer_shutdown_event_is_none(self, clean_trace_manager):
         """Test stop_writer when shutdown_event is None (skips set)."""
         loop = asyncio.get_running_loop()
-        TraceManager._writer_loop = loop
-        TraceManager._logs_writer_task = None
-        TraceManager._writer_started = True
-        TraceManager._shutdown_event = None
-        TraceManager._lock = asyncio.Lock()
+        LogWriterTask._writer_loop = loop
+        LogWriterTask._logs_writer_task = None
+        LogWriterTask._writer_started = True
+        LogWriterTask._shutdown_event = None
+        LogWriterTask._lock = asyncio.Lock()
 
-        await TraceManager.stop_writer()
+        await LogWriterTask.stop_writer()
 
-        assert TraceManager._writer_started is False
-        assert TraceManager._writer_loop is None
+        assert LogWriterTask._writer_started is False
+        assert LogWriterTask._writer_loop is None
 
     @pytest.mark.asyncio
     async def test_stop_writer_no_prior_state(self, clean_trace_manager):
         """Test stop_writer when no prior state exists (clean slate)."""
-        await TraceManager.stop_writer()
+        await LogWriterTask.stop_writer()
 
-        assert TraceManager._writer_started is False
-        assert TraceManager._writer_loop is None
+        assert LogWriterTask._writer_started is False
+        assert LogWriterTask._writer_loop is None
 
     @pytest.mark.asyncio
     async def test_stop_writer_get_running_loop_raises(self, clean_trace_manager):
         """Test stop_writer when get_running_loop raises RuntimeError (lines 72-73)."""
         mock_task = _make_task_mock(done=False)
         old_loop = MagicMock()
-        TraceManager._writer_loop = old_loop
-        TraceManager._logs_writer_task = mock_task
-        TraceManager._writer_started = True
-        TraceManager._shutdown_event = asyncio.Event()
-        TraceManager._lock = asyncio.Lock()
+        LogWriterTask._writer_loop = old_loop
+        LogWriterTask._logs_writer_task = mock_task
+        LogWriterTask._writer_started = True
+        LogWriterTask._shutdown_event = asyncio.Event()
+        LogWriterTask._lock = asyncio.Lock()
 
         with patch(
-            "src.engines.kasal.infra.trace_management.asyncio.get_running_loop",
+            "src.services.execution.logs.writer_task.asyncio.get_running_loop",
             side_effect=RuntimeError("no running loop"),
         ):
             # current_loop becomes None due to RuntimeError
             # loop_mismatch is False because current_loop is None
             # Falls through to normal lock path
-            await TraceManager.stop_writer()
+            await LogWriterTask.stop_writer()
 
-        assert TraceManager._writer_started is False
+        assert LogWriterTask._writer_started is False

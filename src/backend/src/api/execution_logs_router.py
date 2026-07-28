@@ -16,7 +16,7 @@ from fastapi import (
 from src.core.dependencies import GroupContextDep, SessionDep
 from src.core.logger import LoggerManager
 from src.schemas.execution_logs import ExecutionLogResponse, ExecutionLogsResponse
-from src.services.execution_logs_service import ExecutionLogsService
+from src.services.execution.logs.writer import ExecutionLogsService
 
 # Get logger from the centralized logging system
 logger = LoggerManager.get_instance().system

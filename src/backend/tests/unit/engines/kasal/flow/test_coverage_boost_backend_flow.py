@@ -472,7 +472,7 @@ class TestKickoffAsync:
         mock_crewai_flow.state = None
 
         with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.kasal.infra.trace_management.TraceManager") as MockTM:
+             patch("src.services.execution.logs.writer_task.LogWriterTask") as MockTM:
             MockTM.ensure_writer_started = AsyncMock()
             result = await bf.kickoff_async()
 
@@ -489,7 +489,7 @@ class TestKickoffAsync:
         mock_crewai_flow.state = None
 
         with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.kasal.infra.trace_management.TraceManager") as MockTM:
+             patch("src.services.execution.logs.writer_task.LogWriterTask") as MockTM:
             MockTM.ensure_writer_started = AsyncMock(side_effect=Exception("trace fail"))
             result = await bf.kickoff_async()
 

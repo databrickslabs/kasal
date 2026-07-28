@@ -115,9 +115,9 @@ async def update_execution_trace_id(
 
 
 async def flush_and_stop_writers(async_logger: Optional[logging.Logger] = None) -> None:
-    """Flush MLflow async logging and stop TraceManager writer if present.
+    """Flush MLflow async logging and stop LogWriterTask writer if present.
 
-    This is CrewAI-specific as it also handles the custom TraceManager used by CrewAI.
+    This is CrewAI-specific as it also handles the custom LogWriterTask used by CrewAI.
 
     Args:
         async_logger: Optional logger for debug output
@@ -128,7 +128,7 @@ async def flush_and_stop_writers(async_logger: Optional[logging.Logger] = None) 
     from src.services.mlflow_tracing_service import flush_async_logging
     await flush_async_logging(async_logger=alog)
 
-    # Drain any custom trace queue and stop TraceManager if available (CrewAI-specific)
+    # Drain any custom trace queue and stop LogWriterTask if available (CrewAI-specific)
     try:
         from src.services.trace.queue import get_trace_queue
         trace_queue = get_trace_queue()
@@ -138,8 +138,8 @@ async def flush_and_stop_writers(async_logger: Optional[logging.Logger] = None) 
             await asyncio.sleep(0.1)
             waited += 0.1
         try:
-            from src.engines.kasal.infra.trace_management import TraceManager
-            await TraceManager.stop_writer()
+            from src.services.execution.logs.writer_task import LogWriterTask
+            await LogWriterTask.stop_writer()
         except Exception:
             pass
     except Exception:

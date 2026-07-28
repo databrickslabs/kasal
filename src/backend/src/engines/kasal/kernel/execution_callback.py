@@ -17,7 +17,7 @@ import logging
 from typing import Any, Dict
 from datetime import datetime, timezone
 
-from src.services.execution_logs_queue import enqueue_log
+from src.services.execution.logs.queue import enqueue_log
 from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)

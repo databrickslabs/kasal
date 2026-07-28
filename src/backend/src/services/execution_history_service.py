@@ -356,7 +356,7 @@ class ExecutionHistoryService:
 
             # Import services here to avoid circular imports
             from src.services.trace import ExecutionTraceService
-            from src.services.execution_logs_service import ExecutionLogsService
+            from src.services.execution.logs.writer import ExecutionLogsService
             from src.services.workflow_recipe_service import WorkflowRecipeService
 
             # Create service instances
@@ -481,7 +481,7 @@ class ExecutionHistoryService:
             
             # Import services here to avoid circular imports
             from src.services.trace import ExecutionTraceService
-            from src.services.execution_logs_service import ExecutionLogsService
+            from src.services.execution.logs.writer import ExecutionLogsService
 
             # Create service instances
             trace_service = ExecutionTraceService(self.session)
@@ -553,7 +553,7 @@ class ExecutionHistoryService:
             
             # Import services here to avoid circular imports
             from src.services.trace import ExecutionTraceService
-            from src.services.execution_logs_service import ExecutionLogsService
+            from src.services.execution.logs.writer import ExecutionLogsService
 
             # Create service instances
             trace_service = ExecutionTraceService(self.session)

@@ -6,33 +6,33 @@ Auto-generated test template. TODO: Add comprehensive test coverage.
 
 import pytest
 from unittest.mock import Mock, patch, MagicMock
-from src.engines.kasal.infra.trace_management import (
-    TraceManager
+from src.services.execution.logs.writer_task import (
+    LogWriterTask
 )
 
 
 
-class TestTraceManager:
-    """Tests for TraceManager"""
+class TestLogWriterTask:
+    """Tests for LogWriterTask"""
 
     @pytest.fixture
     def tracemanager(self):
-        """Create TraceManager instance for testing"""
+        """Create LogWriterTask instance for testing"""
         # TODO: Implement fixture
         pass
 
     def test_tracemanager_initialization(self, tracemanager):
-        """Test TraceManager initializes correctly"""
+        """Test LogWriterTask initializes correctly"""
         # TODO: Implement test
         pass
 
     def test_tracemanager_basic_functionality(self, tracemanager):
-        """Test TraceManager basic functionality"""
+        """Test LogWriterTask basic functionality"""
         # TODO: Implement test
         pass
 
     def test_tracemanager_error_handling(self, tracemanager):
-        """Test TraceManager handles errors correctly"""
+        """Test LogWriterTask handles errors correctly"""
         # TODO: Implement test
         pass
 

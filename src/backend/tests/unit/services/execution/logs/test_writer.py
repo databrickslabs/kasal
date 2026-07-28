@@ -15,7 +15,7 @@ from queue import Empty, Full
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
 
-from src.services.execution_logs_service import (
+from src.services.execution.logs.writer import (
     ExecutionLogsService,
     logs_writer_loop,
     start_logs_writer,
@@ -53,7 +53,7 @@ _HIST_REPO_PATCH = "src.repositories.execution_history_repository.ExecutionHisto
 # Patch target for get_smart_db_session used by logs_writer_loop
 _SESSION_FACTORY_PATCH = "src.db.database_router.get_smart_db_session"
 # Patch target for asyncio.sleep inside the service module
-_SLEEP_PATCH = "src.services.execution_logs_service.asyncio.sleep"
+_SLEEP_PATCH = "src.services.execution.logs.writer.asyncio.sleep"
 
 
 # ===================================================================
@@ -64,7 +64,7 @@ _SLEEP_PATCH = "src.services.execution_logs_service.asyncio.sleep"
 class TestExecutionLogsServiceInit:
     """Tests for __init__ wiring."""
 
-    @patch("src.services.execution_logs_service.ExecutionLogsRepository")
+    @patch("src.services.execution.logs.writer.ExecutionLogsRepository")
     def test_init_creates_repository(self, mock_repo_cls):
         mock_session = AsyncMock()
         service = ExecutionLogsService(mock_session)
@@ -84,7 +84,7 @@ class TestCreateExecutionLog:
     @pytest.fixture(autouse=True)
     def _setup(self):
         self.mock_session = AsyncMock()
-        with patch("src.services.execution_logs_service.ExecutionLogsRepository") as repo_cls:
+        with patch("src.services.execution.logs.writer.ExecutionLogsRepository") as repo_cls:
             self.mock_repo = repo_cls.return_value
             self.mock_repo.create_log = AsyncMock(return_value=SimpleNamespace(id=1))
             self.service = ExecutionLogsService(self.mock_session)
@@ -154,7 +154,7 @@ class TestGetExecutionLogs:
     @pytest.fixture(autouse=True)
     def _setup(self):
         self.mock_session = AsyncMock()
-        with patch("src.services.execution_logs_service.ExecutionLogsRepository") as repo_cls:
+        with patch("src.services.execution.logs.writer.ExecutionLogsRepository") as repo_cls:
             self.mock_repo = repo_cls.return_value
             self.mock_repo.get_logs_by_execution_id = AsyncMock(return_value=[])
             self.service = ExecutionLogsService(self.mock_session)
@@ -206,7 +206,7 @@ class TestGetExecutionLogsByGroup:
     @pytest.fixture(autouse=True)
     def _setup(self):
         self.mock_session = AsyncMock()
-        with patch("src.services.execution_logs_service.ExecutionLogsRepository") as repo_cls:
+        with patch("src.services.execution.logs.writer.ExecutionLogsRepository") as repo_cls:
             self.mock_repo = repo_cls.return_value
             self.mock_repo.get_logs_by_execution_id = AsyncMock(return_value=[])
             self.service = ExecutionLogsService(self.mock_session)
@@ -325,7 +325,7 @@ class TestCountLogs:
     @pytest.fixture(autouse=True)
     def _setup(self):
         self.mock_session = AsyncMock()
-        with patch("src.services.execution_logs_service.ExecutionLogsRepository") as repo_cls:
+        with patch("src.services.execution.logs.writer.ExecutionLogsRepository") as repo_cls:
             self.mock_repo = repo_cls.return_value
             self.mock_repo.count_by_execution_id = AsyncMock(return_value=42)
             self.service = ExecutionLogsService(self.mock_session)
@@ -348,7 +348,7 @@ class TestDeleteLogs:
     @pytest.fixture(autouse=True)
     def _setup(self):
         self.mock_session = AsyncMock()
-        with patch("src.services.execution_logs_service.ExecutionLogsRepository") as repo_cls:
+        with patch("src.services.execution.logs.writer.ExecutionLogsRepository") as repo_cls:
             self.mock_repo = repo_cls.return_value
             self.mock_repo.delete_by_execution_id = AsyncMock(return_value=5)
             self.mock_repo.delete_all = AsyncMock(return_value=100)
@@ -403,7 +403,7 @@ class TestLogsWriterLoop:
         mock_queue.qsize.return_value = 0
 
         with patch(
-            "src.services.execution_logs_service.get_job_output_queue",
+            "src.services.execution.logs.writer.get_job_output_queue",
             return_value=mock_queue,
         ):
             await logs_writer_loop(shutdown)
@@ -441,11 +441,11 @@ class TestLogsWriterLoop:
 
         with (
             patch(
-                "src.services.execution_logs_service.get_job_output_queue",
+                "src.services.execution.logs.writer.get_job_output_queue",
                 return_value=mock_queue,
             ),
             patch(
-                "src.services.execution_logs_service.ExecutionLogsRepository",
+                "src.services.execution.logs.writer.ExecutionLogsRepository",
                 return_value=mock_repo,
             ),
             patch(
@@ -483,7 +483,7 @@ class TestLogsWriterLoop:
 
         with (
             patch(
-                "src.services.execution_logs_service.get_job_output_queue",
+                "src.services.execution.logs.writer.get_job_output_queue",
                 return_value=mock_queue,
             ),
             patch(_SLEEP_PATCH, new_callable=AsyncMock),
@@ -527,11 +527,11 @@ class TestLogsWriterLoop:
 
         with (
             patch(
-                "src.services.execution_logs_service.get_job_output_queue",
+                "src.services.execution.logs.writer.get_job_output_queue",
                 return_value=mock_queue,
             ),
             patch(
-                "src.services.execution_logs_service.ExecutionLogsRepository",
+                "src.services.execution.logs.writer.ExecutionLogsRepository",
                 return_value=mock_repo,
             ),
             patch(
@@ -558,7 +558,7 @@ class TestLogsWriterLoop:
 
         with (
             patch(
-                "src.services.execution_logs_service.get_job_output_queue",
+                "src.services.execution.logs.writer.get_job_output_queue",
                 return_value=mock_queue,
             ),
             patch(_SLEEP_PATCH, new_callable=AsyncMock),
@@ -583,7 +583,7 @@ class TestLogsWriterLoop:
 
         with (
             patch(
-                "src.services.execution_logs_service.get_job_output_queue",
+                "src.services.execution.logs.writer.get_job_output_queue",
                 return_value=mock_queue,
             ),
             patch(_SLEEP_PATCH, new_callable=AsyncMock) as mock_sleep,
@@ -631,11 +631,11 @@ class TestLogsWriterLoop:
 
         with (
             patch(
-                "src.services.execution_logs_service.get_job_output_queue",
+                "src.services.execution.logs.writer.get_job_output_queue",
                 return_value=mock_queue,
             ),
             patch(
-                "src.services.execution_logs_service.ExecutionLogsRepository",
+                "src.services.execution.logs.writer.ExecutionLogsRepository",
                 return_value=mock_repo,
             ),
             patch(
@@ -668,7 +668,7 @@ class TestLogsWriterLoop:
 
         with (
             patch(
-                "src.services.execution_logs_service.get_job_output_queue",
+                "src.services.execution.logs.writer.get_job_output_queue",
                 return_value=mock_queue,
             ),
             patch(_SLEEP_PATCH, new_callable=AsyncMock),
@@ -690,7 +690,7 @@ class TestLogsWriterLoop:
 
         with (
             patch(
-                "src.services.execution_logs_service.get_job_output_queue",
+                "src.services.execution.logs.writer.get_job_output_queue",
                 return_value=mock_queue,
             ),
             patch(
@@ -743,11 +743,11 @@ class TestLogsWriterLoop:
 
         with (
             patch(
-                "src.services.execution_logs_service.get_job_output_queue",
+                "src.services.execution.logs.writer.get_job_output_queue",
                 return_value=mock_queue,
             ),
             patch(
-                "src.services.execution_logs_service.ExecutionLogsRepository",
+                "src.services.execution.logs.writer.ExecutionLogsRepository",
                 return_value=mock_repo,
             ),
             patch(
@@ -788,11 +788,11 @@ class TestLogsWriterLoop:
 
         with (
             patch(
-                "src.services.execution_logs_service.get_job_output_queue",
+                "src.services.execution.logs.writer.get_job_output_queue",
                 return_value=mock_queue,
             ),
             patch(
-                "src.services.execution_logs_service.ExecutionLogsRepository",
+                "src.services.execution.logs.writer.ExecutionLogsRepository",
                 return_value=mock_repo,
             ),
             patch(
@@ -812,7 +812,7 @@ class TestLogsWriterLoop:
         shutdown = asyncio.Event()
 
         with patch(
-            "src.services.execution_logs_service.get_job_output_queue",
+            "src.services.execution.logs.writer.get_job_output_queue",
             side_effect=RuntimeError("fatal"),
         ):
             # Should NOT propagate
@@ -846,7 +846,7 @@ class TestLogsWriterLoop:
 
         with (
             patch(
-                "src.services.execution_logs_service.get_job_output_queue",
+                "src.services.execution.logs.writer.get_job_output_queue",
                 return_value=mock_queue,
             ),
             patch(_SESSION_FACTORY_PATCH, _broken_session),
@@ -881,11 +881,11 @@ class TestLogsWriterLoop:
 
         with (
             patch(
-                "src.services.execution_logs_service.get_job_output_queue",
+                "src.services.execution.logs.writer.get_job_output_queue",
                 return_value=mock_queue,
             ),
             patch(
-                "src.services.execution_logs_service.ExecutionLogsRepository",
+                "src.services.execution.logs.writer.ExecutionLogsRepository",
                 return_value=mock_repo,
             ),
             patch(
@@ -911,7 +911,7 @@ class TestStartLogsWriter:
     @pytest.fixture(autouse=True)
     def _reset_global(self):
         """Reset the global _logs_writer_task before and after each test."""
-        import src.services.execution_logs_service as mod
+        import src.services.execution.logs.writer as mod
 
         original = mod._logs_writer_task
         mod._logs_writer_task = None
@@ -927,7 +927,7 @@ class TestStartLogsWriter:
         mock_queue.qsize.return_value = 0
 
         with patch(
-            "src.services.execution_logs_service.get_job_output_queue",
+            "src.services.execution.logs.writer.get_job_output_queue",
             return_value=mock_queue,
         ):
             task = await start_logs_writer(shutdown)
@@ -939,7 +939,7 @@ class TestStartLogsWriter:
 
     @pytest.mark.asyncio
     async def test_start_returns_existing_running_task(self):
-        import src.services.execution_logs_service as mod
+        import src.services.execution.logs.writer as mod
 
         # Create a mock task that is not done
         mock_task = MagicMock()
@@ -953,7 +953,7 @@ class TestStartLogsWriter:
 
     @pytest.mark.asyncio
     async def test_start_replaces_done_task(self):
-        import src.services.execution_logs_service as mod
+        import src.services.execution.logs.writer as mod
 
         # Create a mock task that is done
         mock_task = MagicMock()
@@ -967,7 +967,7 @@ class TestStartLogsWriter:
         mock_queue.qsize.return_value = 0
 
         with patch(
-            "src.services.execution_logs_service.get_job_output_queue",
+            "src.services.execution.logs.writer.get_job_output_queue",
             return_value=mock_queue,
         ):
             result = await start_logs_writer(shutdown)
@@ -986,7 +986,7 @@ class TestStopLogsWriter:
 
     @pytest.fixture(autouse=True)
     def _reset_global(self):
-        import src.services.execution_logs_service as mod
+        import src.services.execution.logs.writer as mod
 
         original = mod._logs_writer_task
         mod._logs_writer_task = None
@@ -1000,7 +1000,7 @@ class TestStopLogsWriter:
 
     @pytest.mark.asyncio
     async def test_stop_when_task_already_done(self):
-        import src.services.execution_logs_service as mod
+        import src.services.execution.logs.writer as mod
 
         mock_task = MagicMock()
         mock_task.done.return_value = True
@@ -1012,7 +1012,7 @@ class TestStopLogsWriter:
     @pytest.mark.asyncio
     async def test_stop_graceful_shutdown(self):
         """Task finishes within timeout -> graceful stop."""
-        import src.services.execution_logs_service as mod
+        import src.services.execution.logs.writer as mod
 
         shutdown = asyncio.Event()
 
@@ -1022,7 +1022,7 @@ class TestStopLogsWriter:
 
         with (
             patch(
-                "src.services.execution_logs_service.get_job_output_queue",
+                "src.services.execution.logs.writer.get_job_output_queue",
                 return_value=mock_queue,
             ),
             patch(_SLEEP_PATCH, new_callable=AsyncMock) as mock_sleep,
@@ -1043,7 +1043,7 @@ class TestStopLogsWriter:
     @pytest.mark.asyncio
     async def test_stop_timeout_cancels_task(self):
         """Task does not finish within timeout -> force cancel."""
-        import src.services.execution_logs_service as mod
+        import src.services.execution.logs.writer as mod
 
         # Create a task that will never finish on its own
         never_done = asyncio.Future()
@@ -1058,7 +1058,7 @@ class TestStopLogsWriter:
         mock_queue.put_nowait = MagicMock()
 
         with patch(
-            "src.services.execution_logs_service.get_job_output_queue",
+            "src.services.execution.logs.writer.get_job_output_queue",
             return_value=mock_queue,
         ):
             result = await stop_logs_writer(timeout=0.05)
@@ -1069,7 +1069,7 @@ class TestStopLogsWriter:
     @pytest.mark.asyncio
     async def test_stop_queue_full_on_shutdown_signal(self):
         """When the queue is full, put_nowait raises Full but shutdown continues."""
-        import src.services.execution_logs_service as mod
+        import src.services.execution.logs.writer as mod
 
         shutdown = asyncio.Event()
         shutdown.set()
@@ -1078,7 +1078,7 @@ class TestStopLogsWriter:
         mock_queue_obj.qsize.return_value = 0
 
         with patch(
-            "src.services.execution_logs_service.get_job_output_queue",
+            "src.services.execution.logs.writer.get_job_output_queue",
             return_value=mock_queue_obj,
         ):
             task = asyncio.create_task(logs_writer_loop(shutdown))
@@ -1090,7 +1090,7 @@ class TestStopLogsWriter:
         full_queue.put_nowait.side_effect = Full("full")
 
         with patch(
-            "src.services.execution_logs_service.get_job_output_queue",
+            "src.services.execution.logs.writer.get_job_output_queue",
             return_value=full_queue,
         ):
             result = await stop_logs_writer(timeout=2.0)
@@ -1100,14 +1100,14 @@ class TestStopLogsWriter:
     @pytest.mark.asyncio
     async def test_stop_handles_unexpected_exception(self):
         """When an unexpected exception occurs during stop, returns False."""
-        import src.services.execution_logs_service as mod
+        import src.services.execution.logs.writer as mod
 
         mock_task = MagicMock()
         mock_task.done.return_value = False
         mod._logs_writer_task = mock_task
 
         with patch(
-            "src.services.execution_logs_service.get_job_output_queue",
+            "src.services.execution.logs.writer.get_job_output_queue",
             side_effect=RuntimeError("totally broken"),
         ):
             result = await stop_logs_writer()
@@ -1126,7 +1126,7 @@ class TestEdgeCases:
     @pytest.mark.asyncio
     async def test_get_execution_logs_single_log(self):
         mock_session = AsyncMock()
-        with patch("src.services.execution_logs_service.ExecutionLogsRepository") as repo_cls:
+        with patch("src.services.execution.logs.writer.ExecutionLogsRepository") as repo_cls:
             mock_repo = repo_cls.return_value
             mock_repo.get_logs_by_execution_id = AsyncMock(
                 return_value=[_make_log("only")]
@@ -1140,7 +1140,7 @@ class TestEdgeCases:
     @pytest.mark.asyncio
     async def test_create_log_none_group_context(self):
         mock_session = AsyncMock()
-        with patch("src.services.execution_logs_service.ExecutionLogsRepository") as repo_cls:
+        with patch("src.services.execution.logs.writer.ExecutionLogsRepository") as repo_cls:
             mock_repo = repo_cls.return_value
             mock_repo.create_log = AsyncMock(return_value=SimpleNamespace(id=1))
             service = ExecutionLogsService(mock_session)
@@ -1155,7 +1155,7 @@ class TestEdgeCases:
     async def test_delete_by_execution_id_calls_delete_logs(self):
         """Ensure delete_by_execution_id is truly an alias that calls delete_logs."""
         mock_session = AsyncMock()
-        with patch("src.services.execution_logs_service.ExecutionLogsRepository") as repo_cls:
+        with patch("src.services.execution.logs.writer.ExecutionLogsRepository") as repo_cls:
             mock_repo = repo_cls.return_value
             mock_repo.delete_by_execution_id = AsyncMock(return_value=3)
             service = ExecutionLogsService(mock_session)
@@ -1170,7 +1170,7 @@ class TestEdgeCases:
     async def test_get_logs_by_group_with_group_context_no_group_ids(self):
         """GroupContext with group_ids=None and primary_group_id=None."""
         mock_session = AsyncMock()
-        with patch("src.services.execution_logs_service.ExecutionLogsRepository") as repo_cls:
+        with patch("src.services.execution.logs.writer.ExecutionLogsRepository") as repo_cls:
             service = ExecutionLogsService(mock_session)
 
         gc = GroupContext(group_ids=None, group_email="a@b.com", email_domain="b.com")
@@ -1198,7 +1198,7 @@ class TestEdgeCases:
 
         with (
             patch(
-                "src.services.execution_logs_service.get_job_output_queue",
+                "src.services.execution.logs.writer.get_job_output_queue",
                 return_value=mock_queue,
             ),
             patch(
@@ -1226,7 +1226,7 @@ class TestEdgeCases:
     async def test_count_logs_returns_zero(self):
         """count_logs should propagate zero count correctly."""
         mock_session = AsyncMock()
-        with patch("src.services.execution_logs_service.ExecutionLogsRepository") as repo_cls:
+        with patch("src.services.execution.logs.writer.ExecutionLogsRepository") as repo_cls:
             mock_repo = repo_cls.return_value
             mock_repo.count_by_execution_id = AsyncMock(return_value=0)
             service = ExecutionLogsService(mock_session)
@@ -1238,7 +1238,7 @@ class TestEdgeCases:
     async def test_delete_all_logs_returns_zero_when_empty(self):
         """delete_all_logs should return 0 when there are no logs."""
         mock_session = AsyncMock()
-        with patch("src.services.execution_logs_service.ExecutionLogsRepository") as repo_cls:
+        with patch("src.services.execution.logs.writer.ExecutionLogsRepository") as repo_cls:
             mock_repo = repo_cls.return_value
             mock_repo.delete_all = AsyncMock(return_value=0)
             service = ExecutionLogsService(mock_session)
@@ -1250,7 +1250,7 @@ class TestEdgeCases:
     async def test_get_execution_logs_by_group_execution_exists_no_group_empty_ids(self):
         """When execution exists but group_ids is empty list, access is denied."""
         mock_session = AsyncMock()
-        with patch("src.services.execution_logs_service.ExecutionLogsRepository") as repo_cls:
+        with patch("src.services.execution.logs.writer.ExecutionLogsRepository") as repo_cls:
             mock_repo = repo_cls.return_value
             mock_repo.get_logs_by_execution_id = AsyncMock(return_value=[])
             service = ExecutionLogsService(mock_session)
@@ -1295,7 +1295,7 @@ class TestEdgeCases:
 
         with (
             patch(
-                "src.services.execution_logs_service.get_job_output_queue",
+                "src.services.execution.logs.writer.get_job_output_queue",
                 return_value=mock_queue,
             ),
             patch(
@@ -1328,7 +1328,7 @@ class TestEdgeCases:
 
         with (
             patch(
-                "src.services.execution_logs_service.get_job_output_queue",
+                "src.services.execution.logs.writer.get_job_output_queue",
                 return_value=mock_queue,
             ),
             patch(_SLEEP_PATCH, new_callable=AsyncMock) as mock_sleep,
@@ -1340,7 +1340,7 @@ class TestEdgeCases:
     @pytest.mark.asyncio
     async def test_stop_logs_writer_queue_full(self):
         """When put_nowait raises Full, the warning is logged (line 362)."""
-        import src.services.execution_logs_service as mod
+        import src.services.execution.logs.writer as mod
 
         # Create a non-done task
         never_done = asyncio.Future()
@@ -1356,7 +1356,7 @@ class TestEdgeCases:
 
         try:
             with patch(
-                "src.services.execution_logs_service.get_job_output_queue",
+                "src.services.execution.logs.writer.get_job_output_queue",
                 return_value=full_queue,
             ):
                 result = await stop_logs_writer(timeout=0.05)

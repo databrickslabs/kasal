@@ -49,7 +49,7 @@ engines/kasal/
 │                              #   agent_security, model_conversion_handler, a2ui_runner,
 │                              #   execution_callback (the crew's step/task hooks)
 ├── memory/                    # memory_hooks ONLY — recall before a task, persist after
-├── infra/                     # logging_config, trace_management, mlflow_integration, crew_logger
+├── infra/                     # mlflow_integration (the rest moved to services/execution/logs/)
 ├── guardrails/                # GuardrailWrapper ONLY — the engine's guardrail label
 └── config/                    # crew/embedder/manager config builders
 ```
@@ -86,10 +86,11 @@ crew and flow), `services/task_output/` (the volume sink), and
   `src/backend/CLAUDE.md` for the crew-ID determinism and Vector Search schema
   rules (do not hardcode index columns; never call `.value` on enum-valued
   Pydantic fields).
-- **Naming caveats to know**: `infra/trace_management.py` is the execution-LOGS
-  writer (trace persistence moved to OTel/MLflow); `infra/crew_logger.py`
-  (`CrewLogger`) is **live** despite an old audit note — it is used by the engine
-  hub and several services.
+- **Logging is not the engine's.** `src/core/logger.py` owns loggers;
+  `services/execution/logs/` owns capture (python logging + the engine's own
+  `Printer` + stdout, all funnelled into the execution-logs queue);
+  `services/execution/subprocess_bootstrap.py` sets a child interpreter up. The
+  engine calls those and owns none of them.
 - **One subscriber owns the event bus: `OTelEventBridge`.** Every trace row a run
   produces comes from it, via `KasalDBSpanExporter`. Do not add a second listener
   class that writes traces — that is how the codebase ended up with three
@@ -117,6 +118,8 @@ orchestration: what runs, in what order, wired to what.
 | `services/a2ui/` | surface composition + the catalog |
 | `services/task_output/` | `KasalCallback` base + the Databricks Volume sink |
 | `services/crew_checkpoint.py` | task-checkpoint recorder + resume builder |
+| `services/execution/logs/` | log capture, queue, writer, and the writer task |
+| `services/execution/subprocess_bootstrap.py` | `configure_subprocess_logging` + the stdout muzzle |
 
 The test for which side something belongs on: does it import `kasal_engine`
 (a vendored LIBRARY — that is fine in services, like `BaseTool`), or

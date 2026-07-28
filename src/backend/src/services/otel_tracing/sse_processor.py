@@ -1,7 +1,7 @@
 """KasalSSESpanProcessor — broadcasts task lifecycle spans via SSE on on_end().
 
 Only broadcasts task_started/task_completed/task_failed to match the current
-TraceManager SSE behavior. Skips SSE in CREW_SUBPROCESS_MODE=true since the
+LogWriterTask SSE behavior. Skips SSE in CREW_SUBPROCESS_MODE=true since the
 main process TraceBroadcastService handles via DB polling.
 """
 
@@ -58,7 +58,7 @@ class KasalSSESpanProcessor(SpanProcessor):
             if event_type not in _SSE_EVENT_TYPES:
                 return
 
-            # Build SSE payload matching TraceManager format
+            # Build SSE payload matching LogWriterTask format
             task_name = str(
                 attrs.get("kasal.extra.task_name")
                 or attrs.get("crewai.task.description", "")

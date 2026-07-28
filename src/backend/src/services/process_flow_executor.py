@@ -210,7 +210,7 @@ def run_flow_in_process(
         }
 
     # Configure logging
-    from src.engines.kasal.infra.logging_config import (
+    from src.services.execution.subprocess_bootstrap import (
         configure_subprocess_logging,
         suppress_stdout_stderr,
         restore_stdout_stderr,
@@ -332,7 +332,7 @@ def run_flow_in_process(
 
         # Run the flow execution asynchronously (with initialization in same loop)
         async def run_async_flow():
-            """Execute the flow in an async context with TraceManager in same event loop"""
+            """Execute the flow in an async context with LogWriterTask in same event loop"""
 
             # Activate Lakebase on async_session_factory so ALL callers
             # (FlowRunnerService, tools, etc.) automatically use Lakebase.
@@ -353,20 +353,20 @@ def run_flow_in_process(
                     f"[FLOW_SUBPROCESS] Lakebase activation error (non-fatal): {lb_err}"
                 )
 
-            # Initialize TraceManager and event listeners FIRST (in same loop as execution)
-            # This is CRITICAL - TraceManager must be started in the same loop that will call stop_writer()
+            # Initialize LogWriterTask and event listeners FIRST (in same loop as execution)
+            # This is CRITICAL - LogWriterTask must be started in the same loop that will call stop_writer()
             try:
                 async_logger.info(
-                    f"[FLOW_SUBPROCESS] Initializing TraceManager and event listeners for {execution_id}"
+                    f"[FLOW_SUBPROCESS] Initializing LogWriterTask and event listeners for {execution_id}"
                 )
 
-                from src.engines.kasal.infra.trace_management import TraceManager
+                from src.services.execution.logs.writer_task import LogWriterTask
                 from kasal_engine.events import crewai_event_bus
 
                 # Start trace and logs writers
-                await TraceManager.ensure_writer_started()
+                await LogWriterTask.ensure_writer_started()
                 async_logger.info(
-                    f"[FLOW_SUBPROCESS] TraceManager writer started for {execution_id}"
+                    f"[FLOW_SUBPROCESS] LogWriterTask writer started for {execution_id}"
                 )
 
                 # Initialize OTel tracing (always-on, sole trace source)
@@ -502,7 +502,7 @@ def run_flow_in_process(
 
             except Exception as trace_init_error:
                 async_logger.error(
-                    f"[FLOW_SUBPROCESS] Failed to initialize TraceManager: {trace_init_error}",
+                    f"[FLOW_SUBPROCESS] Failed to initialize LogWriterTask: {trace_init_error}",
                     exc_info=True,
                 )
                 # Continue execution even if trace initialization fails
@@ -926,20 +926,20 @@ def run_flow_in_process(
                         f"[FLOW_SUBPROCESS] OTel shutdown: {otel_shutdown_err}"
                     )
 
-                # CRITICAL: Stop TraceManager writer tasks first - these keep the subprocess alive
+                # CRITICAL: Stop LogWriterTask writer tasks first - these keep the subprocess alive
                 try:
-                    from src.engines.kasal.infra.trace_management import TraceManager
+                    from src.services.execution.logs.writer_task import LogWriterTask
 
                     async_logger.info(
-                        "[FLOW_SUBPROCESS] Stopping TraceManager writer tasks..."
+                        "[FLOW_SUBPROCESS] Stopping LogWriterTask writer tasks..."
                     )
-                    loop.run_until_complete(TraceManager.stop_writer())
+                    loop.run_until_complete(LogWriterTask.stop_writer())
                     async_logger.info(
-                        "[FLOW_SUBPROCESS] TraceManager writer tasks stopped"
+                        "[FLOW_SUBPROCESS] LogWriterTask writer tasks stopped"
                     )
                 except Exception as trace_cleanup_err:
                     async_logger.warning(
-                        f"[FLOW_SUBPROCESS] TraceManager cleanup: {trace_cleanup_err}"
+                        f"[FLOW_SUBPROCESS] LogWriterTask cleanup: {trace_cleanup_err}"
                     )
 
                 # Cleanup litellm's async HTTP clients
@@ -1212,7 +1212,7 @@ class ProcessFlowExecutor:
             # CRITICAL: Use os._exit(0) instead of sys.exit(0)
             # os._exit(0) forcefully terminates without waiting for non-daemon threads
             # This is necessary because HITL flows leave background tasks running
-            # (TraceManager writers, event listeners) that prevent sys.exit(0) from completing
+            # (LogWriterTask writers, event listeners) that prevent sys.exit(0) from completing
             # Normal sys.exit(0) waits for all threads → process hangs as zombie
             # os._exit(0) terminates immediately → process exits cleanly
             os._exit(0)
@@ -1791,7 +1791,7 @@ class ProcessFlowExecutor:
         and writes them to the database for persistent storage and later retrieval.
 
         NOTE: This is a non-critical operation. If it fails, the flow execution is still
-        considered successful. Traces are captured separately by TraceManager.
+        considered successful. Traces are captured separately by LogWriterTask.
 
         Args:
             log_queue: Not used anymore, kept for compatibility

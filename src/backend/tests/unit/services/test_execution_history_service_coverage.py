@@ -311,7 +311,7 @@ def patch_deletion_services(mock_trace_svc, mock_logs_svc):
     the execution_history_service methods via local imports.
     """
     import src.services.trace.service as trace_mod
-    import src.services.execution_logs_service as logs_mod
+    import src.services.execution.logs.writer as logs_mod
 
     original_trace = trace_mod.ExecutionTraceService
     original_logs = logs_mod.ExecutionLogsService

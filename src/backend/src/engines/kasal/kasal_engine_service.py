@@ -42,7 +42,7 @@ from src.engines.base.base_engine_service import BaseEngineService
 from src.models.execution_status import ExecutionStatus
 
 # Import helper modules
-from src.engines.kasal.infra.trace_management import TraceManager
+from src.services.execution.logs.writer_task import LogWriterTask
 from src.engines.kasal.paths.crew.execution_runner import run_crew_in_process, update_execution_status_with_retry
 from src.engines.kasal.paths.flow.flow_execution_runner import run_flow_in_process
 from src.engines.kasal.config_adapter import normalize_config, normalize_flow_config
@@ -136,10 +136,10 @@ class KasalEngineService(BaseEngineService):
             ... )
         """
         # Ensure trace writer is started when engine initializes
-        await TraceManager.ensure_writer_started()
+        await LogWriterTask.ensure_writer_started()
         try:
             # Set up CrewAI library logging via our centralized logger
-            from src.engines.kasal.infra.crew_logger import crew_logger
+            from src.services.execution.logs.capture import execution_log_capture
 
             # Choose logger based on execution type if provided
             execution_type = kwargs.get("execution_type", "crew")
@@ -243,7 +243,7 @@ class KasalEngineService(BaseEngineService):
             # We will only update the status
             
             # Ensure writer is started before running execution
-            await TraceManager.ensure_writer_started()
+            await LogWriterTask.ensure_writer_started()
             
             logger.info(f"[KasalEngineService] Starting run_execution for ID: {execution_id} (already has RUNNING status)")
             
@@ -540,7 +540,7 @@ class KasalEngineService(BaseEngineService):
                 flow_logger.info(f"[KasalEngineService] Added group_id to flow config: {group_context.primary_group_id}")
 
             # Ensure writer is started before running execution
-            await TraceManager.ensure_writer_started()
+            await LogWriterTask.ensure_writer_started()
 
             flow_logger.info(f"[KasalEngineService] Starting run_flow for ID: {execution_id} (process-based)")
             flow_logger.info(f"[KasalEngineService] Flow config has {len(flow_config.get('nodes', []))} nodes and {len(flow_config.get('edges', []))} edges")

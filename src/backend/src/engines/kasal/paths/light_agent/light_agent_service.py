@@ -153,7 +153,7 @@ class LightAgentService:
         from src.services.execution_status_service import ExecutionStatusService
         from src.db.session import request_scoped_session
         from src.services.agent_service import AgentService
-        from src.services.execution_logs_queue import enqueue_log
+        from src.services.execution.logs.queue import enqueue_log
 
         def _log(msg: str) -> None:
             """Best-effort execution log line. The main-process logs writer drains
@@ -250,8 +250,8 @@ class LightAgentService:
             # Make sure the main-process logs writer is draining the queue, then log
             # the run start so the Logs tab is populated for this light run too.
             try:
-                from src.engines.kasal.infra.trace_management import TraceManager
-                await TraceManager.ensure_writer_started()
+                from src.services.execution.logs.writer_task import LogWriterTask
+                await LogWriterTask.ensure_writer_started()
             except Exception as w_err:  # noqa: BLE001
                 logger.debug(f"[light_agent] logs writer ensure skipped: {w_err}")
             _log(f"Chat agent '{role}' started")

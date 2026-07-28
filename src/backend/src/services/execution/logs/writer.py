@@ -17,7 +17,7 @@ from src.core.logger import LoggerManager
 from src.models.execution_logs import ExecutionLog
 from src.schemas.execution_logs import LogMessage, ExecutionLogResponse
 from src.repositories.execution_logs_repository import ExecutionLogsRepository
-from src.services.execution_logs_queue import enqueue_log, get_job_output_queue
+from src.services.execution.logs.queue import enqueue_log, get_job_output_queue
 from src.utils.user_context import GroupContext
 
 # Get logger from the centralized logging system

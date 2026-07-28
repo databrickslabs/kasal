@@ -381,7 +381,7 @@ class TestBackendFlow:
 
         mock_crewai_flow = self.create_mock_crewai_flow(kickoff_async_result="test result")
 
-        with patch('src.engines.kasal.infra.trace_management.TraceManager') as mock_trace_manager:
+        with patch('src.services.execution.logs.writer_task.LogWriterTask') as mock_trace_manager:
             mock_trace_manager.ensure_writer_started = AsyncMock()
 
             with patch.object(flow, 'flow', new_callable=AsyncMock) as mock_flow_method:
@@ -402,7 +402,7 @@ class TestBackendFlow:
 
         mock_crewai_flow = self.create_mock_crewai_flow()
 
-        with patch('src.engines.kasal.infra.trace_management.TraceManager') as mock_trace_manager:
+        with patch('src.services.execution.logs.writer_task.LogWriterTask') as mock_trace_manager:
             mock_trace_manager.ensure_writer_started = AsyncMock(side_effect=Exception("Trace error"))
 
             with patch.object(flow, 'flow', new_callable=AsyncMock) as mock_flow_method:

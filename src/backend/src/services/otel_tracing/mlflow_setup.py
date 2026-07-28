@@ -1180,7 +1180,7 @@ async def post_execution_mlflow_cleanup(
         async_logger=alog,
     )
 
-    # 4. Flush and stop TraceManager writer (CrewAI-specific)
+    # 4. Flush and stop LogWriterTask writer (CrewAI-specific)
     try:
         from src.engines.kasal.infra.mlflow_integration import (
             flush_and_stop_writers as _flush_stop,

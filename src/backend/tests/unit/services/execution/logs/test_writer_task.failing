@@ -3,47 +3,47 @@ import asyncio
 from unittest.mock import MagicMock, patch, AsyncMock
 from datetime import datetime
 
-from src.engines.crewai.trace_management import TraceManager
+from src.engines.crewai.trace_management import LogWriterTask
 
 
-class TestTraceManager:
-    """Test suite for TraceManager class."""
+class TestLogWriterTask:
+    """Test suite for LogWriterTask class."""
     
     def test_trace_manager_class_variables(self):
-        """Test that TraceManager has expected class variables."""
-        assert hasattr(TraceManager, '_trace_writer_task')
-        assert hasattr(TraceManager, '_logs_writer_task')
-        assert hasattr(TraceManager, '_shutdown_event')
-        assert hasattr(TraceManager, '_writer_started')
-        assert hasattr(TraceManager, '_lock')
+        """Test that LogWriterTask has expected class variables."""
+        assert hasattr(LogWriterTask, '_trace_writer_task')
+        assert hasattr(LogWriterTask, '_logs_writer_task')
+        assert hasattr(LogWriterTask, '_shutdown_event')
+        assert hasattr(LogWriterTask, '_writer_started')
+        assert hasattr(LogWriterTask, '_lock')
         
         # Check initial values
-        assert TraceManager._trace_writer_task is None
-        assert TraceManager._logs_writer_task is None
-        assert isinstance(TraceManager._shutdown_event, asyncio.Event)
-        assert TraceManager._writer_started is False
-        assert isinstance(TraceManager._lock, asyncio.Lock)
+        assert LogWriterTask._trace_writer_task is None
+        assert LogWriterTask._logs_writer_task is None
+        assert isinstance(LogWriterTask._shutdown_event, asyncio.Event)
+        assert LogWriterTask._writer_started is False
+        assert isinstance(LogWriterTask._lock, asyncio.Lock)
     
     def test_trace_manager_singleton_pattern(self):
-        """Test that TraceManager uses class variables for singleton behavior."""
+        """Test that LogWriterTask uses class variables for singleton behavior."""
         # These should be the same objects across different accesses
-        event1 = TraceManager._shutdown_event
-        event2 = TraceManager._shutdown_event
+        event1 = LogWriterTask._shutdown_event
+        event2 = LogWriterTask._shutdown_event
         assert event1 is event2
         
-        lock1 = TraceManager._lock
-        lock2 = TraceManager._lock
+        lock1 = LogWriterTask._lock
+        lock2 = LogWriterTask._lock
         assert lock1 is lock2
     
     @pytest.mark.asyncio
     async def test_trace_writer_loop_function_exists(self):
         """Test that _trace_writer_loop method exists and is a classmethod."""
-        assert hasattr(TraceManager, '_trace_writer_loop')
-        assert callable(TraceManager._trace_writer_loop)
+        assert hasattr(LogWriterTask, '_trace_writer_loop')
+        assert callable(LogWriterTask._trace_writer_loop)
         
         # Check that it's a classmethod by verifying first parameter behavior
         import inspect
-        sig = inspect.signature(TraceManager._trace_writer_loop)
+        sig = inspect.signature(LogWriterTask._trace_writer_loop)
         # For classmethod, first parameter should be 'cls'
         first_param = list(sig.parameters.keys())[0] if sig.parameters else None
         assert first_param == 'cls'
@@ -68,14 +68,14 @@ class TestTraceManager:
             
             # Try to start the loop (it should fail quickly due to our mock exception)
             try:
-                await TraceManager._trace_writer_loop()
+                await LogWriterTask._trace_writer_loop()
             except Exception:
                 pass  # Expected due to our mock setup
             
             # Verify the imports were called
             mock_get_queue.assert_called_once()
             mock_history_service.assert_called_once()
-            mock_logger.info.assert_any_call("[TraceManager._trace_writer_loop] Writer task started.")
+            mock_logger.info.assert_any_call("[LogWriterTask._trace_writer_loop] Writer task started.")
     
     @pytest.mark.asyncio
     async def test_trace_writer_loop_queue_initialization(self):
@@ -92,20 +92,20 @@ class TestTraceManager:
             mock_history_service.return_value = MagicMock()
             
             try:
-                await TraceManager._trace_writer_loop()
+                await LogWriterTask._trace_writer_loop()
             except Exception:
                 pass
             
             # Check that queue size was logged
             mock_logger.debug.assert_any_call(
-                "[TraceManager._trace_writer_loop] Queue retrieved. Initial approximate size: 5"
+                "[LogWriterTask._trace_writer_loop] Queue retrieved. Initial approximate size: 5"
             )
     
     @pytest.mark.asyncio
     async def test_trace_writer_loop_shutdown_event_check(self):
         """Test that trace writer loop checks shutdown event."""
         # Set shutdown event to True to stop loop immediately
-        TraceManager._shutdown_event.set()
+        LogWriterTask._shutdown_event.set()
         
         with patch('src.services.trace_queue.get_trace_queue') as mock_get_queue, \
              patch('src.services.execution_history_service.get_execution_history_service') as mock_history_service, \
@@ -116,13 +116,13 @@ class TestTraceManager:
             mock_history_service.return_value = MagicMock()
             
             # This should exit quickly due to shutdown event
-            await TraceManager._trace_writer_loop()
+            await LogWriterTask._trace_writer_loop()
             
             # The queue.get should not be called since shutdown event is set
             mock_queue.get.assert_not_called()
         
         # Reset shutdown event for other tests
-        TraceManager._shutdown_event.clear()
+        LogWriterTask._shutdown_event.clear()
     
     @pytest.mark.asyncio
     async def test_trace_writer_loop_batch_processing_setup(self):
@@ -144,20 +144,20 @@ class TestTraceManager:
             # Set shutdown event to stop after one iteration
             async def delayed_shutdown():
                 await asyncio.sleep(0.1)
-                TraceManager._shutdown_event.set()
+                LogWriterTask._shutdown_event.set()
             
             shutdown_task = asyncio.create_task(delayed_shutdown())
             
             try:
-                await TraceManager._trace_writer_loop()
+                await LogWriterTask._trace_writer_loop()
             finally:
-                TraceManager._shutdown_event.clear()
+                LogWriterTask._shutdown_event.clear()
                 if not shutdown_task.done():
                     shutdown_task.cancel()
             
             # Verify batch processing was attempted
             mock_logger.debug.assert_any_call(
-                "[TraceManager._trace_writer_loop] Waiting for traces... Queue size: ~0"
+                "[LogWriterTask._trace_writer_loop] Waiting for traces... Queue size: ~0"
             )
     
     @pytest.mark.asyncio
@@ -179,7 +179,7 @@ class TestTraceManager:
                     return None  # Shutdown signal
                 else:
                     # Set shutdown event and raise to exit
-                    TraceManager._shutdown_event.set()
+                    LogWriterTask._shutdown_event.set()
                     raise Exception("Stop")
             
             mock_queue.get.side_effect = mock_get
@@ -187,15 +187,15 @@ class TestTraceManager:
             mock_history_service.return_value = MagicMock()
             
             try:
-                await TraceManager._trace_writer_loop()
+                await LogWriterTask._trace_writer_loop()
             except Exception:
                 pass
             finally:
-                TraceManager._shutdown_event.clear()
+                LogWriterTask._shutdown_event.clear()
             
             # Check that shutdown signal was logged
             mock_logger.debug.assert_any_call(
-                "[TraceManager._trace_writer_loop] Received shutdown signal (None) in queue."
+                "[LogWriterTask._trace_writer_loop] Received shutdown signal (None) in queue."
             )
     
     @pytest.mark.asyncio
@@ -217,7 +217,7 @@ class TestTraceManager:
                 if call_count == 1:
                     return trace_data
                 else:
-                    TraceManager._shutdown_event.set()
+                    LogWriterTask._shutdown_event.set()
                     raise Exception("Stop")
             
             mock_queue.get.side_effect = mock_get
@@ -225,32 +225,32 @@ class TestTraceManager:
             mock_history_service.return_value = MagicMock()
             
             try:
-                await TraceManager._trace_writer_loop()
+                await LogWriterTask._trace_writer_loop()
             except Exception:
                 pass
             finally:
-                TraceManager._shutdown_event.clear()
+                LogWriterTask._shutdown_event.clear()
             
             # Verify task_done was called for the processed item
             mock_queue.task_done.assert_called()
     
     def test_trace_manager_constants(self):
-        """Test TraceManager constants and default values."""
+        """Test LogWriterTask constants and default values."""
         # Test that class maintains state
-        original_started = TraceManager._writer_started
-        original_task = TraceManager._trace_writer_task
+        original_started = LogWriterTask._writer_started
+        original_task = LogWriterTask._trace_writer_task
         
         # Modify values
-        TraceManager._writer_started = True
-        TraceManager._trace_writer_task = MagicMock()
+        LogWriterTask._writer_started = True
+        LogWriterTask._trace_writer_task = MagicMock()
         
         # Verify changes persist
-        assert TraceManager._writer_started is True
-        assert TraceManager._trace_writer_task is not None
+        assert LogWriterTask._writer_started is True
+        assert LogWriterTask._trace_writer_task is not None
         
         # Reset for other tests
-        TraceManager._writer_started = original_started
-        TraceManager._trace_writer_task = original_task
+        LogWriterTask._writer_started = original_started
+        LogWriterTask._trace_writer_task = original_task
     
     @pytest.mark.asyncio
     async def test_trace_writer_loop_exception_handling(self):
@@ -264,45 +264,45 @@ class TestTraceManager:
             
             # The loop should handle the exception
             try:
-                await TraceManager._trace_writer_loop()
+                await LogWriterTask._trace_writer_loop()
             except Exception as e:
                 # Exception should be caught or propagated
                 assert "Queue initialization failed" in str(e)
             
             # Verify logger was called for startup
-            mock_logger.info.assert_called_with("[TraceManager._trace_writer_loop] Writer task started.")
+            mock_logger.info.assert_called_with("[LogWriterTask._trace_writer_loop] Writer task started.")
     
     def test_trace_manager_imports(self):
-        """Test that TraceManager can be imported and used."""
+        """Test that LogWriterTask can be imported and used."""
         # Verify the class exists and can be referenced
-        assert TraceManager is not None
-        assert hasattr(TraceManager, '_trace_writer_loop')
+        assert LogWriterTask is not None
+        assert hasattr(LogWriterTask, '_trace_writer_loop')
         
         # Verify it's a proper class
-        assert isinstance(TraceManager, type)
+        assert isinstance(LogWriterTask, type)
         
     @pytest.mark.asyncio
     async def test_shutdown_event_behavior(self):
         """Test shutdown event behavior."""
         # Initially not set
-        assert not TraceManager._shutdown_event.is_set()
+        assert not LogWriterTask._shutdown_event.is_set()
         
         # Can be set
-        TraceManager._shutdown_event.set()
-        assert TraceManager._shutdown_event.is_set()
+        LogWriterTask._shutdown_event.set()
+        assert LogWriterTask._shutdown_event.is_set()
         
         # Can be cleared
-        TraceManager._shutdown_event.clear()
-        assert not TraceManager._shutdown_event.is_set()
+        LogWriterTask._shutdown_event.clear()
+        assert not LogWriterTask._shutdown_event.is_set()
     
     @pytest.mark.asyncio
     async def test_lock_behavior(self):
         """Test lock behavior."""
         # Lock should be acquirable
-        async with TraceManager._lock:
+        async with LogWriterTask._lock:
             # Should be able to use the lock
             assert True
         
         # Test that it's an async lock
-        assert hasattr(TraceManager._lock, '__aenter__')
-        assert hasattr(TraceManager._lock, '__aexit__')
+        assert hasattr(LogWriterTask._lock, '__aenter__')
+        assert hasattr(LogWriterTask._lock, '__aexit__')

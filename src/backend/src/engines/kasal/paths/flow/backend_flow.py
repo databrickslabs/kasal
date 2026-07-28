@@ -286,7 +286,7 @@ class BackendFlow:
 
         # For flows, we only need minimal callback setup with job_id and flow_id
         # The actual logging/tracing is handled by:
-        # 1. TraceManager + the OTel event bridge (initialized in subprocess)
+        # 1. LogWriterTask + the OTel event bridge (initialized in subprocess)
         # 2. Synchronous callbacks set on each Crew instance in flow methods
         flow_id_for_callbacks = str(self._flow_id) if self._flow_id else None
         self._config['callbacks'] = {
@@ -322,8 +322,8 @@ class BackendFlow:
             # Start the trace writer if tracing is enabled
             if self._tracing_enabled or callbacks.get('start_trace_writer', False):
                 try:
-                    from src.engines.kasal.infra.trace_management import TraceManager
-                    await TraceManager.ensure_writer_started()
+                    from src.services.execution.logs.writer_task import LogWriterTask
+                    await LogWriterTask.ensure_writer_started()
                     logger.info("Successfully started trace writer for event processing")
                 except Exception as e:
                     logger.warning(f"Error starting trace writer: {e}", exc_info=True)
@@ -555,8 +555,8 @@ class BackendFlow:
             # Start the trace writer if tracing is enabled
             if self._tracing_enabled or callbacks.get('start_trace_writer', False):
                 try:
-                    from src.engines.kasal.infra.trace_management import TraceManager
-                    await TraceManager.ensure_writer_started()
+                    from src.services.execution.logs.writer_task import LogWriterTask
+                    await LogWriterTask.ensure_writer_started()
                     logger.info("Successfully started trace writer for event processing")
                 except Exception as e:
                     logger.warning(f"Error starting trace writer: {e}", exc_info=True)

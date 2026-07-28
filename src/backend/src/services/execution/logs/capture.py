@@ -1,8 +1,12 @@
 """
-Comprehensive logging solution for the CrewAI engine.
+Capturing a run's output — the part python logging does not see.
 
-This module provides a centralized approach to capturing and routing all CrewAI logs,
-including console output, event bus messages, and standard logging.
+The engine prints agent reasoning through its own ``Printer`` and writes to
+stdout/stderr directly; neither goes through a logger, so neither would reach
+the Logs tab. This patches the Printer and redirects the streams for the
+duration of a job, funnelling both into the same queue as everything else.
+
+The logger REGISTRY is ``src/core/logger.py``. This is capture only.
 """
 
 import logging
@@ -29,7 +33,7 @@ from kasal_engine.utils import Printer
 from src.core.logger import LoggerManager
 
 # Import queue services
-from src.services.execution_logs_queue import enqueue_log
+from src.services.execution.logs.queue import enqueue_log
 
 # Import group context
 from src.utils.user_context import GroupContext
@@ -38,10 +42,11 @@ from src.utils.user_context import GroupContext
 logger = logging.getLogger(__name__)
 
 
-class CrewLogger:
-    """
-    Comprehensive logger for the CrewAI engine that integrates with the event bus,
-    captures stdout/stderr, and routes logs to the appropriate destinations.
+class ExecutionLogCapture:
+    """Routes an execution's non-logger output into the execution-logs queue.
+
+    Singleton: it patches process-global state (the engine Printer, sys.stdout),
+    so two of these would fight.
     """
     
     _instance = None
@@ -51,7 +56,7 @@ class CrewLogger:
         """Ensure singleton instance."""
         with cls._lock:
             if cls._instance is None:
-                cls._instance = super(CrewLogger, cls).__new__(cls)
+                cls._instance = super(ExecutionLogCapture, cls).__new__(cls)
                 cls._instance._initialized = False
             return cls._instance
     
@@ -133,11 +138,11 @@ class CrewLogger:
             group_context: Group context for logging isolation
         """
         if job_id in self._active_jobs:
-            logger.warning(f"CrewLogger already set up for job {job_id}")
+            logger.warning(f"ExecutionLogCapture already set up for job {job_id}")
             return
             
         # Create a handler for this job
-        handler = CrewLoggerHandler(job_id=job_id, group_context=group_context)
+        handler = ExecutionLogHandler(job_id=job_id, group_context=group_context)
         handler.setFormatter(logging.Formatter('[CREW] %(asctime)s - %(levelname)s - %(message)s'))
         
         # Store job info
@@ -150,7 +155,7 @@ class CrewLogger:
         self._crew_logger.addHandler(handler)
         
         # Log setup confirmation
-        self._crew_logger.info(f"CrewLogger set up for job {job_id} (using execution-scoped callbacks)")
+        self._crew_logger.info(f"ExecutionLogCapture set up for job {job_id} (using execution-scoped callbacks)")
         
         # Override CrewAI's Printer (still needed for print() statements)
         self._patch_printer(job_id)
@@ -163,7 +168,7 @@ class CrewLogger:
             job_id: The execution/job ID
         """
         if job_id not in self._active_jobs:
-            logger.warning(f"No CrewLogger setup found for job {job_id}")
+            logger.warning(f"No ExecutionLogCapture setup found for job {job_id}")
             return
             
         job_info = self._active_jobs[job_id]
@@ -183,7 +188,7 @@ class CrewLogger:
         del self._active_jobs[job_id]
         
         # Log cleanup confirmation (won't go through our handler since it's removed)
-        logger.info(f"CrewLogger cleaned up for job {job_id}")
+        logger.info(f"ExecutionLogCapture cleaned up for job {job_id}")
     
     
     
@@ -348,7 +353,7 @@ class CrewLogger:
             stderr_capture.close()
 
 
-class CrewLoggerHandler(logging.Handler):
+class ExecutionLogHandler(logging.Handler):
     """
     Custom logging handler that captures logs from the crew logger
     and redirects them to the job_output_queue.
@@ -386,12 +391,12 @@ class CrewLoggerHandler(logging.Handler):
             try:
                 import sys
                 if hasattr(sys.stderr, 'write') and not sys.stderr.closed:
-                    sys.stderr.write(f"Error in CrewLoggerHandler.emit: {e}\n")
+                    sys.stderr.write(f"Error in ExecutionLogHandler.emit: {e}\n")
                     sys.stderr.flush()
             except:
                 # If even that fails, silently ignore to prevent cascading failures
                 pass
 
 
-# Create singleton instance
-crew_logger = CrewLogger() 
+# Singleton: it patches process-global state.
+execution_log_capture = ExecutionLogCapture() 

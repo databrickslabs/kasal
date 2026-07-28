@@ -271,15 +271,15 @@ class TestTracing:
         mock_crewai_flow = MockCrewAIFlow()
 
         with patch.object(flow, 'flow', new_callable=AsyncMock) as mock_flow_method, \
-             patch('src.engines.kasal.infra.trace_management.TraceManager') as MockTraceManager:
+             patch('src.services.execution.logs.writer_task.LogWriterTask') as MockLogWriterTask:
 
             mock_flow_method.return_value = mock_crewai_flow
-            MockTraceManager.ensure_writer_started = AsyncMock()
+            MockLogWriterTask.ensure_writer_started = AsyncMock()
 
             await flow.kickoff_async()
 
             # Should start trace writer
-            MockTraceManager.ensure_writer_started.assert_called_once()
+            MockLogWriterTask.ensure_writer_started.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_tracing_enabled_via_config(self, mock_flow_data):
@@ -291,15 +291,15 @@ class TestTracing:
         mock_crewai_flow = MockCrewAIFlow()
 
         with patch.object(flow, 'flow', new_callable=AsyncMock) as mock_flow_method, \
-             patch('src.engines.kasal.infra.trace_management.TraceManager') as MockTraceManager:
+             patch('src.services.execution.logs.writer_task.LogWriterTask') as MockLogWriterTask:
 
             mock_flow_method.return_value = mock_crewai_flow
-            MockTraceManager.ensure_writer_started = AsyncMock()
+            MockLogWriterTask.ensure_writer_started = AsyncMock()
 
             await flow.kickoff()
 
             # Should start trace writer
-            MockTraceManager.ensure_writer_started.assert_called_once()
+            MockLogWriterTask.ensure_writer_started.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_tracing_error_doesnt_stop_execution(self, mock_flow_data):
@@ -311,10 +311,10 @@ class TestTracing:
         mock_crewai_flow = MockCrewAIFlow()
 
         with patch.object(flow, 'flow', new_callable=AsyncMock) as mock_flow_method, \
-             patch('src.engines.kasal.infra.trace_management.TraceManager') as MockTraceManager:
+             patch('src.services.execution.logs.writer_task.LogWriterTask') as MockLogWriterTask:
 
             mock_flow_method.return_value = mock_crewai_flow
-            MockTraceManager.ensure_writer_started = AsyncMock(side_effect=Exception("Trace error"))
+            MockLogWriterTask.ensure_writer_started = AsyncMock(side_effect=Exception("Trace error"))
 
             result = await flow.kickoff_async()
 
@@ -331,15 +331,15 @@ class TestTracing:
         mock_crewai_flow = MockCrewAIFlow()
 
         with patch.object(flow, 'flow', new_callable=AsyncMock) as mock_flow_method, \
-             patch('src.engines.kasal.infra.trace_management.TraceManager') as MockTraceManager:
+             patch('src.services.execution.logs.writer_task.LogWriterTask') as MockLogWriterTask:
 
             mock_flow_method.return_value = mock_crewai_flow
-            MockTraceManager.ensure_writer_started = AsyncMock()
+            MockLogWriterTask.ensure_writer_started = AsyncMock()
 
             await flow.kickoff_async()
 
             # Should NOT start trace writer when disabled
-            MockTraceManager.ensure_writer_started.assert_not_called()
+            MockLogWriterTask.ensure_writer_started.assert_not_called()
 
 
 class TestBackendFlowInitialization:

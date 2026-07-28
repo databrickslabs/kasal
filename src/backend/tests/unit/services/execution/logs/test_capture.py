@@ -1,5 +1,5 @@
 """
-Unit tests for CrewLogger.
+Unit tests for ExecutionLogCapture.
 
 Tests the functionality of the CrewAI engine logger including
 event handling, output capture, and log redirection.
@@ -14,7 +14,7 @@ from unittest.mock import patch, MagicMock, AsyncMock, call, PropertyMock
 from contextlib import contextmanager
 from datetime import datetime
 
-from src.engines.kasal.infra.crew_logger import CrewLogger, CrewLoggerHandler
+from src.services.execution.logs.capture import ExecutionLogCapture, ExecutionLogHandler
 
 
 @pytest.fixture
@@ -36,42 +36,42 @@ def mock_group_context():
 
 @pytest.fixture
 def reset_singleton():
-    """Reset the CrewLogger singleton before each test."""
-    CrewLogger._instance = None
+    """Reset the ExecutionLogCapture singleton before each test."""
+    ExecutionLogCapture._instance = None
     yield
-    CrewLogger._instance = None
+    ExecutionLogCapture._instance = None
 
 
 @pytest.fixture
 def crew_logger_instance(mock_logger_manager):
-    """Create a CrewLogger instance with mocked dependencies."""
-    with patch("src.engines.kasal.infra.crew_logger.LoggerManager") as mock_lm:
+    """Create a ExecutionLogCapture instance with mocked dependencies."""
+    with patch("src.services.execution.logs.capture.LoggerManager") as mock_lm:
         mock_lm.get_instance.return_value = mock_logger_manager
         
         # Reset singleton
-        CrewLogger._instance = None
+        ExecutionLogCapture._instance = None
         
-        return CrewLogger()
+        return ExecutionLogCapture()
 
 
-class TestCrewLogger:
-    """Test cases for CrewLogger."""
+class TestExecutionLogCapture:
+    """Test cases for ExecutionLogCapture."""
     
     def test_singleton_pattern(self, mock_logger_manager):
-        """Test that CrewLogger follows singleton pattern."""
-        with patch("src.engines.kasal.infra.crew_logger.LoggerManager") as mock_lm:
+        """Test that ExecutionLogCapture follows singleton pattern."""
+        with patch("src.services.execution.logs.capture.LoggerManager") as mock_lm:
             mock_lm.get_instance.return_value = mock_logger_manager
             
             # Reset singleton
-            CrewLogger._instance = None
+            ExecutionLogCapture._instance = None
             
-            logger1 = CrewLogger()
-            logger2 = CrewLogger()
+            logger1 = ExecutionLogCapture()
+            logger2 = ExecutionLogCapture()
             
             assert logger1 is logger2
     
     def test_initialization(self, crew_logger_instance, mock_logger_manager):
-        """Test CrewLogger initialization."""
+        """Test ExecutionLogCapture initialization."""
         assert crew_logger_instance._crew_logger == mock_logger_manager.crew
         assert crew_logger_instance._initialized is True
         assert crew_logger_instance._active_jobs == {}
@@ -101,7 +101,7 @@ class TestCrewLogger:
     def test_module_coverage_verification(self):
         """Verify module constants and coverage."""
         # Simple test to verify module is loaded and accessible
-        from src.engines.kasal.infra.crew_logger import logger
+        from src.services.execution.logs.capture import logger
         
         # Test the logger exists
         assert logger is not None
@@ -110,7 +110,7 @@ class TestCrewLogger:
         """Test setup for job functionality."""
         job_id = "test_job_123"
         
-        with patch("src.engines.kasal.infra.crew_logger.CrewLoggerHandler") as mock_handler_class:
+        with patch("src.services.execution.logs.capture.ExecutionLogHandler") as mock_handler_class:
             mock_handler = MagicMock()
             mock_handler_class.return_value = mock_handler
             
@@ -126,7 +126,7 @@ class TestCrewLogger:
         job_id = "test_job_123"
         
         # Setup a job first
-        with patch("src.engines.kasal.infra.crew_logger.CrewLoggerHandler") as mock_handler_class:
+        with patch("src.services.execution.logs.capture.ExecutionLogHandler") as mock_handler_class:
             mock_handler = MagicMock()
             mock_handler_class.return_value = mock_handler
             
@@ -140,21 +140,21 @@ class TestCrewLogger:
             assert job_id not in crew_logger_instance._active_jobs
 
 
-class TestCrewLoggerHandler:
-    """Test cases for CrewLoggerHandler."""
+class TestExecutionLogHandler:
+    """Test cases for ExecutionLogHandler."""
     
     def test_initialization(self, mock_group_context):
-        """Test CrewLoggerHandler initialization."""
+        """Test ExecutionLogHandler initialization."""
         job_id = "test_job_123"
-        handler = CrewLoggerHandler(job_id, mock_group_context)
+        handler = ExecutionLogHandler(job_id, mock_group_context)
         
         assert handler.job_id == job_id
         assert handler.group_context == mock_group_context
     
     def test_emit_log_record(self, mock_group_context):
-        """Test CrewLoggerHandler emit method."""
+        """Test ExecutionLogHandler emit method."""
         job_id = "test_job_123"
-        handler = CrewLoggerHandler(job_id, mock_group_context)
+        handler = ExecutionLogHandler(job_id, mock_group_context)
         
         # Mock the format method
         handler.format = MagicMock(return_value="Formatted log message")
@@ -169,7 +169,7 @@ class TestCrewLoggerHandler:
             exc_info=None
         )
         
-        with patch("src.engines.kasal.infra.crew_logger.enqueue_log") as mock_enqueue:
+        with patch("src.services.execution.logs.capture.enqueue_log") as mock_enqueue:
             handler.emit(record)
             mock_enqueue.assert_called_once_with(
                 execution_id=job_id,
@@ -178,9 +178,9 @@ class TestCrewLoggerHandler:
             )
     
     def test_emit_with_exception(self, mock_group_context):
-        """Test CrewLoggerHandler emit method with exception handling."""
+        """Test ExecutionLogHandler emit method with exception handling."""
         job_id = "test_job_123"
-        handler = CrewLoggerHandler(job_id, mock_group_context)
+        handler = ExecutionLogHandler(job_id, mock_group_context)
         
         handler.format = MagicMock(side_effect=Exception("Format error"))
         
@@ -194,6 +194,6 @@ class TestCrewLoggerHandler:
             exc_info=None
         )
         
-        with patch("src.engines.kasal.infra.crew_logger.enqueue_log"):
+        with patch("src.services.execution.logs.capture.enqueue_log"):
             # Should not raise exception even with format error
             handler.emit(record)

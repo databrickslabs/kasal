@@ -9,7 +9,7 @@ import queue
 from datetime import datetime
 from unittest.mock import patch, MagicMock
 
-from src.services.execution_logs_queue import JobOutputQueue, get_job_output_queue, enqueue_log
+from src.services.execution.logs.queue import JobOutputQueue, get_job_output_queue, enqueue_log
 from src.utils.user_context import GroupContext
 
 
@@ -174,7 +174,7 @@ class TestEnqueueLog:
         assert log_data["job_id"] == execution_id
         assert log_data["content"] == content
     
-    @patch('src.services.execution_logs_queue.get_job_output_queue')
+    @patch('src.services.execution.logs.queue.get_job_output_queue')
     def test_enqueue_log_queue_full_exception(self, mock_get_queue):
         """Test log enqueueing when queue is full."""
         mock_queue = MagicMock()
@@ -186,7 +186,7 @@ class TestEnqueueLog:
         assert result is False
         mock_queue.put_nowait.assert_called_once()
     
-    @patch('src.services.execution_logs_queue.get_job_output_queue')
+    @patch('src.services.execution.logs.queue.get_job_output_queue')
     def test_enqueue_log_general_exception(self, mock_get_queue):
         """Test log enqueueing with general exception."""
         mock_queue = MagicMock()
@@ -221,7 +221,7 @@ class TestEnqueueLog:
             assert log_data["job_id"] == expected_execution_id
             assert log_data["content"] == expected_content
     
-    @patch('src.services.execution_logs_queue.datetime')
+    @patch('src.services.execution.logs.queue.datetime')
     def test_enqueue_log_default_timestamp(self, mock_datetime):
         """Test that default timestamp uses datetime.now()."""
         mock_now = datetime(2023, 6, 15, 10, 30, 45)
@@ -309,7 +309,7 @@ class TestEnqueueLog:
         A full queue used to lose log lines with no accounting, making
         truncated execution logs look like an engine bug.
         """
-        import src.services.execution_logs_queue as elq
+        import src.services.execution.logs.queue as elq
 
         job_queue_instance = JobOutputQueue()
         job_queue_instance._queue = queue.Queue(maxsize=1)
@@ -331,7 +331,7 @@ class TestEnqueueLog:
 
     def test_drop_warning_repeats_at_report_interval(self):
         """Every Nth drop re-warns so long-running loss stays visible."""
-        import src.services.execution_logs_queue as elq
+        import src.services.execution.logs.queue as elq
 
         with patch.object(elq, '_dropped_total', elq._DROP_REPORT_EVERY - 1), \
              patch.object(elq, 'logger') as mock_logger:
