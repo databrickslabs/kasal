@@ -377,9 +377,185 @@ class TestApiKeyRepositoryErrorHandling:
     async def test_get_api_key_value_with_none_encrypted_value(self, api_key_repository_async):
         """Test get_api_key_value when encrypted_value is None."""
         api_key = MockApiKey(name="NULL_VALUE_KEY", encrypted_value=None)
-        
+
         with patch.object(api_key_repository_async, 'find_by_name', return_value=api_key):
             with patch('src.utils.encryption_utils.EncryptionUtils.decrypt_value', side_effect=Exception("Cannot decrypt None")):
                 result = await api_key_repository_async.get_api_key_value("NULL_VALUE_KEY")
-                
+
                 assert result is None
+
+
+# ============================================================================
+# find_by_name_sync / find_all / get_api_key_value / delete — additional
+# branch coverage using plain mocks (async vs sync session, decrypt failure,
+# delete exception/not-found/success paths).
+# ============================================================================
+
+class _GroupScopedApiKey:
+    """Lightweight mock distinct from MockApiKey above — this module's
+    find_all/find_by_name_sync branches key off group_id, which MockApiKey
+    does not model."""
+
+    def __init__(self, id=1, name="OPENAI_API_KEY", encrypted_value="enc_val", group_id=None):
+        self.id = id
+        self.name = name
+        self.encrypted_value = encrypted_value
+        self.group_id = group_id
+
+
+def _make_async_session():
+    s = AsyncMock(spec=AsyncSession)
+    s.execute = AsyncMock()
+    s.flush = AsyncMock()
+    s.rollback = AsyncMock()
+    return s
+
+
+def _make_sync_session():
+    s = MagicMock(spec=Session)
+    return s
+
+
+def _make_scalars(items):
+    scalars = MagicMock()
+    scalars.first.return_value = items[0] if items else None
+    scalars.all.return_value = items
+    return scalars
+
+
+def _make_result(items):
+    result = MagicMock()
+    result.scalars.return_value = _make_scalars(items)
+    return result
+
+
+def test_find_by_name_sync_raises_type_error_for_async():
+    async_session = _make_async_session()
+    repo = ApiKeyRepository(session=async_session)
+    with pytest.raises(TypeError):
+        repo.find_by_name_sync("OPENAI_API_KEY")
+
+
+def test_find_by_name_sync_returns_key():
+    sync_session = _make_sync_session()
+    key = _GroupScopedApiKey()
+    scalars = MagicMock()
+    scalars.first.return_value = key
+    result = MagicMock()
+    result.scalars.return_value = scalars
+    sync_session.execute.return_value = result
+    repo = ApiKeyRepository(session=sync_session)
+    found = repo.find_by_name_sync("OPENAI_API_KEY")
+    assert found is key
+
+
+def test_find_by_name_sync_with_group_id_not_found():
+    sync_session = _make_sync_session()
+    scalars = MagicMock()
+    scalars.first.return_value = None
+    result = MagicMock()
+    result.scalars.return_value = scalars
+    sync_session.execute.return_value = result
+    repo = ApiKeyRepository(session=sync_session)
+    found = repo.find_by_name_sync("OPENAI_API_KEY", group_id="g1")
+    assert found is None
+
+
+@pytest.mark.asyncio
+async def test_find_all_no_group():
+    async_session = _make_async_session()
+    keys = [_GroupScopedApiKey(id=1), _GroupScopedApiKey(id=2)]
+    async_session.execute.return_value = _make_result(keys)
+    repo = ApiKeyRepository(session=async_session)
+    result = await repo.find_all()
+    assert len(result) == 2
+
+
+@pytest.mark.asyncio
+async def test_find_all_with_group():
+    async_session = _make_async_session()
+    keys = [_GroupScopedApiKey(id=1, group_id="g1")]
+    async_session.execute.return_value = _make_result(keys)
+    repo = ApiKeyRepository(session=async_session)
+    result = await repo.find_all(group_id="g1")
+    assert len(result) == 1
+
+
+@pytest.mark.asyncio
+async def test_get_api_key_value_returns_none_when_not_found():
+    async_session = _make_async_session()
+    async_session.execute.return_value = _make_result([])
+    repo = ApiKeyRepository(session=async_session)
+    result = await repo.get_api_key_value("MISSING_KEY")
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_get_api_key_value_decryption_success():
+    async_session = _make_async_session()
+    key = _GroupScopedApiKey(encrypted_value="encrypted_123")
+    async_session.execute.return_value = _make_result([key])
+    repo = ApiKeyRepository(session=async_session)
+
+    # EncryptionUtils is imported locally inside the method
+    mock_encryption = MagicMock()
+    mock_encryption.decrypt_value.return_value = "decrypted_value"
+    with patch.dict('sys.modules', {
+        'src.utils.encryption_utils': MagicMock(EncryptionUtils=mock_encryption)
+    }):
+        result = await repo.get_api_key_value("OPENAI_API_KEY")
+
+    assert result == "decrypted_value"
+
+
+@pytest.mark.asyncio
+async def test_get_api_key_value_decryption_fails_returns_none():
+    async_session = _make_async_session()
+    key = _GroupScopedApiKey(encrypted_value="bad_enc")
+    async_session.execute.return_value = _make_result([key])
+    repo = ApiKeyRepository(session=async_session)
+
+    mock_encryption = MagicMock()
+    mock_encryption.decrypt_value.side_effect = Exception("decrypt error")
+    with patch.dict('sys.modules', {
+        'src.utils.encryption_utils': MagicMock(EncryptionUtils=mock_encryption)
+    }):
+        result = await repo.get_api_key_value("OPENAI_API_KEY")
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_delete_exception_raises_and_rolls_back():
+    async_session = _make_async_session()
+    async_session.execute.side_effect = Exception("DB error")
+    repo = ApiKeyRepository(session=async_session)
+
+    with pytest.raises(Exception, match="DB error"):
+        await repo.delete(1)
+
+    async_session.rollback.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_delete_not_found_returns_false():
+    async_session = _make_async_session()
+    result_mock = MagicMock()
+    result_mock.rowcount = 0
+    async_session.execute.return_value = result_mock
+    repo = ApiKeyRepository(session=async_session)
+
+    result = await repo.delete(999)
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_delete_success_returns_true():
+    async_session = _make_async_session()
+    result_mock = MagicMock()
+    result_mock.rowcount = 1
+    async_session.execute.return_value = result_mock
+    repo = ApiKeyRepository(session=async_session)
+
+    result = await repo.delete(1)
+    assert result is True

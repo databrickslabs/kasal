@@ -16,6 +16,24 @@ Focus areas:
 - Context enrichment injection
 - Placeholder resolution with sensitive key masking
 """
+# ORDERING NOTE — this file must sort AFTER
+# test_tool_factory_create_tool_paths.py.
+#
+# Something in here leaves ToolFactory state that makes
+# TestDatabricksKnowledgeSearchToolCreation in that file see the real
+# DatabricksKnowledgeSearchTool instead of its patched mock. Running these two
+# in the other order reproduces it every time:
+#
+#   pytest test_tool_factory_credential_and_config_paths.py \
+#          test_tool_factory_create_tool_paths.py
+#   -> 2 failed
+#
+# The bug is the shared state, not the name; the name is just what currently
+# keeps alphabetical collection order on the working side. This pair was
+# previously called _extended.py / _extended2.py and had the same constraint by
+# accident — it is one of the "flaky" suites that turned out not to be flaky at
+# all. Fixing it properly means finding what is not being torn down.
+
 import asyncio
 import os
 import pytest

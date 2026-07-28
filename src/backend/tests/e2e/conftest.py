@@ -14,7 +14,6 @@ from sqlalchemy.pool import NullPool
 
 from src.db.base import Base
 from src.main import app
-from src.core.config import get_settings
 from src.db.session import get_db
 
 

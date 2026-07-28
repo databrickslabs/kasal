@@ -56,7 +56,6 @@ def _offenders() -> set[str]:
 #: Files whose directory does not match what they import. Shrink this.
 _BASELINE = {
     "api/test_memory_backend_router.py",
-    "api/test_sse_router_extended.py",
     "converters/dax/test_context.py",
     "converters/sql/test_formula_parser.py",
     "converters/sql/test_sql_structures.py",
@@ -64,9 +63,9 @@ _BASELINE = {
     "converters/uc_metrics/test_context.py",
     "services/agent_builder/test_execution_runner_callbacks.py",
     "services/chat/test_context_compaction_event.py",
-    "services/execution/kernel/test_agent_helpers_comprehensive.py",
+    "services/execution/kernel/test_agent_helpers_create_agent_config.py",
     "services/execution/kernel/test_agent_helpers_date_awareness.py",
-    "services/execution/kernel/test_agent_helpers_new.py",
+    "services/execution/kernel/test_agent_helpers_optional_params.py",
     "services/execution/kernel/test_agent_helpers_security.py",
     "services/execution/kernel/test_mcp_session_guard.py",
     "services/execution/kernel/test_output_budget_clamp.py",
@@ -75,7 +74,7 @@ _BASELINE = {
     "services/execution/kernel/test_task_helpers.py",
     "services/execution/kernel/test_task_helpers_engine.py",
     "services/execution/kernel/test_task_helpers_mcp_exclusion.py",
-    "services/execution/kernel/test_task_helpers_new.py",
+    "services/execution/kernel/test_task_helpers_pydantic_field_types.py",
     "services/execution/kernel/test_ui_document.py",
     "services/execution/test_process_log_queue.py",
     "services/guardrails/test_guardrail_events.py",
@@ -90,9 +89,9 @@ _BASELINE = {
     "test_execution_workflow.py",
     "test_global_exception_handlers.py",
     "test_main.py",
-    "test_main_additional.py",
+    "test_main_error_handlers.py",
     "test_main_lifespan.py",
-    "test_main_lifespan_coverage.py",
+    "test_main_middleware.py",
     "test_security_headers_middleware.py",
 }
 
