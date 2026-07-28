@@ -18,8 +18,8 @@ import hashlib
 from collections import OrderedDict
 from typing import Any, Dict
 
-from src.engines.kasal.guardrails.base_guardrail import BaseGuardrail
-from src.engines.kasal.guardrails.guardrail_model import DEFAULT_GUARDRAIL_MODEL
+from src.services.guardrails.base_guardrail import BaseGuardrail
+from src.services.guardrails.guardrail_model import DEFAULT_GUARDRAIL_MODEL
 from src.core.logger import LoggerManager
 
 logger = LoggerManager.get_instance().guardrails

@@ -548,7 +548,7 @@ class TestCreateTask:
         with patch('src.engines.kasal.paths.crew.task_adapter.Task') as mock_task_class, \
              patch('src.core.unit_of_work.UnitOfWork') as mock_uow, \
              patch('src.services.mcp_service.MCPService') as mock_mcp, \
-             patch('src.engines.kasal.guardrails.guardrail_factory.GuardrailFactory') as mock_factory, \
+             patch('src.services.guardrails.guardrail_factory.GuardrailFactory') as mock_factory, \
              patch('src.core.logger.LoggerManager') as mock_logger_manager:
             
             # Setup UoW to return empty MCP servers
@@ -602,7 +602,7 @@ class TestCreateTask:
         with patch('src.engines.kasal.paths.crew.task_adapter.Task') as mock_task_class, \
              patch('src.core.unit_of_work.UnitOfWork') as mock_uow, \
              patch('src.services.mcp_service.MCPService') as mock_mcp, \
-             patch('src.engines.kasal.guardrails.guardrail_factory.GuardrailFactory') as mock_factory, \
+             patch('src.services.guardrails.guardrail_factory.GuardrailFactory') as mock_factory, \
              patch('src.core.logger.LoggerManager') as mock_logger_manager:
             
             # Setup UoW to return empty MCP servers
@@ -656,7 +656,7 @@ class TestCreateTask:
         with patch('src.engines.kasal.paths.crew.task_adapter.Task') as mock_task_class, \
              patch('src.core.unit_of_work.UnitOfWork') as mock_uow, \
              patch('src.services.mcp_service.MCPService') as mock_mcp, \
-             patch('src.engines.kasal.guardrails.guardrail_factory.GuardrailFactory') as mock_factory, \
+             patch('src.services.guardrails.guardrail_factory.GuardrailFactory') as mock_factory, \
              patch('src.core.logger.LoggerManager') as mock_logger_manager:
             
             # Setup UoW to return empty MCP servers

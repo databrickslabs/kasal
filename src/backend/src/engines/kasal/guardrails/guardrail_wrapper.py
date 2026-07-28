@@ -10,7 +10,7 @@ import datetime
 import os
 import traceback
 
-from src.engines.kasal.guardrails.base_guardrail import BaseGuardrail
+from src.services.guardrails.base_guardrail import BaseGuardrail
 from src.core.logger import LoggerManager
 
 

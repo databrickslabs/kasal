@@ -11,7 +11,7 @@ import json
 import traceback
 
 from src.core.logger import LoggerManager
-from src.engines.kasal.guardrails.base_guardrail import BaseGuardrail
+from src.services.guardrails.base_guardrail import BaseGuardrail
 from src.repositories.data_processing_repository import DataProcessingRepository
 from src.core.unit_of_work import SyncUnitOfWork
 

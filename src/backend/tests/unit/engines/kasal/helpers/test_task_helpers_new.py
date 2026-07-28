@@ -794,7 +794,7 @@ class TestCreateTaskGuardrail:
              patch("src.engines.kasal.paths.crew.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory_backend_service.MemoryBackendService") as mock_mem_svc, \
-             patch("src.engines.kasal.guardrails.guardrail_factory.GuardrailFactory") as mock_gf, \
+             patch("src.services.guardrails.guardrail_factory.GuardrailFactory") as mock_gf, \
              patch("src.engines.kasal.paths.crew.task_adapter.GuardrailWrapper") as mock_gw:
 
             mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
@@ -837,7 +837,7 @@ class TestCreateTaskGuardrail:
              patch("src.engines.kasal.paths.crew.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory_backend_service.MemoryBackendService") as mock_mem_svc, \
-             patch("src.engines.kasal.guardrails.guardrail_factory.GuardrailFactory") as mock_gf, \
+             patch("src.services.guardrails.guardrail_factory.GuardrailFactory") as mock_gf, \
              patch("src.engines.kasal.callbacks.databricks_volume_callback.DatabricksVolumeCallback") as mock_dvcb:
 
             mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
@@ -872,7 +872,7 @@ class TestCreateTaskGuardrail:
              patch("src.engines.kasal.paths.crew.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory_backend_service.MemoryBackendService") as mock_mem_svc, \
-             patch("src.engines.kasal.guardrails.guardrail_factory.GuardrailFactory") as mock_gf, \
+             patch("src.services.guardrails.guardrail_factory.GuardrailFactory") as mock_gf, \
              patch("src.engines.kasal.paths.crew.task_adapter.GuardrailWrapper") as mock_gw:
 
             mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
@@ -925,7 +925,7 @@ class TestCreateTaskGuardrail:
              patch("src.engines.kasal.paths.crew.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory_backend_service.MemoryBackendService") as mock_mem_svc, \
-             patch("src.engines.kasal.guardrails.guardrail_factory.GuardrailFactory") as mock_gf, \
+             patch("src.services.guardrails.guardrail_factory.GuardrailFactory") as mock_gf, \
              patch("src.engines.kasal.paths.crew.task_adapter.GuardrailWrapper") as mock_gw:
 
             mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
@@ -980,7 +980,7 @@ class TestCreateTaskGuardrail:
              patch("src.engines.kasal.paths.crew.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory_backend_service.MemoryBackendService") as mock_mem_svc, \
-             patch("src.engines.kasal.guardrails.guardrail_factory.GuardrailFactory") as mock_gf, \
+             patch("src.services.guardrails.guardrail_factory.GuardrailFactory") as mock_gf, \
              patch("src.engines.kasal.paths.crew.task_adapter.GuardrailWrapper") as mock_gw:
 
             mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])

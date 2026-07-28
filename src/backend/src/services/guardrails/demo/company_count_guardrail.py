@@ -6,10 +6,9 @@ import re
 import json
 import os
 from typing import Dict, Any, List, Optional, Union
-from kasal_engine.core import TaskOutput
 import traceback
 
-from src.engines.kasal.guardrails.base_guardrail import BaseGuardrail
+from src.services.guardrails.base_guardrail import BaseGuardrail, is_task_output
 from src.core.logger import LoggerManager
 
 # Get the logger manager instance
@@ -44,7 +43,7 @@ class CompanyCountGuardrail(BaseGuardrail):
         logger.info(f"Log directory: {logger_manager._log_dir}")
         logger.info(f"Logger handlers: {logger.handlers}")
     
-    def validate(self, output: Union[str, TaskOutput, Dict[str, Any]]) -> Dict[str, Any]:
+    def validate(self, output: Union[str, Any, Dict[str, Any]]) -> Dict[str, Any]:
         """
         Validate that the output contains at least the minimum number of company names.
         
@@ -115,15 +114,15 @@ class CompanyCountGuardrail(BaseGuardrail):
                 "feedback": feedback
             }
     
-    def _get_output_text(self, output: Union[str, TaskOutput, Dict[str, Any]]) -> Optional[str]:
+    def _get_output_text(self, output: Union[str, Any, Dict[str, Any]]) -> Optional[str]:
         """Extract text content from various output types."""
         logger.info(f"Attempting to extract text from output of type: {type(output)}")
         
         if isinstance(output, str):
             logger.info("Output is already a string")
             return output
-        elif isinstance(output, TaskOutput):
-            logger.info("Output is a TaskOutput object")
+        elif is_task_output(output):
+            logger.info("Output is a task-output object")
             # Try all possible attributes that might contain the output
             possible_attrs = ['content', 'raw_output', 'output', 'text', 'result', 'response']
             for attr in possible_attrs:
@@ -132,7 +131,7 @@ class CompanyCountGuardrail(BaseGuardrail):
                     logger.info(f"Found {attr} attribute: {value}")
                     if value and isinstance(value, str):
                         return value
-            logger.info("No suitable attribute found in TaskOutput")
+            logger.info("No suitable attribute found in the task output")
             logger.info(f"Available attributes: {dir(output)}")
             # Try to get any string representation
             try:

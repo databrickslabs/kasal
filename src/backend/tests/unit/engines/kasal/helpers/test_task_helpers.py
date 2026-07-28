@@ -574,7 +574,7 @@ class TestCreateTask:
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.kasal.guardrails.guardrail_factory.GuardrailFactory') as mock_factory:
+             patch('src.services.guardrails.guardrail_factory.GuardrailFactory') as mock_factory:
             mock_mcp_service.from_unit_of_work = AsyncMock(return_value=Mock(
                 get_enabled_servers=AsyncMock(return_value=Mock(servers=[]))
             ))
@@ -615,7 +615,7 @@ class TestCreateTask:
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.kasal.guardrails.guardrail_factory.GuardrailFactory') as mock_factory, \
+             patch('src.services.guardrails.guardrail_factory.GuardrailFactory') as mock_factory, \
              patch('os.makedirs'), \
              patch('builtins.open', create=True):
             mock_mcp_service.from_unit_of_work = AsyncMock(return_value=Mock(
@@ -653,7 +653,7 @@ class TestCreateTask:
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.kasal.guardrails.guardrail_factory.GuardrailFactory') as mock_factory, \
+             patch('src.services.guardrails.guardrail_factory.GuardrailFactory') as mock_factory, \
              patch('os.makedirs'), \
              patch('builtins.open', create=True):
             mock_mcp_service.from_unit_of_work = AsyncMock(return_value=Mock(
@@ -1206,7 +1206,7 @@ class TestCreateTask:
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.kasal.guardrails.guardrail_factory.GuardrailFactory') as mock_factory:
+             patch('src.services.guardrails.guardrail_factory.GuardrailFactory') as mock_factory:
             mock_mcp_service.from_unit_of_work = AsyncMock(return_value=Mock(
                 get_enabled_servers=AsyncMock(return_value=Mock(servers=[]))
             ))

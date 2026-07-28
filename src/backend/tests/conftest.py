@@ -314,17 +314,17 @@ def mock_uow(monkeypatch):
     mock_cls = MagicMock()
     # Patch in all guardrail modules that may reference SyncUnitOfWork
     monkeypatch.setattr(
-        "src.engines.kasal.guardrails.demo.empty_data_processing_guardrail.SyncUnitOfWork",
+        "src.services.guardrails.demo.empty_data_processing_guardrail.SyncUnitOfWork",
         mock_cls,
         raising=False,
     )
     monkeypatch.setattr(
-        "src.engines.kasal.guardrails.demo.data_processing_guardrail.SyncUnitOfWork",
+        "src.services.guardrails.demo.data_processing_guardrail.SyncUnitOfWork",
         mock_cls,
         raising=False,
     )
     monkeypatch.setattr(
-        "src.engines.kasal.guardrails.demo.data_processing_count_guardrail.SyncUnitOfWork",
+        "src.services.guardrails.demo.data_processing_count_guardrail.SyncUnitOfWork",
         mock_cls,
         raising=False,
     )
@@ -339,17 +339,17 @@ def mock_repo_class(monkeypatch):
     mock_cls = MagicMock()
     # Patch in all guardrail modules that may reference DataProcessingRepository
     monkeypatch.setattr(
-        "src.engines.kasal.guardrails.demo.empty_data_processing_guardrail.DataProcessingRepository",
+        "src.services.guardrails.demo.empty_data_processing_guardrail.DataProcessingRepository",
         mock_cls,
         raising=False,
     )
     monkeypatch.setattr(
-        "src.engines.kasal.guardrails.demo.data_processing_guardrail.DataProcessingRepository",
+        "src.services.guardrails.demo.data_processing_guardrail.DataProcessingRepository",
         mock_cls,
         raising=False,
     )
     monkeypatch.setattr(
-        "src.engines.kasal.guardrails.demo.data_processing_count_guardrail.DataProcessingRepository",
+        "src.services.guardrails.demo.data_processing_count_guardrail.DataProcessingRepository",
         mock_cls,
         raising=False,
     )
@@ -393,21 +393,21 @@ def pytest_runtest_setup(item):
 
             # Patch guardrail modules to use these mocks
             try:
-                import src.engines.kasal.guardrails.demo.data_processing_count_guardrail as m1
+                import src.services.guardrails.demo.data_processing_count_guardrail as m1
 
                 m1.DataProcessingRepository = mock_cls
                 m1.SyncUnitOfWork = uow_mock_cls
             except Exception:
                 pass
             try:
-                import src.engines.kasal.guardrails.demo.data_processing_guardrail as m2
+                import src.services.guardrails.demo.data_processing_guardrail as m2
 
                 m2.DataProcessingRepository = mock_cls
                 m2.SyncUnitOfWork = uow_mock_cls
             except Exception:
                 pass
             try:
-                import src.engines.kasal.guardrails.demo.empty_data_processing_guardrail as m3
+                import src.services.guardrails.demo.empty_data_processing_guardrail as m3
 
                 m3.DataProcessingRepository = mock_cls
                 m3.SyncUnitOfWork = uow_mock_cls

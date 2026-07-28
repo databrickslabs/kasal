@@ -3,7 +3,7 @@ import json
 from unittest.mock import MagicMock, patch, Mock
 from typing import Dict, Any
 
-from src.engines.kasal.guardrails.demo.data_processing_guardrail import DataProcessingGuardrail
+from src.services.guardrails.demo.data_processing_guardrail import DataProcessingGuardrail
 
 
 class TestDataProcessingGuardrail:
@@ -43,7 +43,7 @@ class TestDataProcessingGuardrail:
     
     def test_init_inheritance_from_base(self):
         """Test that DataProcessingGuardrail inherits from BaseGuardrail."""
-        from src.engines.kasal.guardrails.base_guardrail import BaseGuardrail
+        from src.services.guardrails.base_guardrail import BaseGuardrail
         
         guardrail = DataProcessingGuardrail({})
         
@@ -51,7 +51,7 @@ class TestDataProcessingGuardrail:
         assert hasattr(guardrail, 'config')
         assert hasattr(guardrail, 'validate')
     
-    @patch('src.engines.kasal.guardrails.base_guardrail.BaseGuardrail.__init__')
+    @patch('src.services.guardrails.base_guardrail.BaseGuardrail.__init__')
     def test_init_exception_handling(self, mock_base_init):
         """Test initialization exception handling."""
         # Mock the parent __init__ to raise an exception

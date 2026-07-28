@@ -122,7 +122,7 @@ def _apply_human_review(task_args, task_config, config, task_key):
     """Attach a HumanReviewGuardrail when the task enables human_input."""
     import os
 
-    from src.engines.kasal.guardrails.core.human_review_guardrail import (
+    from src.services.guardrails.core.human_review_guardrail import (
         HumanReviewGuardrail,
     )
 
@@ -192,14 +192,14 @@ def _apply_code_guardrail(task_args, task_config, agent, config, task_key):
         return
 
     try:
-        from src.engines.kasal.guardrails.guardrail_factory import GuardrailFactory
+        from src.services.guardrails.guardrail_factory import GuardrailFactory
 
         # LLM-backed factory guardrails get the run's model stamped in.
         if (
             isinstance(_parsed_config, dict)
             and _parsed_config.get("type") in _LLM_FACTORY_GUARDRAILS
         ):
-            from src.engines.kasal.guardrails.guardrail_model import (
+            from src.services.guardrails.guardrail_model import (
                 resolve_guardrail_model,
             )
 
@@ -254,7 +254,7 @@ async def _apply_llm_guardrail(task_args, task_config, agent, config, task_key):
                 llm_guardrail_config, "description", "Validate the task output"
             )
             explicit_model = getattr(llm_guardrail_config, "llm_model", None)
-        from src.engines.kasal.guardrails.guardrail_model import resolve_guardrail_model
+        from src.services.guardrails.guardrail_model import resolve_guardrail_model
 
         llm_model = resolve_guardrail_model(explicit_model, agent, config)
 

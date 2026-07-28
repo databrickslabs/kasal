@@ -2,7 +2,7 @@ import pytest
 from abc import ABC
 from unittest.mock import MagicMock
 
-from src.engines.kasal.guardrails.base_guardrail import BaseGuardrail
+from src.services.guardrails.base_guardrail import BaseGuardrail
 
 
 class TestBaseGuardrail:

@@ -6,10 +6,9 @@ import re
 import json
 import os
 from typing import Dict, Any, List, Optional, Union
-from kasal_engine.core import TaskOutput
 import traceback
 
-from src.engines.kasal.guardrails.base_guardrail import BaseGuardrail
+from src.services.guardrails.base_guardrail import BaseGuardrail, is_task_output
 from src.core.logger import LoggerManager
 
 # Get the logger manager instance
@@ -58,7 +57,7 @@ class MinimumNumberGuardrail(BaseGuardrail):
         logger.info(f"Initialized MinimumNumberGuardrail with min_value={self.min_value}, field_name={self.field_name}")
         logger.info(f"Full guardrail configuration: {config_dict}")
     
-    def validate(self, output: Union[str, TaskOutput, Dict[str, Any]]) -> Dict[str, Any]:
+    def validate(self, output: Union[str, Any, Dict[str, Any]]) -> Dict[str, Any]:
         """
         Validate that the output contains a number greater than the minimum value.
         
@@ -76,8 +75,8 @@ class MinimumNumberGuardrail(BaseGuardrail):
         logger.info(f"Input type: {type(output)}")
         
         # Special handling for Linkup Search Tool output which might be truncated in string representation
-        if isinstance(output, TaskOutput):
-            logger.info("Detected TaskOutput object, checking for special Linkup Search Tool format")
+        if is_task_output(output):
+            logger.info("Detected task-output object, checking for special Linkup Search Tool format")
             # Check if this is a result from Linkup Search Tool
             if hasattr(output, 'results') and hasattr(output, 'source'):
                 source = getattr(output, 'source', '')
@@ -110,8 +109,8 @@ class MinimumNumberGuardrail(BaseGuardrail):
             logger.info(f"Extracted value: {value} for field: {self.field_name}")
             
             if value is None:
-                # Special fallback for TaskOutput with results attribute
-                if isinstance(output, TaskOutput) and hasattr(output, 'results'):
+                # Special fallback for task output with results attribute
+                if is_task_output(output) and hasattr(output, 'results'):
                     results = getattr(output, 'results')
                     if isinstance(results, list):
                         count = len(results)
@@ -158,7 +157,7 @@ class MinimumNumberGuardrail(BaseGuardrail):
                 "feedback": f"An error occurred during validation: {str(e)}. Please ensure the output includes a {self.field_name} field with a numeric value greater than {self.min_value}."
             }
     
-    def _extract_value(self, output: Union[str, TaskOutput, Dict[str, Any]]) -> Optional[Union[int, float, str]]:
+    def _extract_value(self, output: Union[str, Any, Dict[str, Any]]) -> Optional[Union[int, float, str]]:
         """
         Extract the value to check from various output types.
         
@@ -173,20 +172,34 @@ class MinimumNumberGuardrail(BaseGuardrail):
             logger.info("Output is a dictionary")
             return self._get_value_from_dict(output)
         
-        # If output is a TaskOutput object
-        elif isinstance(output, TaskOutput):
-            logger.info("Output is a TaskOutput object")
-            logger.info(f"TaskOutput dir: {dir(output)}")
+        # If output is a task-output object
+        elif is_task_output(output):
+            logger.info("Output is a task-output object")
+            logger.info(f"task output dir: {dir(output)}")
             
-            # Log available attributes for debugging
+            # Log available attributes for debugging. Defensive because this is
+            # LOGGING: an output object whose property raises (a lazy field, a
+            # broken accessor) must not take validation down on its way past.
+            # hasattr only swallows AttributeError, so anything else escaped here.
             for attr in ['raw_output', 'content', 'output', 'result', 'response', 'results', 'total_count']:
-                if hasattr(output, attr):
-                    value = getattr(output, attr)
-                    logger.info(f"TaskOutput.{attr}: {type(value)} = {str(value)[:100]}{'...' if len(str(value)) > 100 else ''}")
+                try:
+                    if hasattr(output, attr):
+                        value = getattr(output, attr)
+                        logger.info(f"task output .{attr}: {type(value)} = {str(value)[:100]}{'...' if len(str(value)) > 100 else ''}")
+                except Exception as attr_err:  # noqa: BLE001
+                    logger.debug(f"task output .{attr} not readable: {attr_err}")
             
-            # Special handling for Linkup Search Tool output format
-            if hasattr(output, 'results') and hasattr(output, 'total_count'):
-                logger.info("Found 'results' and 'total_count' attributes in TaskOutput")
+            # Special handling for Linkup Search Tool output format. Same
+            # defence: hasattr re-raises anything that is not AttributeError, so
+            # a property that blows up must not decide validation's outcome.
+            def _has(attr: str) -> bool:
+                try:
+                    return hasattr(output, attr)
+                except Exception:  # noqa: BLE001
+                    return False
+
+            if _has('results') and _has('total_count'):
+                logger.info("Found 'results' and 'total_count' attributes in the task output")
                 try:
                     # Try to get total_count directly if it exists
                     total_count = getattr(output, 'total_count')
@@ -232,7 +245,7 @@ class MinimumNumberGuardrail(BaseGuardrail):
             # Try converting TaskOutput to string and search in that
             try:
                 output_str = str(output)
-                logger.info(f"Converting TaskOutput to string (length: {len(output_str)})")
+                logger.info(f"Converting the task output to string (length: {len(output_str)})")
                 logger.info(f"String preview: {output_str[:200]}...")
                 
                 # Look for patterns indicating results and counts
@@ -254,7 +267,7 @@ class MinimumNumberGuardrail(BaseGuardrail):
                 # Fall back to general text extraction
                 return self._extract_value_from_text(output_str)
             except Exception as e:
-                logger.error(f"Error processing TaskOutput as string: {e}")
+                logger.error(f"Error processing the task output as string: {e}")
             
             # Try all possible attributes that might contain the output
             possible_attrs = ['output', 'result', 'response']

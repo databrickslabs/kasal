@@ -262,7 +262,7 @@ class TestConfigureTask:
 
         with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
              patch("kasal_engine.core.Task", side_effect=mock_task_ctor), \
-             patch("src.engines.kasal.guardrails.guardrail_factory.GuardrailFactory") as MockGF:
+             patch("src.services.guardrails.guardrail_factory.GuardrailFactory") as MockGF:
             MockGF.create_guardrail.return_value = MagicMock()
 
             await TaskConfig.configure_task(task_data, agent=agent)
@@ -291,7 +291,7 @@ class TestConfigureTask:
 
         with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
              patch("kasal_engine.core.Task", return_value=task), \
-             patch("src.engines.kasal.guardrails.guardrail_factory.GuardrailFactory") as MockGF, \
+             patch("src.services.guardrails.guardrail_factory.GuardrailFactory") as MockGF, \
              patch("src.engines.kasal.guardrails.guardrail_wrapper.GuardrailWrapper", return_value=MagicMock()):
             MockGF.create_guardrail.side_effect = _capture
 
@@ -319,7 +319,7 @@ class TestConfigureTask:
 
         with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
              patch("kasal_engine.core.Task", return_value=task), \
-             patch("src.engines.kasal.guardrails.guardrail_factory.GuardrailFactory") as MockGF, \
+             patch("src.services.guardrails.guardrail_factory.GuardrailFactory") as MockGF, \
              patch("src.engines.kasal.guardrails.guardrail_wrapper.GuardrailWrapper", return_value=MagicMock()):
             MockGF.create_guardrail.side_effect = _capture
 
@@ -335,7 +335,7 @@ class TestConfigureTask:
 
         with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
              patch("kasal_engine.core.Task", return_value=task), \
-             patch("src.engines.kasal.guardrails.guardrail_factory.GuardrailFactory") as MockGF:
+             patch("src.services.guardrails.guardrail_factory.GuardrailFactory") as MockGF:
             MockGF.create_guardrail.return_value = None
 
             result = await TaskConfig.configure_task(task_data, agent=agent)
@@ -349,7 +349,7 @@ class TestConfigureTask:
 
         with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
              patch("kasal_engine.core.Task", return_value=task), \
-             patch("src.engines.kasal.guardrails.guardrail_factory.GuardrailFactory", side_effect=ImportError("no module")):
+             patch("src.services.guardrails.guardrail_factory.GuardrailFactory", side_effect=ImportError("no module")):
             result = await TaskConfig.configure_task(task_data, agent=agent)
 
         # Should still return task even if guardrail setup fails

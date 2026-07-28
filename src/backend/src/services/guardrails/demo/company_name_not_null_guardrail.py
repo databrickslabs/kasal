@@ -10,7 +10,7 @@ import json
 import traceback
 
 from src.core.logger import LoggerManager
-from src.engines.kasal.guardrails.base_guardrail import BaseGuardrail
+from src.services.guardrails.base_guardrail import BaseGuardrail
 from src.repositories.data_processing_repository import DataProcessingRepository
 # Database operations disabled in guardrails (sync context)
 

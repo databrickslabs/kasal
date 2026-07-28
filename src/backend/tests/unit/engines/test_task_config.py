@@ -923,7 +923,7 @@ class TestTaskConfigGuardrails:
             return mock_task
 
         with patch('kasal_engine.core.Task', side_effect=_ctor), \
-             patch('src.engines.kasal.guardrails.guardrail_factory.GuardrailFactory') as mock_factory, \
+             patch('src.services.guardrails.guardrail_factory.GuardrailFactory') as mock_factory, \
              patch('src.engines.kasal.kernel.task_builder.GuardrailWrapper') as mock_wrapper_class, \
              patch('builtins.open', create=True), \
              patch('os.makedirs'):
@@ -996,7 +996,7 @@ class TestTaskConfigGuardrails:
             return mock_task
 
         with patch('kasal_engine.core.Task', side_effect=_ctor), \
-             patch('src.engines.kasal.guardrails.guardrail_factory.GuardrailFactory') as mock_factory, \
+             patch('src.services.guardrails.guardrail_factory.GuardrailFactory') as mock_factory, \
              patch('src.engines.kasal.kernel.task_builder.GuardrailWrapper') as mock_wrapper_class, \
              patch('kasal_engine.core.LLMGuardrail') as mock_llm_guardrail_class, \
              patch('src.core.llm_manager.LLMManager.configure_kasal_llm', new_callable=AsyncMock, return_value=Mock()), \
@@ -1023,7 +1023,7 @@ class TestTaskConfigGuardrails:
         from src.engines.kasal.paths.flow.modules.task_adapter import TaskConfig
 
         with patch('kasal_engine.core.Task') as mock_task_class, \
-             patch('src.engines.kasal.guardrails.guardrail_factory.GuardrailFactory') as mock_factory:
+             patch('src.services.guardrails.guardrail_factory.GuardrailFactory') as mock_factory:
 
             mock_task = Mock()
             mock_task_class.return_value = mock_task
@@ -1044,7 +1044,7 @@ class TestTaskConfigGuardrails:
         from src.engines.kasal.paths.flow.modules.task_adapter import TaskConfig
 
         with patch('kasal_engine.core.Task') as mock_task_class, \
-             patch('src.engines.kasal.guardrails.guardrail_factory.GuardrailFactory') as mock_factory:
+             patch('src.services.guardrails.guardrail_factory.GuardrailFactory') as mock_factory:
 
             mock_task = Mock()
             mock_task_class.return_value = mock_task

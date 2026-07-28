@@ -67,7 +67,7 @@ class TestCodeGuardrail:
     async def test_factory_guardrail_set_with_retry(self):
         with (
             patch(
-                "src.engines.kasal.guardrails.guardrail_factory.GuardrailFactory"
+                "src.services.guardrails.guardrail_factory.GuardrailFactory"
             ) as MockGF,
             patch("src.engines.kasal.kernel.task_builder.GuardrailWrapper") as MockGW,
         ):
@@ -95,7 +95,7 @@ class TestCodeGuardrail:
 
         with (
             patch(
-                "src.engines.kasal.guardrails.guardrail_factory.GuardrailFactory"
+                "src.services.guardrails.guardrail_factory.GuardrailFactory"
             ) as MockGF,
             patch(
                 "src.engines.kasal.kernel.task_builder.GuardrailWrapper",

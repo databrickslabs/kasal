@@ -3,25 +3,25 @@ import json
 from unittest.mock import MagicMock, patch, Mock
 from typing import Dict, Any, Optional
 
-from src.engines.kasal.guardrails.guardrail_factory import GuardrailFactory
-from src.engines.kasal.guardrails.base_guardrail import BaseGuardrail
-from src.engines.kasal.guardrails.demo.company_count_guardrail import CompanyCountGuardrail
-from src.engines.kasal.guardrails.demo.data_processing_guardrail import DataProcessingGuardrail
-from src.engines.kasal.guardrails.demo.empty_data_processing_guardrail import EmptyDataProcessingGuardrail
-from src.engines.kasal.guardrails.demo.data_processing_count_guardrail import DataProcessingCountGuardrail
-from src.engines.kasal.guardrails.demo.company_name_not_null_guardrail import CompanyNameNotNullGuardrail
-from src.engines.kasal.guardrails.core.minimum_number_guardrail import MinimumNumberGuardrail
+from src.services.guardrails.guardrail_factory import GuardrailFactory
+from src.services.guardrails.base_guardrail import BaseGuardrail
+from src.services.guardrails.demo.company_count_guardrail import CompanyCountGuardrail
+from src.services.guardrails.demo.data_processing_guardrail import DataProcessingGuardrail
+from src.services.guardrails.demo.empty_data_processing_guardrail import EmptyDataProcessingGuardrail
+from src.services.guardrails.demo.data_processing_count_guardrail import DataProcessingCountGuardrail
+from src.services.guardrails.demo.company_name_not_null_guardrail import CompanyNameNotNullGuardrail
+from src.services.guardrails.core.minimum_number_guardrail import MinimumNumberGuardrail
 
 
 class TestGuardrailFactory:
     """Test suite for GuardrailFactory class."""
     
-    @patch('src.engines.kasal.guardrails.guardrail_factory.logger')
+    @patch('src.services.guardrails.guardrail_factory.logger')
     def test_create_guardrail_with_valid_json_string(self, mock_logger):
         """Test creating guardrail with valid JSON string configuration."""
         config_str = '{"type": "company_count", "min_companies": 10}'
         
-        with patch('src.engines.kasal.guardrails.guardrail_factory.CompanyCountGuardrail') as mock_guardrail:
+        with patch('src.services.guardrails.guardrail_factory.CompanyCountGuardrail') as mock_guardrail:
             mock_instance = MagicMock()
             mock_guardrail.return_value = mock_instance
             
@@ -33,7 +33,7 @@ class TestGuardrailFactory:
             mock_guardrail.assert_called_once_with(expected_config)
             mock_logger.info.assert_called_with("Creating guardrail of type: company_count")
     
-    @patch('src.engines.kasal.guardrails.guardrail_factory.logger')
+    @patch('src.services.guardrails.guardrail_factory.logger')
     def test_create_guardrail_with_invalid_json_string(self, mock_logger):
         """Test creating guardrail with invalid JSON string configuration."""
         config_str = '{"type": "company_count", invalid json}'
@@ -43,12 +43,12 @@ class TestGuardrailFactory:
         assert result is None
         mock_logger.error.assert_called_with(f"Failed to parse guardrail config: {config_str}")
     
-    @patch('src.engines.kasal.guardrails.guardrail_factory.logger')
+    @patch('src.services.guardrails.guardrail_factory.logger')
     def test_create_guardrail_with_dict_config(self, mock_logger):
         """Test creating guardrail with dictionary configuration."""
         config_dict = {"type": "data_processing", "field": "companies"}
         
-        with patch('src.engines.kasal.guardrails.guardrail_factory.DataProcessingGuardrail') as mock_guardrail:
+        with patch('src.services.guardrails.guardrail_factory.DataProcessingGuardrail') as mock_guardrail:
             mock_instance = MagicMock()
             mock_guardrail.return_value = mock_instance
             
@@ -60,7 +60,7 @@ class TestGuardrailFactory:
             mock_logger.info.assert_any_call("Creating DataProcessingGuardrail...")
             mock_logger.info.assert_any_call(f"Successfully created DataProcessingGuardrail: {mock_instance}")
     
-    @patch('src.engines.kasal.guardrails.guardrail_factory.logger')
+    @patch('src.services.guardrails.guardrail_factory.logger')
     def test_create_guardrail_missing_type(self, mock_logger):
         """Test creating guardrail with missing type in configuration."""
         config = {"field": "companies", "min_count": 5}
@@ -70,7 +70,7 @@ class TestGuardrailFactory:
         assert result is None
         mock_logger.error.assert_called_with("No guardrail type specified in config")
     
-    @patch('src.engines.kasal.guardrails.guardrail_factory.logger')
+    @patch('src.services.guardrails.guardrail_factory.logger')
     def test_create_guardrail_empty_type(self, mock_logger):
         """Test creating guardrail with empty type in configuration."""
         config = {"type": "", "field": "companies"}
@@ -80,7 +80,7 @@ class TestGuardrailFactory:
         assert result is None
         mock_logger.error.assert_called_with("No guardrail type specified in config")
     
-    @patch('src.engines.kasal.guardrails.guardrail_factory.logger')
+    @patch('src.services.guardrails.guardrail_factory.logger')
     def test_create_guardrail_none_type(self, mock_logger):
         """Test creating guardrail with None type in configuration."""
         config = {"type": None, "field": "companies"}
@@ -90,12 +90,12 @@ class TestGuardrailFactory:
         assert result is None
         mock_logger.error.assert_called_with("No guardrail type specified in config")
     
-    @patch('src.engines.kasal.guardrails.guardrail_factory.logger')
+    @patch('src.services.guardrails.guardrail_factory.logger')
     def test_create_company_count_guardrail(self, mock_logger):
         """Test creating company_count guardrail."""
         config = {"type": "company_count", "min_companies": 20}
         
-        with patch('src.engines.kasal.guardrails.guardrail_factory.CompanyCountGuardrail') as mock_guardrail:
+        with patch('src.services.guardrails.guardrail_factory.CompanyCountGuardrail') as mock_guardrail:
             mock_instance = MagicMock()
             mock_guardrail.return_value = mock_instance
             
@@ -105,12 +105,12 @@ class TestGuardrailFactory:
             mock_guardrail.assert_called_once_with(config)
             mock_logger.info.assert_called_with("Creating guardrail of type: company_count")
     
-    @patch('src.engines.kasal.guardrails.guardrail_factory.logger')
+    @patch('src.services.guardrails.guardrail_factory.logger')
     def test_create_data_processing_guardrail(self, mock_logger):
         """Test creating data_processing guardrail."""
         config = {"type": "data_processing", "field": "data"}
         
-        with patch('src.engines.kasal.guardrails.guardrail_factory.DataProcessingGuardrail') as mock_guardrail:
+        with patch('src.services.guardrails.guardrail_factory.DataProcessingGuardrail') as mock_guardrail:
             mock_instance = MagicMock()
             mock_guardrail.return_value = mock_instance
             
@@ -122,12 +122,12 @@ class TestGuardrailFactory:
             mock_logger.info.assert_any_call("Creating DataProcessingGuardrail...")
             mock_logger.info.assert_any_call(f"Successfully created DataProcessingGuardrail: {mock_instance}")
     
-    @patch('src.engines.kasal.guardrails.guardrail_factory.logger')
+    @patch('src.services.guardrails.guardrail_factory.logger')
     def test_create_empty_data_processing_guardrail(self, mock_logger):
         """Test creating empty_data_processing guardrail."""
         config = {"type": "empty_data_processing", "field": "data"}
         
-        with patch('src.engines.kasal.guardrails.guardrail_factory.EmptyDataProcessingGuardrail') as mock_guardrail:
+        with patch('src.services.guardrails.guardrail_factory.EmptyDataProcessingGuardrail') as mock_guardrail:
             mock_instance = MagicMock()
             mock_guardrail.return_value = mock_instance
             
@@ -139,12 +139,12 @@ class TestGuardrailFactory:
             mock_logger.info.assert_any_call("Creating EmptyDataProcessingGuardrail...")
             mock_logger.info.assert_any_call(f"Successfully created EmptyDataProcessingGuardrail: {mock_instance}")
     
-    @patch('src.engines.kasal.guardrails.guardrail_factory.logger')
+    @patch('src.services.guardrails.guardrail_factory.logger')
     def test_create_data_processing_count_guardrail(self, mock_logger):
         """Test creating data_processing_count guardrail."""
         config = {"type": "data_processing_count", "min_count": 15}
         
-        with patch('src.engines.kasal.guardrails.guardrail_factory.DataProcessingCountGuardrail') as mock_guardrail:
+        with patch('src.services.guardrails.guardrail_factory.DataProcessingCountGuardrail') as mock_guardrail:
             mock_instance = MagicMock()
             mock_guardrail.return_value = mock_instance
             
@@ -156,12 +156,12 @@ class TestGuardrailFactory:
             mock_logger.info.assert_any_call("Creating DataProcessingCountGuardrail...")
             mock_logger.info.assert_any_call(f"Successfully created DataProcessingCountGuardrail: {mock_instance}")
     
-    @patch('src.engines.kasal.guardrails.guardrail_factory.logger')
+    @patch('src.services.guardrails.guardrail_factory.logger')
     def test_create_company_name_not_null_guardrail(self, mock_logger):
         """Test creating company_name_not_null guardrail."""
         config = {"type": "company_name_not_null", "field": "company_name"}
         
-        with patch('src.engines.kasal.guardrails.guardrail_factory.CompanyNameNotNullGuardrail') as mock_guardrail:
+        with patch('src.services.guardrails.guardrail_factory.CompanyNameNotNullGuardrail') as mock_guardrail:
             mock_instance = MagicMock()
             mock_guardrail.return_value = mock_instance
             
@@ -173,12 +173,12 @@ class TestGuardrailFactory:
             mock_logger.info.assert_any_call("Creating CompanyNameNotNullGuardrail...")
             mock_logger.info.assert_any_call(f"Successfully created CompanyNameNotNullGuardrail: {mock_instance}")
     
-    @patch('src.engines.kasal.guardrails.guardrail_factory.logger')
+    @patch('src.services.guardrails.guardrail_factory.logger')
     def test_create_minimum_number_guardrail(self, mock_logger):
         """Test creating minimum_number guardrail."""
         config = {"type": "minimum_number", "minimum": 5}
         
-        with patch('src.engines.kasal.guardrails.guardrail_factory.MinimumNumberGuardrail') as mock_guardrail:
+        with patch('src.services.guardrails.guardrail_factory.MinimumNumberGuardrail') as mock_guardrail:
             mock_instance = MagicMock()
             mock_guardrail.return_value = mock_instance
             
@@ -190,7 +190,7 @@ class TestGuardrailFactory:
             mock_logger.info.assert_any_call("Creating MinimumNumberGuardrail...")
             mock_logger.info.assert_any_call(f"Successfully created MinimumNumberGuardrail: {mock_instance}")
     
-    @patch('src.engines.kasal.guardrails.guardrail_factory.logger')
+    @patch('src.services.guardrails.guardrail_factory.logger')
     def test_create_guardrail_unknown_type(self, mock_logger):
         """Test creating guardrail with unknown type."""
         config = {"type": "unknown_guardrail_type", "param": "value"}
@@ -200,13 +200,13 @@ class TestGuardrailFactory:
         assert result is None
         mock_logger.error.assert_called_with("Unknown guardrail type: unknown_guardrail_type")
     
-    @patch('src.engines.kasal.guardrails.guardrail_factory.logger')
+    @patch('src.services.guardrails.guardrail_factory.logger')
     def test_create_guardrail_exception_during_creation(self, mock_logger):
         """Test exception handling during guardrail creation."""
         config = {"type": "company_count", "min_companies": 10}
         exception = Exception("Test exception")
         
-        with patch('src.engines.kasal.guardrails.guardrail_factory.CompanyCountGuardrail') as mock_guardrail:
+        with patch('src.services.guardrails.guardrail_factory.CompanyCountGuardrail') as mock_guardrail:
             mock_guardrail.side_effect = exception
             
             result = GuardrailFactory.create_guardrail(config)
@@ -216,12 +216,12 @@ class TestGuardrailFactory:
             # The second error call should be the traceback
             assert mock_logger.error.call_count == 2
     
-    @patch('src.engines.kasal.guardrails.guardrail_factory.logger')
+    @patch('src.services.guardrails.guardrail_factory.logger')
     def test_create_guardrail_returns_none(self, mock_logger):
         """Test handling when guardrail creation returns None."""
         config = {"type": "company_count", "min_companies": 10}
         
-        with patch('src.engines.kasal.guardrails.guardrail_factory.CompanyCountGuardrail') as mock_guardrail:
+        with patch('src.services.guardrails.guardrail_factory.CompanyCountGuardrail') as mock_guardrail:
             mock_guardrail.return_value = None
             
             result = GuardrailFactory.create_guardrail(config)
@@ -229,15 +229,15 @@ class TestGuardrailFactory:
             assert result is None
             mock_logger.error.assert_called_with("Failed to create guardrail of type company_count - returned None")
     
-    @patch('src.engines.kasal.guardrails.guardrail_factory.logger')
-    @patch('src.engines.kasal.guardrails.guardrail_factory.traceback')
+    @patch('src.services.guardrails.guardrail_factory.logger')
+    @patch('src.services.guardrails.guardrail_factory.traceback')
     def test_create_guardrail_traceback_logged(self, mock_traceback, mock_logger):
         """Test that traceback is logged when exception occurs."""
         config = {"type": "data_processing", "field": "test"}
         exception = ValueError("Invalid configuration")
         mock_traceback.format_exc.return_value = "Traceback details here"
         
-        with patch('src.engines.kasal.guardrails.guardrail_factory.DataProcessingGuardrail') as mock_guardrail:
+        with patch('src.services.guardrails.guardrail_factory.DataProcessingGuardrail') as mock_guardrail:
             mock_guardrail.side_effect = exception
             
             result = GuardrailFactory.create_guardrail(config)
@@ -247,7 +247,7 @@ class TestGuardrailFactory:
             mock_traceback.format_exc.assert_called_once()
             mock_logger.error.assert_any_call("Traceback details here")
     
-    @patch('src.engines.kasal.guardrails.guardrail_factory.logger')
+    @patch('src.services.guardrails.guardrail_factory.logger')
     def test_create_guardrail_empty_config_dict(self, mock_logger):
         """Test creating guardrail with empty configuration dictionary."""
         config = {}
@@ -257,7 +257,7 @@ class TestGuardrailFactory:
         assert result is None
         mock_logger.error.assert_called_with("No guardrail type specified in config")
     
-    @patch('src.engines.kasal.guardrails.guardrail_factory.logger')
+    @patch('src.services.guardrails.guardrail_factory.logger')
     def test_create_guardrail_empty_json_string(self, mock_logger):
         """Test creating guardrail with empty JSON string."""
         config_str = "{}"
@@ -267,7 +267,7 @@ class TestGuardrailFactory:
         assert result is None
         mock_logger.error.assert_called_with("No guardrail type specified in config")
     
-    @patch('src.engines.kasal.guardrails.guardrail_factory.logger')
+    @patch('src.services.guardrails.guardrail_factory.logger')
     def test_create_guardrail_malformed_json(self, mock_logger):
         """Test creating guardrail with malformed JSON."""
         config_str = '{"type": "company_count", "min_companies": }'
@@ -277,7 +277,7 @@ class TestGuardrailFactory:
         assert result is None
         mock_logger.error.assert_called_with(f"Failed to parse guardrail config: {config_str}")
     
-    @patch('src.engines.kasal.guardrails.guardrail_factory.logger')
+    @patch('src.services.guardrails.guardrail_factory.logger')
     def test_create_guardrail_with_complex_config(self, mock_logger):
         """Test creating guardrail with complex configuration."""
         config = {
@@ -293,7 +293,7 @@ class TestGuardrailFactory:
             ]
         }
         
-        with patch('src.engines.kasal.guardrails.guardrail_factory.DataProcessingGuardrail') as mock_guardrail:
+        with patch('src.services.guardrails.guardrail_factory.DataProcessingGuardrail') as mock_guardrail:
             mock_instance = MagicMock()
             mock_guardrail.return_value = mock_instance
             
@@ -303,12 +303,12 @@ class TestGuardrailFactory:
             mock_guardrail.assert_called_once_with(config)
             mock_logger.info.assert_any_call("Creating guardrail of type: data_processing")
     
-    @patch('src.engines.kasal.guardrails.guardrail_factory.logger')
+    @patch('src.services.guardrails.guardrail_factory.logger')
     def test_create_guardrail_json_with_unicode(self, mock_logger):
         """Test creating guardrail with JSON containing unicode characters."""
         config_str = '{"type": "company_count", "description": "Test with unicode: ñáéíóú"}'
         
-        with patch('src.engines.kasal.guardrails.guardrail_factory.CompanyCountGuardrail') as mock_guardrail:
+        with patch('src.services.guardrails.guardrail_factory.CompanyCountGuardrail') as mock_guardrail:
             mock_instance = MagicMock()
             mock_guardrail.return_value = mock_instance
             
@@ -318,7 +318,7 @@ class TestGuardrailFactory:
             expected_config = {"type": "company_count", "description": "Test with unicode: ñáéíóú"}
             mock_guardrail.assert_called_once_with(expected_config)
     
-    @patch('src.engines.kasal.guardrails.guardrail_factory.logger')
+    @patch('src.services.guardrails.guardrail_factory.logger')
     def test_create_guardrail_case_sensitive_type(self, mock_logger):
         """Test that guardrail type matching is case sensitive."""
         config = {"type": "Company_Count", "min_companies": 10}  # Wrong case
@@ -328,7 +328,7 @@ class TestGuardrailFactory:
         assert result is None
         mock_logger.error.assert_called_with("Unknown guardrail type: Company_Count")
     
-    @patch('src.engines.kasal.guardrails.guardrail_factory.logger')
+    @patch('src.services.guardrails.guardrail_factory.logger')
     def test_create_guardrail_with_whitespace_type(self, mock_logger):
         """Test creating guardrail with type containing whitespace."""
         config = {"type": " company_count ", "min_companies": 10}
@@ -338,7 +338,7 @@ class TestGuardrailFactory:
         assert result is None
         mock_logger.error.assert_called_with("Unknown guardrail type:  company_count ")
     
-    @patch('src.engines.kasal.guardrails.guardrail_factory.logger')
+    @patch('src.services.guardrails.guardrail_factory.logger')
     def test_factory_is_static_method(self, mock_logger):
         """Test that create_guardrail is a static method."""
         # Should be able to call without instantiating the class
@@ -355,11 +355,11 @@ class TestGuardrailFactory:
         # We should be able to call the method directly on the class
         config = {"type": "unknown_type"}
         
-        with patch('src.engines.kasal.guardrails.guardrail_factory.logger'):
+        with patch('src.services.guardrails.guardrail_factory.logger'):
             result = GuardrailFactory.create_guardrail(config)
             assert result is None
     
-    @patch('src.engines.kasal.guardrails.guardrail_factory.logger')
+    @patch('src.services.guardrails.guardrail_factory.logger')
     def test_all_guardrail_types_covered(self, mock_logger):
         """Test that all guardrail types mentioned in imports are handled."""
         guardrail_types = [
@@ -375,12 +375,12 @@ class TestGuardrailFactory:
         mock_instances = []
         
         # Create patches for all guardrail classes
-        patches.append(patch('src.engines.kasal.guardrails.guardrail_factory.CompanyCountGuardrail'))
-        patches.append(patch('src.engines.kasal.guardrails.guardrail_factory.DataProcessingGuardrail'))
-        patches.append(patch('src.engines.kasal.guardrails.guardrail_factory.EmptyDataProcessingGuardrail'))
-        patches.append(patch('src.engines.kasal.guardrails.guardrail_factory.DataProcessingCountGuardrail'))
-        patches.append(patch('src.engines.kasal.guardrails.guardrail_factory.CompanyNameNotNullGuardrail'))
-        patches.append(patch('src.engines.kasal.guardrails.guardrail_factory.MinimumNumberGuardrail'))
+        patches.append(patch('src.services.guardrails.guardrail_factory.CompanyCountGuardrail'))
+        patches.append(patch('src.services.guardrails.guardrail_factory.DataProcessingGuardrail'))
+        patches.append(patch('src.services.guardrails.guardrail_factory.EmptyDataProcessingGuardrail'))
+        patches.append(patch('src.services.guardrails.guardrail_factory.DataProcessingCountGuardrail'))
+        patches.append(patch('src.services.guardrails.guardrail_factory.CompanyNameNotNullGuardrail'))
+        patches.append(patch('src.services.guardrails.guardrail_factory.MinimumNumberGuardrail'))
         
         # Start all patches
         mocks = [p.start() for p in patches]

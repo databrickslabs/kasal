@@ -4,7 +4,7 @@ import traceback
 from unittest.mock import MagicMock, patch, Mock
 from typing import Dict, Any
 
-from src.engines.kasal.guardrails.demo.empty_data_processing_guardrail import EmptyDataProcessingGuardrail
+from src.services.guardrails.demo.empty_data_processing_guardrail import EmptyDataProcessingGuardrail
 
 
 class TestEmptyDataProcessingGuardrail:
@@ -30,7 +30,7 @@ class TestEmptyDataProcessingGuardrail:
         """Test initialization with invalid JSON string."""
         invalid_json = "{'invalid': json}"  # Single quotes make it invalid JSON
         
-        with patch('src.engines.kasal.guardrails.demo.empty_data_processing_guardrail.logger') as mock_logger:
+        with patch('src.services.guardrails.demo.empty_data_processing_guardrail.logger') as mock_logger:
             guardrail = EmptyDataProcessingGuardrail(invalid_json)
             
             # Should fall back to empty dict
@@ -41,7 +41,7 @@ class TestEmptyDataProcessingGuardrail:
     
     def test_init_with_empty_string(self):
         """Test initialization with empty string."""
-        with patch('src.engines.kasal.guardrails.demo.empty_data_processing_guardrail.logger') as mock_logger:
+        with patch('src.services.guardrails.demo.empty_data_processing_guardrail.logger') as mock_logger:
             guardrail = EmptyDataProcessingGuardrail("")
             
             # Empty string should parse as empty dict
@@ -51,7 +51,7 @@ class TestEmptyDataProcessingGuardrail:
     
     def test_init_with_whitespace_string(self):
         """Test initialization with whitespace-only string."""
-        with patch('src.engines.kasal.guardrails.demo.empty_data_processing_guardrail.logger') as mock_logger:
+        with patch('src.services.guardrails.demo.empty_data_processing_guardrail.logger') as mock_logger:
             guardrail = EmptyDataProcessingGuardrail("   ")
             
             # Whitespace string should parse as empty dict
@@ -79,7 +79,7 @@ class TestEmptyDataProcessingGuardrail:
     
     def test_init_inheritance_from_base(self):
         """Test that EmptyDataProcessingGuardrail inherits from BaseGuardrail."""
-        from src.engines.kasal.guardrails.base_guardrail import BaseGuardrail
+        from src.services.guardrails.base_guardrail import BaseGuardrail
         
         guardrail = EmptyDataProcessingGuardrail({})
         
@@ -89,18 +89,18 @@ class TestEmptyDataProcessingGuardrail:
     
     def test_init_logs_success(self):
         """Test that initialization logs success message."""
-        with patch('src.engines.kasal.guardrails.demo.empty_data_processing_guardrail.logger') as mock_logger:
+        with patch('src.services.guardrails.demo.empty_data_processing_guardrail.logger') as mock_logger:
             EmptyDataProcessingGuardrail({})
             
             mock_logger.info.assert_called_with("EmptyDataProcessingGuardrail initialized successfully")
     
-    @patch('src.engines.kasal.guardrails.base_guardrail.BaseGuardrail.__init__')
+    @patch('src.services.guardrails.base_guardrail.BaseGuardrail.__init__')
     def test_init_exception_handling(self, mock_base_init):
         """Test initialization exception handling."""
         # Mock the parent __init__ to raise an exception
         mock_base_init.side_effect = Exception("Base init failed")
         
-        with patch('src.engines.kasal.guardrails.demo.empty_data_processing_guardrail.logger') as mock_logger:
+        with patch('src.services.guardrails.demo.empty_data_processing_guardrail.logger') as mock_logger:
             with pytest.raises(Exception, match="Base init failed"):
                 EmptyDataProcessingGuardrail({"test": "config"})
             
@@ -111,11 +111,11 @@ class TestEmptyDataProcessingGuardrail:
     
     def test_init_exception_handling_with_traceback(self):
         """Test initialization exception handling includes traceback."""
-        with patch('src.engines.kasal.guardrails.base_guardrail.BaseGuardrail.__init__') as mock_base_init:
+        with patch('src.services.guardrails.base_guardrail.BaseGuardrail.__init__') as mock_base_init:
             mock_base_init.side_effect = ValueError("Test error")
             
-            with patch('src.engines.kasal.guardrails.demo.empty_data_processing_guardrail.logger') as mock_logger:
-                with patch('src.engines.kasal.guardrails.demo.empty_data_processing_guardrail.traceback') as mock_traceback:
+            with patch('src.services.guardrails.demo.empty_data_processing_guardrail.logger') as mock_logger:
+                with patch('src.services.guardrails.demo.empty_data_processing_guardrail.traceback') as mock_traceback:
                     mock_traceback.format_exc.return_value = "Mock traceback"
                     
                     with pytest.raises(ValueError, match="Test error"):
@@ -148,7 +148,7 @@ class TestEmptyDataProcessingGuardrail:
         mock_repo.count_total_records_sync.return_value = 0
         mock_repo_class.return_value = mock_repo
         
-        with patch('src.engines.kasal.guardrails.demo.empty_data_processing_guardrail.logger') as mock_logger:
+        with patch('src.services.guardrails.demo.empty_data_processing_guardrail.logger') as mock_logger:
             guardrail = EmptyDataProcessingGuardrail({})
             result = guardrail.validate("test_output")
             
@@ -173,7 +173,7 @@ class TestEmptyDataProcessingGuardrail:
         mock_repo.count_total_records_sync.return_value = 5
         mock_repo_class.return_value = mock_repo
         
-        with patch('src.engines.kasal.guardrails.demo.empty_data_processing_guardrail.logger') as mock_logger:
+        with patch('src.services.guardrails.demo.empty_data_processing_guardrail.logger') as mock_logger:
             guardrail = EmptyDataProcessingGuardrail({})
             result = guardrail.validate("test_output")
             
@@ -193,7 +193,7 @@ class TestEmptyDataProcessingGuardrail:
         mock_uow_instance._session = MagicMock()
         mock_uow.get_instance.return_value = mock_uow_instance
         
-        with patch('src.engines.kasal.guardrails.demo.empty_data_processing_guardrail.logger') as mock_logger:
+        with patch('src.services.guardrails.demo.empty_data_processing_guardrail.logger') as mock_logger:
             guardrail = EmptyDataProcessingGuardrail({})
             
             try:
@@ -239,7 +239,7 @@ class TestEmptyDataProcessingGuardrail:
         mock_repo.count_total_records_sync.return_value = 0
         mock_repo_class.return_value = mock_repo
         
-        with patch('src.engines.kasal.guardrails.demo.empty_data_processing_guardrail.logger') as mock_logger:
+        with patch('src.services.guardrails.demo.empty_data_processing_guardrail.logger') as mock_logger:
             guardrail = EmptyDataProcessingGuardrail({})
             guardrail.validate("test_output")
             
@@ -253,8 +253,8 @@ class TestEmptyDataProcessingGuardrail:
         # Setup UOW to throw exception
         mock_uow.get_instance.side_effect = Exception("Database connection failed")
         
-        with patch('src.engines.kasal.guardrails.demo.empty_data_processing_guardrail.logger') as mock_logger:
-            with patch('src.engines.kasal.guardrails.demo.empty_data_processing_guardrail.traceback') as mock_traceback:
+        with patch('src.services.guardrails.demo.empty_data_processing_guardrail.logger') as mock_logger:
+            with patch('src.services.guardrails.demo.empty_data_processing_guardrail.traceback') as mock_traceback:
                 mock_traceback.format_exc.return_value = "Mock traceback"
                 
                 guardrail = EmptyDataProcessingGuardrail({})
@@ -283,7 +283,7 @@ class TestEmptyDataProcessingGuardrail:
         mock_repo.count_total_records_sync.side_effect = ValueError("Repository error")
         mock_repo_class.return_value = mock_repo
         
-        with patch('src.engines.kasal.guardrails.demo.empty_data_processing_guardrail.logger') as mock_logger:
+        with patch('src.services.guardrails.demo.empty_data_processing_guardrail.logger') as mock_logger:
             guardrail = EmptyDataProcessingGuardrail({})
             result = guardrail.validate("test_output")
             
@@ -401,7 +401,7 @@ class TestEmptyDataProcessingGuardrail:
         mock_repo.count_total_records_sync.return_value = 0
         mock_repo_class.return_value = mock_repo
         
-        with patch('src.engines.kasal.guardrails.demo.empty_data_processing_guardrail.logger') as mock_logger:
+        with patch('src.services.guardrails.demo.empty_data_processing_guardrail.logger') as mock_logger:
             guardrail = EmptyDataProcessingGuardrail({})
             guardrail.validate("test_output")
             
@@ -421,7 +421,7 @@ class TestEmptyDataProcessingGuardrail:
         mock_repo.count_total_records_sync.return_value = 1000000
         mock_repo_class.return_value = mock_repo
         
-        with patch('src.engines.kasal.guardrails.demo.empty_data_processing_guardrail.logger') as mock_logger:
+        with patch('src.services.guardrails.demo.empty_data_processing_guardrail.logger') as mock_logger:
             guardrail = EmptyDataProcessingGuardrail({})
             result = guardrail.validate("test_output")
             
@@ -442,7 +442,7 @@ class TestEmptyDataProcessingGuardrail:
         mock_repo.count_total_records_sync.return_value = 1
         mock_repo_class.return_value = mock_repo
         
-        with patch('src.engines.kasal.guardrails.demo.empty_data_processing_guardrail.logger') as mock_logger:
+        with patch('src.services.guardrails.demo.empty_data_processing_guardrail.logger') as mock_logger:
             guardrail = EmptyDataProcessingGuardrail({})
             result = guardrail.validate("test_output")
             
@@ -453,8 +453,8 @@ class TestEmptyDataProcessingGuardrail:
     def test_validate_output_parameter_not_used(self):
         """Test that the output parameter is not used in validation logic."""
         # This test confirms that the output parameter is ignored as per the docstring
-        with patch('src.engines.kasal.guardrails.demo.empty_data_processing_guardrail.SyncUnitOfWork') as mock_uow:
-            with patch('src.engines.kasal.guardrails.demo.empty_data_processing_guardrail.DataProcessingRepository') as mock_repo_class:
+        with patch('src.services.guardrails.demo.empty_data_processing_guardrail.SyncUnitOfWork') as mock_uow:
+            with patch('src.services.guardrails.demo.empty_data_processing_guardrail.DataProcessingRepository') as mock_repo_class:
                 # Setup minimal mocks
                 mock_uow_instance = MagicMock()
                 mock_uow_instance._initialized = True
@@ -488,7 +488,7 @@ class TestEmptyDataProcessingGuardrail:
         ]
         
         for invalid_config in invalid_configs:
-            with patch('src.engines.kasal.guardrails.demo.empty_data_processing_guardrail.logger') as mock_logger:
+            with patch('src.services.guardrails.demo.empty_data_processing_guardrail.logger') as mock_logger:
                 guardrail = EmptyDataProcessingGuardrail(invalid_config)
                 
                 # Should fall back to empty dict
@@ -499,7 +499,7 @@ class TestEmptyDataProcessingGuardrail:
     
     def test_getattr_with_fallback(self):
         """Test getattr usage with fallback for _initialized attribute."""
-        with patch('src.engines.kasal.guardrails.demo.empty_data_processing_guardrail.SyncUnitOfWork') as mock_uow:
+        with patch('src.services.guardrails.demo.empty_data_processing_guardrail.SyncUnitOfWork') as mock_uow:
             # Setup UOW without _initialized attribute
             mock_uow_instance = MagicMock()
             # Explicitly delete the _initialized attribute to test getattr fallback

@@ -43,7 +43,7 @@ def _load_modules_isolated():
         "src.engines.kasal.tools", "src.engines.kasal.tools.tool_factory",
         "src.engines.kasal.paths.flow", "src.engines.kasal.paths.flow.modules",
         "src.engines.kasal.guardrails",
-        "src.engines.kasal.guardrails.guardrail_factory",
+        "src.services.guardrails", "src.services.guardrails.guardrail_factory",
         "src.engines.kasal.guardrails.guardrail_wrapper",
         "src.db", "src.db.session",
         "src.services", "src.services.api_keys_service",

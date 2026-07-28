@@ -8,7 +8,7 @@ run-level config model, then a hardcoded last resort.
 """
 from types import SimpleNamespace
 
-from src.engines.kasal.guardrails.guardrail_model import (
+from src.services.guardrails.guardrail_model import (
     DEFAULT_GUARDRAIL_MODEL,
     resolve_guardrail_model,
 )
