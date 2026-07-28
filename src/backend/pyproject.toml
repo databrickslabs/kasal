@@ -176,7 +176,6 @@ layers = [
 # independently; the "Repositories never import services" contract below is
 # where the reasoning lives.
 ignore_imports = [
-    "src.repositories.dashboard_repository -> src.services.settings.api_keys",
     "src.utils.databricks_auth -> src.services.databricks.workspace.service",
     "src.utils.databricks_auth -> src.services.settings.api_keys",
     "src.utils.user_context -> src.services.groups.groups",
@@ -189,11 +188,10 @@ name = "Repositories never import services"
 type = "forbidden"
 source_modules = ["src.repositories"]
 forbidden_modules = ["src.services"]
-# DashboardRepository is an HTTP repository (no DB session) that resolves its own
-# Databricks PAT through ApiKeysService. The fix is to inject the token from the
-# calling service; until then this is the one exception.
+# What is left is all transitive, via utils. The repositories are innocent: they
+# import src.utils.databricks_auth / src.utils.user_context, and those reach for
+# a service. Fixing the three utils modules clears every entry here.
 ignore_imports = [
-    "src.repositories.dashboard_repository -> src.services.settings.api_keys",
     # Transitive, via utils. The repositories are innocent here: they import
     # src.utils.databricks_auth / src.utils.user_context, which reach for a
     # service. Fixing the three utils modules below clears all of these at once.

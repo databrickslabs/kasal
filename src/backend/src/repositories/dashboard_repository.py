@@ -32,7 +32,7 @@ class DashboardRepository:
         """
         self._user_token = user_token
         self._host: Optional[str] = None
-        self._pat: Optional[str] = None
+        self._auth_headers: Optional[Dict[str, str]] = None
         self._client = httpx.AsyncClient(
             transport=httpx.AsyncHTTPTransport(retries=2),
             timeout=30.0,
@@ -67,74 +67,30 @@ class DashboardRepository:
 
         return None
 
-    async def _resolve_pat(self) -> Optional[str]:
+    async def _resolve_auth_headers(self) -> Dict[str, str]:
+        """Authorization header for a Lakeview call, or {} if none could be built.
+
+        Delegates to ``databricks_auth``, which owns the OBO -> PAT -> SPN chain.
+        This used to reimplement that chain's first two steps by calling
+        ApiKeysService directly — a repository reaching into a service, and a
+        second copy of an auth priority order that had already drifted (it had no
+        SPN step, so a workspace authenticating by service principal got an
+        unauthenticated request and a 401 nobody could explain).
         """
-        Retrieve a PAT token without triggering SPN token refresh.
-        Priority: OBO user_token → PAT from DB (ApiKeysService) → env var.
-        """
-        if self._user_token:
-            return self._user_token
+        from src.utils.databricks_auth import get_databricks_auth_headers
 
-        # PAT from DB — same as get_auth_context() Priority 2
-        try:
-            from src.services.settings.api_keys import ApiKeysService
-            from src.db.session import async_session_factory
-            from src.utils.user_context import UserContext
-
-            group_id: Optional[str] = None
-            try:
-                ctx = UserContext.get_group_context()
-                if ctx and hasattr(ctx, "primary_group_id"):
-                    group_id = ctx.primary_group_id
-            except Exception:
-                pass
-
-            if group_id:
-                async with async_session_factory() as session:
-                    svc = ApiKeysService(session, group_id=group_id)
-                    for key_name in ("DATABRICKS_TOKEN", "DATABRICKS_API_KEY"):
-                        try:
-                            api_key = await svc.find_by_name(key_name)
-                            if api_key and api_key.encrypted_value:
-                                from src.utils.encryption_utils import EncryptionUtils
-                                pat = EncryptionUtils.decrypt_value(api_key.encrypted_value)
-                                if pat:
-                                    logger.debug(f"[DashboardRepo] PAT from DB ({key_name})")
-                                    return pat
-                        except Exception as e:
-                            logger.debug(f"[DashboardRepo] PAT DB lookup {key_name}: {e}")
-        except Exception as e:
-            logger.debug(f"[DashboardRepo] PAT DB lookup failed: {e}")
-
-        # Env var PAT
-        for env_key in ("DATABRICKS_TOKEN", "DATABRICKS_API_KEY"):
-            val = os.environ.get(env_key, "")
-            if val:
-                logger.debug(f"[DashboardRepo] PAT from env ({env_key})")
-                return val
-
-        return None
-
-    async def _get_base_url(self) -> str:
-        if not self._host:
-            self._host = await self._resolve_host()
-        if not self._host:
-            raise RuntimeError(
-                "No Databricks workspace URL configured. "
-                "Set DATABRICKS_HOST or configure a Databricks profile."
-            )
-        host = self._host
-        if not host.startswith("https://"):
-            host = f"https://{host}"
-        return f"{host}/api/2.0/lakeview"
+        headers, error = await get_databricks_auth_headers(user_token=self._user_token)
+        if error or not headers:
+            logger.warning(f"[DashboardRepo] no auth headers: {error or 'none returned'}")
+            return {}
+        return {k: v for k, v in headers.items() if k.lower() == "authorization"}
 
     async def _get_headers(self) -> Dict[str, str]:
-        if not self._pat:
-            self._pat = await self._resolve_pat()
+        if self._auth_headers is None:
+            self._auth_headers = await self._resolve_auth_headers()
         headers: Dict[str, str] = {"Content-Type": "application/json"}
-        if self._pat:
-            headers["Authorization"] = f"Bearer {self._pat}"
-        else:
+        headers.update(self._auth_headers)
+        if "Authorization" not in headers:
             logger.warning("[DashboardRepo] No auth token — request may return 401")
         headers.update(get_user_agent_header(KasalProduct.DASHBOARD))
         return headers
